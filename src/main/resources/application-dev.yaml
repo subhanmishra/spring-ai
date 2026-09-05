@@ -1,0 +1,67 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ragdatabase
+    username: myuser
+    password: secret
+  ai:
+    retry:
+      backoff:
+        initial-interval: 2000
+        max-interval: 10000
+        multiplier: 2
+      max-attempts: 3
+    vectorstore:
+      pgvector:
+        table-name: vector_store
+        schema-name: public
+        initialize-schema: false
+        index-type: HNSW # Reverted to HNSW as it works with 768 dimensions
+        distance-type: COSINE_DISTANCE
+        dimensions: 768 # Set to 768 for nomic-embed-text
+    #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
+    #        remove-existing-vector-store-table: true
+    #    openai:
+    #      api-key: _
+    #      base-url: http://localhost:12434/engines
+    #      embedding:
+    #        options:
+    #          model: ai/qwen3-embedding-vllm:latest # Switched to a model compatible with HNSW
+    #      chat:
+    #        options:
+    #          model: ai/llama3.2:latest # Keep using llama3.2 for chat
+    ollama:
+      base-url: http://localhost:11434
+      embedding:
+        model: nomic-embed-text
+      chat:
+        model: llama3.2
+    chat:
+      client:
+        observations:
+          log-prompt: true
+  docker:
+    compose:
+      lifecycle-management: start-and-stop
+
+logging:
+  level:
+    org:
+      springframework:
+        ai:
+          vectorstore: DEBUG
+          chat:
+            client:
+              advisor: DEBUG
+        jdbc:
+          core: DEBUG
+
+#app configurations
+app:
+  rag:
+    chunk-size: 700
+    min-chunk-size-chars: 350
+    min-chunk-length-to-embed: 5
+    max-num-chunks: 10000
+    # chunk-overlap: 100
+    top-k: 5
+    similarity-threshold: 0.6

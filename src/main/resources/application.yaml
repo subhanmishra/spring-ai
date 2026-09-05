@@ -1,24 +1,9 @@
 spring:
   application:
-    name: spring-ai-docker-model-runner
-
-  ai:
-    openai:
-      api-key: _
-      chat:
-        base-url: http://localhost:12434/engines
-        options:
-          model: ai/llama3.2:latest
-  docker:
-    compose:
-      lifecycle-management: start-and-stop
-
-logging:
-  level:
-    org:
-      springframework:
-        ai:
-          chat:
-            client:
-              advisor: DEBUG
-
+    name: spring-ai-rag
+  profiles:
+    active: dev
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 50MB

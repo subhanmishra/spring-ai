@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Docker Compose",
+      "Group": "Servers",
+      "Port": 5432,
+      "Username": "myuser",
+      "Host": "ai_pgvector",
+      "SSLMode": "prefer",
+      "MaintenanceDB": "ragdatabase",
+      "PassFile": "/tmp/pgpassfile"
+    }
+  }
+}
