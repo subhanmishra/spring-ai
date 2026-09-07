@@ -39,7 +39,16 @@ services:
       - "/bin/echo 'pgvector:5432:*:myuser:secret' > /tmp/pgpassfile && chmod 600 /tmp/pgpassfile && /entrypoint.sh"
     depends_on:
       - pgvector
+  redis:
+    image: redis/redis-stack:latest
+    container_name: ai_redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - ./docker-volume/redis:/data
 
 volumes:
   pgvector:
   pgadmin:
+  redis:

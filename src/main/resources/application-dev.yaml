@@ -58,10 +58,12 @@ logging:
 #app configurations
 app:
   rag:
-    chunk-size: 700
-    min-chunk-size-chars: 350
+    chunk-size: 400
+    min-chunk-size-chars: 150
     min-chunk-length-to-embed: 5
     max-num-chunks: 10000
-    # chunk-overlap: 100
+    chunk-overlap: 50
     top-k: 5
     similarity-threshold: 0.6
+  ai: # New section for Spring AI properties
+    max-chat-messages: 10

@@ -1,14 +1,8 @@
 package com.example.subhanmishra.controller;
 
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.ChatMemoryRepository;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.example.subhanmishra.service.ChatService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
@@ -16,55 +10,42 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/ai")
+@Tag(name = "Chat API", description = "Endpoints for interacting with the AI chat functionality")
 public class ChatController {
 
-    private final ChatClient chatClient;
-    private final ChatMemory chatMemory;
-    private final ChatMemoryRepository chatMemoryRepository;
+    private final ChatService chatService;
 
-    @Autowired
-    public ChatController(ChatClient.Builder builder, ChatMemory chatMemory,ChatMemoryRepository chatMemoryRepository, VectorStore vectorStore) {
-        this.chatMemoryRepository = chatMemoryRepository;
-        this.chatMemory = chatMemory;
-        var qaAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
-                .searchRequest(SearchRequest.builder()
-                        .similarityThreshold(0.7d)
-                        .topK(6)
-                        .build())
-                .build();
-        this.chatClient = builder
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(this.chatMemory).build())
-                .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(qaAdvisor)
-                .build();
+    public ChatController(ChatService chatService) {
+        this.chatService = chatService;
     }
 
     @GetMapping("/generate")
-    public String generate(@RequestParam(value = "prompt", defaultValue = "Tell me a joke") String prompt) {
-        return chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
+    @Operation(summary = "Generate a chat response",
+            description = "Sends a prompt to the AI and gets a single, non-streaming response.")
+    public String generate(@RequestParam(value = "prompt", defaultValue = "Tell me a joke") String prompt,
+                           @RequestParam(value = "conversationId", required = false, defaultValue = "") String conversationId) {
+        return chatService.generate(prompt, conversationId);
     }
 
     @GetMapping(value = "/generateStream", produces = "text/event-stream")
-    public Flux<String> generateStream(@RequestParam(value = "prompt", defaultValue = "Tell me a joke") String prompt) {
-
-        return chatClient.prompt()
-                .user(prompt)
-                .stream()
-                .content();
+    @Operation(summary = "Generate a streaming chat response",
+            description = "Sends a prompt to the AI and gets a streaming response, suitable for UI updates.")
+    public Flux<String> generateStream(@RequestParam(value = "prompt", defaultValue = "Tell me a joke") String prompt,
+                                       @RequestParam(value = "conversationId", required = false, defaultValue = "") String conversationId) {
+        return chatService.generateStream(prompt, conversationId);
     }
 
-    @GetMapping("/chat/memory")
+    @GetMapping("/conversations")
+    @Operation(summary = "Get all conversation IDs",
+            description = "Retrieves a list of all active conversation IDs stored in memory.")
     public List<String> getAllConversationIds() {
-        return this.chatMemoryRepository.findConversationIds();
+        return chatService.getAllConversationIds();
     }
 
-    @DeleteMapping("/chat/memory")
+    @DeleteMapping("/conversations")
+    @Operation(summary = "Clear all chat memory",
+            description = "Clears all stored chat conversations from memory.")
     public String clearMemory() {
-        this.chatMemoryRepository.findConversationIds().forEach(chatMemory::clear);
-        //this.chatMemory.clear(ChatMemory.DEFAULT_CONVERSATION_ID);
-        return "Chat memory cleared.";
+        return chatService.clearMemory();
     }
 }

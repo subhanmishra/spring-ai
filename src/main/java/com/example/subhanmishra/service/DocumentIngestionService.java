@@ -1,12 +1,10 @@
 package com.example.subhanmishra.service;
 
-import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,12 +19,10 @@ public class DocumentIngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentIngestionService.class);
     private final VectorStore vectorStore;
-    private final RagProperties ragProperties;
     private final DocumentHistoryService historyService;
 
-    public DocumentIngestionService(VectorStore vectorStore, RagProperties ragProperties, DocumentHistoryService historyService) {
+    public DocumentIngestionService(VectorStore vectorStore, DocumentHistoryService historyService) {
         this.vectorStore = vectorStore;
-        this.ragProperties = ragProperties;
         this.historyService = historyService;
     }
 
@@ -38,26 +34,16 @@ public class DocumentIngestionService {
         // and will not be rolled back if the main ingestion transaction fails.
         historyService.recordHistory(metadata.getId(), DocumentStatus.PROCESSING, "Starting to chunk and embed document.");
 
-        // 1. Text chunking using TokenTextSplitter
-        TokenTextSplitter tokenTextSplitter = TokenTextSplitter.builder()
-                .withChunkSize(ragProperties.chunkSize())
-                .withMinChunkSizeChars(ragProperties.minChunkSizeChars())
-                .withMinChunkLengthToEmbed(ragProperties.minChunkLengthToEmbed())
-                .withMaxNumChunks(ragProperties.maxNumChunks())
-                .withKeepSeparator(true)
-                .build();
-
-        List<Document> chunks = tokenTextSplitter.apply(parsedDocs);
-        if (chunks.isEmpty()) {
+        if (parsedDocs.isEmpty()) {
             // Throwing an exception will cause this transaction to roll back.
             // The caller will catch this and record the FAILED status in the history.
             throw new IllegalStateException("Document parsing resulted in zero chunks. The document may be empty or unscannable.");
         }
 
-        // 2. Enrich metadata on each chunk
+        // 1. Enrich metadata on each chunk
         List<Document> enrichedChunks = new ArrayList<>();
-        for (int i = 0; i < chunks.size(); i++) {
-            Document chunk = chunks.get(i);
+        for (int i = 0; i < parsedDocs.size(); i++) {
+            Document chunk = parsedDocs.get(i);
             Map<String, Object> enrichedMetadata = new HashMap<>(chunk.getMetadata());
             enrichedMetadata.put("documentId", metadata.getId().toString());
             enrichedMetadata.put("fileName", metadata.getFilename());
@@ -74,7 +60,7 @@ public class DocumentIngestionService {
             enrichedChunks.add(enrichedDoc);
         }
 
-        // 3. Write chunks and embeddings to the vector store. This is the main transactional work.
+        // 2. Write chunks and embeddings to the vector store. This is the main transactional work.
         log.info("Writing {} vector chunks to PgVectorStore for document: {}", enrichedChunks.size(), metadata.getFilename());
         vectorStore.add(enrichedChunks);
 
