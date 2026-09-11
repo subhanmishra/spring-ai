@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'spring-ai-ragr'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      # Use host.docker.internal to allow the Prometheus container to scrape the Spring Boot app running on the host machine.
+      - targets: ['host.docker.internal:9095']
