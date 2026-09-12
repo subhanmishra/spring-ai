@@ -9,14 +9,14 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 ## Stack & versions
 
 - **Java 26**, **Spring Boot 4.1.0** (parent), **Spring AI 2.0.1** (BOM)
-- **LLM**: Ollama (local model runner) — not OpenAI, despite what `README.md` says (stale)
+- **LLM**: Ollama (local model runner) — `llama3.2` for chat, `nomic-embed-text` for embeddings (768 dims). No API key; OpenAI config is present but commented out.
 - **Vector store**: PostgreSQL + `pgvector` extension
 - **Chat memory**: Redis (`spring-ai-model-chat-memory-repository-redis`)
 - **Migrations**: Flyway (`flyway-database-postgresql`)
 - **API docs**: springdoc-openapi 3.1.0 (`springdoc-openapi-starter-webmvc-ui`)
 - **Mapping**: modelmapper 3.2.4
 - **Document parsing**: `spring-ai-pdf-document-reader`, `spring-ai-tika-document-reader`
-- **Observability** (not documented in `GEMINI.md`'s dependency list — present in `pom.xml`): `spring-boot-starter-actuator`, `micrometer-registry-prometheus`, `spring-boot-micrometer-tracing-opentelemetry`, `micrometer-tracing-bridge-otel`, `opentelemetry-exporter-otlp`, `loki-logback-appender`, `logstash-logback-encoder`
+- **Observability**: `spring-boot-starter-actuator`, `micrometer-registry-prometheus`, `spring-boot-opentelemetry`, `spring-boot-micrometer-tracing-opentelemetry`, `micrometer-tracing-bridge-otel`, `opentelemetry-exporter-otlp`, `loki-logback-appender` (loki4j 2.0.3)
 - Also: `spring-ai-vector-store-advisor`, optional runtime `spring-boot-docker-compose` / `spring-ai-spring-boot-docker-compose` (auto-starts `compose.yaml`)
 
 ## Build / run / test
@@ -27,50 +27,78 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 ./mvnw clean package
 ```
 
-## Package layout
-
-Standard Maven layout under `com.example.subhanmishra`:
+## Project structure
 
 ```
-src/main/java/.../subhanmishra/
-  config/       # SpringAiConfig, ThreadPoolConfig, ...
-  controller/   # ChatController, DocumentController
-  dto/
-  entity/
-  exception/
-  repository/
-  service/      # ChatService, DocumentParserService, DocumentIngestionService,
-                 # DocumentMetadataService, DocumentHistoryService
-src/main/resources/
-  application.yaml       # sets active profile to dev
-  application-dev.yaml   # datasource, vector store, Ollama, RAG/chunking params
-  logback-spring.xml
-  db/migration/          # Flyway migrations (V1..V3, e.g. V3__Set_IST_Timezone.sql)
+.
+├── src
+│   ├── main
+│   │   ├── java/.../subhanmishra/
+│   │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
+│   │   │   │               # ModelMapperConfig, RagProperties, SpringAiProperties
+│   │   │   ├── controller  # ChatController, DocumentController
+│   │   │   ├── dto
+│   │   │   ├── entity
+│   │   │   ├── exception
+│   │   │   ├── repository
+│   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
+│   │   │                   # DocumentMetadataService, DocumentHistoryService
+│   │   └── resources
+│   │       ├── application.yaml       # sets active profile to dev
+│   │       ├── application-dev.yaml   # datasource; pgvector store; Ollama (embedding + chat);
+│   │       │                          # management.* actuator/tracing/metrics (port 9095);
+│   │       │                          # BOTH Spring AI observation levels (see Observability);
+│   │       │                          # app.rag.* chunking + search (top-k, similarity threshold);
+│   │       │                          # app.ai.* max chat-history messages
+│   │       ├── logback-spring.xml     # console + Loki appenders; traceId/spanId structured metadata
+│   │       └── db/migration/          # Flyway migrations (V1..V3, e.g. V3__Set_IST_Timezone.sql)
+│   └── test                           # only default SpringAiApplicationTests.java so far
+├── docker/                            # config for the observability stack (see below)
+│   ├── grafana/                       # grafana.ini + provisioning/{datasources,dashboards}
+│   ├── loki/
+│   ├── otel/
+│   ├── pgadmin/
+│   ├── prometheus/
+│   └── tempo/
+├── docker-volume/  # gitignored — runtime volume data (grafana plugins etc.), not source
+├── pom.xml
+├── compose.yaml
+├── CLAUDE.md       # this file — auto-loaded context
+├── GEMINI.md       # longer-form companion doc
+└── README.md       # user-facing quick-start; canonical for endpoint tables + infra ports/creds
 ```
 
 Key Java config:
 - `SpringAiConfig` — `ChatClient` (system prompt, chat-memory + question-answer advisors), Redis `ChatMemoryRepository`, `TokenTextSplitter`.
-- `ThreadPoolConfig` — custom `ForkJoinPool` (`documentProcessingPool`, threads named `doc-proc-pool-*`) used as a bulkhead for document parsing.
+- `ThreadPoolConfig` — custom `ForkJoinPool` (`documentProcessingPool`, threads named `doc-chunk-pool-*`) used as a bulkhead for document parsing. Parallelism is `availableProcessors / 2` (min 1), LIFO, with an uncaught-exception handler. Parallel work must be submitted to this pool explicitly — a bare `parallelStream()` runs on the common pool and defeats the bulkhead.
 
 ## Core workflows
 
-**Document upload**: `DocumentController` → `DocumentMetadataService` creates metadata record → `DocumentParserService` parses into paragraphs in parallel on `documentProcessingPool` → `DocumentIngestionService` chunks and writes to pgvector → status updated to `INDEXED`/`FAILED`.
+**Document upload**: `DocumentController` → `DocumentMetadataService` creates metadata record → `DocumentParserService` splits into paragraphs then token-chunks, in parallel on `documentProcessingPool` → `DocumentIngestionService` enriches chunk metadata and writes to pgvector → status updated to `INDEXED`/`FAILED`. `DocumentHistoryService` records each status change as history. `DocumentMetadataService` also handles document deletion.
 
-**Chat**: `ChatController` (`/api/chat/generate`, `/api/chat/generate-stream`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis.
+The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserService.parse()` returns a `Map<String, Object>` holding a `documentStream` (`Stream<Document>`) plus `totalPages`, and `DocumentIngestionService.ingest()` consumes it, enriching metadata lazily and writing to the vector store in batches of 50. Chunk count is therefore only known after the stream is drained, which is why `totalPages` is carried separately rather than derived from the chunk list.
 
-Document endpoints: `/api/documents/upload`, `/api/documents`, `/api/documents/{id}`.
+**Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
+
+`DocumentController` is based at `/api/v1/documents`. Exact routes for both controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
 
 ## Docker environment (`compose.yaml`)
 
-- **pgvector** (Postgres 16 + pgvector) — port `5432`, db `ragdatabase`, user `myuser` / `secret`
-- **pgadmin** — port `5050`, `admin@localhost.com` / `admin`
-- **redis** (Redis Stack) — ports `6379` (Redis), `8001` (UI)
-- **otel-collector** — ports `4317` (gRPC), `4318` (HTTP), config: `docker/otel/otel-collector-config.yaml`
-- **prometheus** — port `9090`, config: `docker/prometheus/prometheus.yml`
-- **grafana** — port `3000`, datasources provisioned from `docker/grafana/provisioning/datasources/` (Prometheus, Loki, Tempo)
-- **tempo** — port `3200`, config: `docker/tempo/tempo.yaml`
-- **loki** — port `3100`, config: `docker/loki/local-config.yaml`
+Services: pgvector, pgadmin, redis, redis-exporter, otel-collector, prometheus, grafana, tempo, loki. Ports and credentials are documented in `README.md`'s Infrastructure section — don't duplicate them here, keep that as the canonical copy.
 
-## Known stale docs
+Config file locations (dev-context, not in README): `docker/otel/otel-collector-config.yaml`, `docker/prometheus/prometheus.yml`, `docker/grafana/grafana.ini`, `docker/grafana/provisioning/datasources/`, `docker/grafana/provisioning/dashboards/`, `docker/tempo/tempo.yaml`, `docker/loki/local-config.yaml`.
 
-`README.md` is out of date — references OpenAI (actual: Ollama), Java 25 / Spring Boot 4.0.2 / Spring AI 2.0.0-M2 (actual: Java 26 / 4.1.0 / 2.0.1), and old `/ai/generate*` endpoints (actual: `/api/chat/*`, `/api/documents/*`). Don't treat it as a source of truth.
+## Observability
+
+The app exports metrics (Prometheus scrape on management port `9095`), traces (OTLP → otel-collector → Tempo) and logs (loki4j appender → Loki), and all four correlation directions work in Grafana. The wiring is non-obvious in several places, so before changing any of it:
+
+- **Two independent Spring AI observation levels.** `spring.ai.chat.client.observations.*` logs the prompt as the caller wrote it, *before* advisors run. `spring.ai.chat.observations.*` logs the final prompt sent to Ollama, *after* `QuestionAnswerAdvisor` injects the retrieved context. Only the second shows the RAG context. Both are enabled; the handlers log at INFO.
+- **`logback-spring.xml` must emit an empty traceId/spanId default, never a placeholder.** Loki drops structured metadata whose value is empty, so untraced lines carry no `traceId` label. A literal default such as `NONE` makes Grafana render a TraceID link on every line that then queries Tempo for a trace by that name and returns nothing.
+- **Prometheus needs two CLI flags** (`compose.yaml`): `--enable-feature=exemplar-storage` or scraped exemplars are silently dropped, and `--web.enable-remote-write-receiver` or Tempo's metrics generator cannot write. Overriding `command:` also discards the image's default args, so `--storage.tsdb.path` must be restated.
+- **Tempo's metrics generator is enabled per tenant** via `overrides.defaults.metrics_generator.processors`. Configuring the `metrics_generator` block alone does not switch it on.
+- **Grafana datasource links**: Loki `derivedFields` needs an explicit `url` even when `datasourceUid` is set. Metrics → logs has no built-in link and uses a **correlation**, which is provisioned *inside* the datasource file — Grafana silently ignores a `provisioning/correlations/` directory.
+- **Dashboard exemplars** require `"exemplar": true` per target. It is set on the `http_server_requests_seconds_*` targets only; gauges (JVM, Hikari) and redis-exporter series cannot carry exemplars.
+
+## See also
+
+`README.md` is the user-facing quick-start doc — canonical source for API endpoint tables/curl examples and docker service ports/credentials, kept in sync with this file. `GEMINI.md` is the longer-form architecture doc.
