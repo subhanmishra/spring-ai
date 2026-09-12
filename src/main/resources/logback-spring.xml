@@ -3,26 +3,39 @@
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
     <springProperty scope="context" name="appName" source="spring.application.name"/>
+    <springProperty scope="context" name="lokiUrl" source="loki.url" defaultValue="http://localhost:3100/loki/api/v1/push"/>
+
+    <!-- Define a new pattern that includes trace and span IDs for CONSOLE output -->
+    <property name="LOG_PATTERN"
+              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} [${appName},%X{traceId:-},%X{spanId:-}] --- [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <!-- Use the new pattern for console output -->
+            <pattern>${LOG_PATTERN}</pattern>
             <charset>utf8</charset>
         </encoder>
     </appender>
 
     <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
         <http>
-            <url>http://loki:3100/loki/api/v1/push</url>
+            <url>${lokiUrl}</url>
         </http>
-        <format>
-            <label>
-                <pattern>app=${appName},host=${HOSTNAME},level=%level,traceId=%X{traceId:-NONE},spanId=%X{spanId:-NONE}</pattern>
-            </label>
-            <message>
-                <pattern>${FILE_LOG_PATTERN}</pattern>
-            </message>
-        </format>
+        <labels>
+            app = ${appName}
+            host = ${HOSTNAME}
+            level = %level
+        </labels>
+        <!-- Emit an EMPTY default, not a literal "NONE". Loki drops structured metadata
+             whose value is empty, so log lines written outside a span carry no traceId
+             label at all. With "NONE", Grafana's derived field saw a non-empty value on
+             every line and rendered a TraceID link that queried Tempo for the trace
+             "NONE" -> always "no data". -->
+        <structuredMetadata>
+            traceId = %X{traceId:-}
+            spanId = %X{spanId:-}
+        </structuredMetadata>
+        <message class="com.github.loki4j.logback.JsonLayout" />
     </appender>
 
     <root level="INFO">

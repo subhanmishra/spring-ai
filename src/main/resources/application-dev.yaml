@@ -1,4 +1,46 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,metrics,prometheus"
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  server:
+    port: 9095
+  otlp:
+    tracing:
+      endpoint: "http://localhost:4318/v1/traces"
+  tracing:
+    sampling:
+      probability: 1.0
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+        step: 5s
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      env: local
+    distribution:
+      percentiles-histogram:
+        all: true
+    enable:
+      all: true
+
+loki:
+  url: http://localhost:3100/loki/api/v1/push
+
 spring:
+  application:
+    name: spring-ai-ragr
+  docker:
+    compose:
+      lifecycle-management: START_AND_STOP
   datasource:
     url: jdbc:postgresql://localhost:5432/ragdatabase
     username: myuser
@@ -36,12 +78,17 @@ spring:
       chat:
         model: llama3.2
     chat:
+      # ChatModel-level: the FINAL prompt sent to Ollama, i.e. after QuestionAnswerAdvisor
+      # has injected the retrieved document context. This is where the RAG context shows up.
+      observations:
+        log-prompt: true
+        log-completion: true
+        include-error-logging: true
       client:
+        # ChatClient-level: the prompt as the caller wrote it, before advisors run.
         observations:
           log-prompt: true
-  docker:
-    compose:
-      lifecycle-management: start-and-stop
+          log-completion: true
 
 logging:
   level:
@@ -62,7 +109,6 @@ app:
     min-chunk-size-chars: 150
     min-chunk-length-to-embed: 5
     max-num-chunks: 10000
-    chunk-overlap: 50
     top-k: 5
     similarity-threshold: 0.6
   ai: # New section for Spring AI properties

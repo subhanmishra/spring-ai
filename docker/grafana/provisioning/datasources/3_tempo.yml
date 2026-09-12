@@ -1,0 +1,41 @@
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+    editable: false
+    jsonData:
+      serviceMap:
+        datasourceUid: prometheus
+      # Required for the service map to actually render as a graph.
+      nodeGraph:
+        enabled: true
+      # Traces -> Metrics, backed by Tempo's span-metrics processor.
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: '-2m'
+        spanEndTimeShift: '2m'
+        tags:
+          - key: service.name
+            value: service
+        queries:
+          - name: 'Request rate'
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+          - name: 'Error rate'
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags,status_code="STATUS_CODE_ERROR"}[5m]))'
+          - name: 'p95 latency'
+            query: 'histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])) by (le))'
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags:
+          - key: service.name
+            value: app
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{$${__tags}} | traceId="$${__trace.traceId}"'

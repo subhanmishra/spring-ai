@@ -1,0 +1,268 @@
+{
+  "uid": "spring-ai-ragr-overview",
+  "title": "spring-ai-ragr overview",
+  "tags": ["spring-boot", "micrometer"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 5,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "JVM heap used",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "jvm_memory_used_bytes{application=\"spring-ai-ragr\", area=\"heap\"}",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "JVM GC pause time (5m rate)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(jvm_gc_pause_seconds_sum{application=\"spring-ai-ragr\"}[5m])",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP request rate by status — controller endpoints",
+      "description": "/ai/** (ChatController) and /api/v1/documents/** (DocumentController)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (uri, status)",
+          "exemplar": true,
+          "legendFormat": "{{uri}} [{{status}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "HTTP request rate by status — other endpoints",
+      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (uri, status)",
+          "exemplar": true,
+          "legendFormat": "{{uri}} [{{status}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "HTTP request latency (p50/p80/p95/p99) — controller endpoints",
+      "description": "/ai/** (ChatController) and /api/v1/documents/** (DocumentController)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p80",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p95",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p99",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "HTTP request latency (p50/p80/p95/p99) — other endpoints",
+      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p80",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p95",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
+          "exemplar": true,
+          "legendFormat": "{{uri}} p99",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "HikariCP active / idle / pending connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_active{application=\"spring-ai-ragr\"}",
+          "legendFormat": "active",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_idle{application=\"spring-ai-ragr\"}",
+          "legendFormat": "idle",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "hikaricp_connections_pending{application=\"spring-ai-ragr\"}",
+          "legendFormat": "pending",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "JVM live threads",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "jvm_threads_live_threads{application=\"spring-ai-ragr\"}",
+          "legendFormat": "live threads",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Redis memory used",
+      "description": "From redis-exporter (job=redis), scraping the ai_redis container's INFO stats",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "redis_memory_used_bytes{job=\"redis\"}",
+          "legendFormat": "memory used",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Redis connected clients",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "redis_connected_clients{job=\"redis\"}",
+          "legendFormat": "connected clients",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Redis commands processed rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(redis_commands_processed_total{job=\"redis\"}[5m])",
+          "legendFormat": "commands/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Redis keyspace hit rate",
+      "description": "hits / (hits + misses), over a 5m rate window",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) / clamp_min(rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) + rate(redis_keyspace_misses_total{job=\"redis\"}[5m]), 1e-9)",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

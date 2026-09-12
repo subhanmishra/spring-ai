@@ -1,0 +1,184 @@
+{
+  "uid": "spring-ai-rag-metrics",
+  "title": "spring-ai-ragr — AI / RAG metrics",
+  "tags": ["spring-ai", "rag", "genai"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "LLM call rate by operation",
+      "description": "gen_ai_client_operation_seconds_count — Ollama chat vs. embedding calls",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"spring-ai-ragr\"}[5m])) by (gen_ai_operation_name, gen_ai_response_model)",
+          "legendFormat": "{{gen_ai_operation_name}} ({{gen_ai_response_model}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "LLM call latency (p50/p95/p99)",
+      "description": "gen_ai_client_operation_seconds_bucket, by operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "{{gen_ai_operation_name}} p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "{{gen_ai_operation_name}} p95",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "{{gen_ai_operation_name}} p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Token usage rate",
+      "description": "gen_ai_client_token_usage_total — input/output/total tokens per second, by operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\"}[5m])) by (gen_ai_operation_name, gen_ai_token_type)",
+          "legendFormat": "{{gen_ai_operation_name}} - {{gen_ai_token_type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "LLM error rate",
+      "description": "gen_ai_client_operation_seconds_count where error != none",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"spring-ai-ragr\", error!=\"none\"}[5m])) by (gen_ai_operation_name, error)",
+          "legendFormat": "{{gen_ai_operation_name}} [{{error}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "ChatClient end-to-end latency (p50/p95/p99)",
+      "description": "spring_ai_chat_client_seconds_bucket — full ChatClient.call() duration including all advisors",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(spring_ai_chat_client_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_chat_client_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(spring_ai_chat_client_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "RAG advisor chain — avg duration by advisor",
+      "description": "spring_ai_advisor_seconds — breaks down where time goes across MessageChatMemoryAdvisor, QuestionAnswerAdvisor, Tool Calling Advisor, etc.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(spring_ai_advisor_seconds_sum{application=\"spring-ai-ragr\"}[5m])) by (spring_ai_advisor_name) / sum(rate(spring_ai_advisor_seconds_count{application=\"spring-ai-ragr\"}[5m])) by (spring_ai_advisor_name)",
+          "legendFormat": "{{spring_ai_advisor_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Vector store operation rate",
+      "description": "db_vector_client_operation_seconds_count — pgvector queries",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(db_vector_client_operation_seconds_count{application=\"spring-ai-ragr\"}[5m])) by (db_system, db_operation_name)",
+          "legendFormat": "{{db_system}} {{db_operation_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Vector store query latency (p50/p95/p99)",
+      "description": "db_vector_client_operation_seconds_bucket — pgvector similarity search latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    }
+  ]
+}

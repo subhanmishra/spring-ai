@@ -9,6 +9,9 @@ distributor:
           endpoint: 0.0.0.0:4317
         http:
           endpoint: 0.0.0.0:4318
+  ring:
+    kvstore:
+      store: inmemory
 
 storage:
   trace:
@@ -16,14 +19,22 @@ storage:
     local:
       path: /var/tempo
 
-ingester:
-  lifecycler:
-    address: 127.0.0.1
-    ring:
-      kvstore:
-        store: inmemory
-      replication_factor: 1
-    final_sleep: 0s
-  chunk_idle_period: 1h
-  max_block_bytes: 1048576
-  max_block_duration: 1h
+metrics_generator:
+  processor:
+    service_graphs: {}
+    span_metrics: {}
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+
+# Configuring `metrics_generator` above does NOT switch it on: processors are enabled
+# per tenant via overrides. Without this block the generator stays idle and the
+# Tempo datasource's serviceMap / tracesToMetrics have no metrics to query.
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics

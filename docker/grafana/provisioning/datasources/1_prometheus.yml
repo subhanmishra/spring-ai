@@ -1,0 +1,41 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    uid: prometheus
+    editable: false
+    jsonData:
+      # Metrics -> Traces. The exemplar label emitted by Micrometer is `trace_id`
+      # (verified in /actuator/prometheus: `# {span_id="...",trace_id="..."}`).
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+    # Metrics -> Logs. Grafana has no built-in metrics->logs datasource link the way
+    # Loki has derivedFields and Tempo has tracesToLogsV2, so this uses Correlations:
+    # a link attached to a named FIELD of this datasource's result that runs a query
+    # against another datasource. Correlations are provisioned HERE, nested under the
+    # source datasource -- Grafana does not read a provisioning/correlations/ directory.
+    # `$${...}` escapes provisioning's env-var interpolation, leaving `${...}`, which
+    # references a field in the Prometheus result.
+    correlations:
+      # Click the `job` field on any Prometheus series -> that service's logs.
+      - targetUID: loki
+        label: App logs
+        description: Loki logs for the service this series belongs to
+        config:
+          type: query
+          field: job
+          target:
+            expr: '{app="$${job}"}'
+      #
+      # NOTE: a per-endpoint variant keyed on the `uri` label was tried and removed.
+      # `{app="..."} |= "${uri}"` matches nothing, because the request URI never appears
+      # in these log lines -- they are JsonLayout documents from the Spring AI observation
+      # handlers and JDBC, none of which mention the endpoint. To make endpoint-scoped
+      # log links work, put the URI into MDC in a filter/interceptor and emit it as
+      # structured metadata in logback-spring.xml, then key the correlation on that.

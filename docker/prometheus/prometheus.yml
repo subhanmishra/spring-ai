@@ -7,3 +7,7 @@ scrape_configs:
     static_configs:
       # Use host.docker.internal to allow the Prometheus container to scrape the Spring Boot app running on the host machine.
       - targets: ['host.docker.internal:9095']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

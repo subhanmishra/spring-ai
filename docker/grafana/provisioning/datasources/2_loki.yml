@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    uid: loki
+    editable: false
+    jsonData:
+      # Logs -> Traces. `url` is the query handed to the target datasource and is
+      # REQUIRED even when datasourceUid is set; without it the link resolves to an
+      # empty trace ID. `$$` escapes Grafana provisioning's env-var interpolation.
+      derivedFields:
+        - datasourceUid: tempo
+          matcherType: label
+          matcherRegex: traceId
+          name: TraceID
+          url: '$${__value.raw}'

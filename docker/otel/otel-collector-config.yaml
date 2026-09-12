@@ -2,13 +2,22 @@ receivers:
   otlp:
     protocols:
       grpc:
+        endpoint: 0.0.0.0:4317
       http:
+        endpoint: 0.0.0.0:4318
 
 exporters:
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
+    sending_queue:
+      enabled: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 5m
 
 service:
   pipelines:
