@@ -11,16 +11,12 @@ import com.example.subhanmishra.repository.VectorStoreRepository;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class DocumentMetadataService {
@@ -69,14 +65,16 @@ public class DocumentMetadataService {
         int chunksCreated = 0;
         try {
             // 3. Parse and ingest the document.
-            List<Document> parsedDocs = parserService.parse(file);
-            chunksCreated = ingestionService.ingest(documentMetadata, parsedDocs);
+            Map<String, Object> parseResult = parserService.parse(file);
+            chunksCreated = ingestionService.ingest(documentMetadata, parseResult);
+
+            int totalPages = (int) parseResult.getOrDefault("totalPages", 0);
 
             // 4. On success, update the main record to the terminal INDEXED status.
             DocumentMetadata finalMetadata = documentMetadata.toBuilder()
                     .status(DocumentStatus.INDEXED)
                     .totalChunks(chunksCreated)
-                    .totalPages(parsedDocs.size())
+                    .totalPages(totalPages)
                     .updatedAt(LocalDateTime.now())
                     .build();
             documentMetadataRepo.save(finalMetadata);

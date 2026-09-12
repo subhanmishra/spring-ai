@@ -2,6 +2,7 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -9,10 +10,12 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class DocumentIngestionService {
@@ -27,45 +30,62 @@ public class DocumentIngestionService {
     }
 
     @Transactional
-    public int ingest(DocumentMetadata metadata, List<Document> parsedDocs) {
+    public int ingest(DocumentMetadata metadata, Map<String, Object> parseResult) {
         log.info("Starting ingestion process for document [id={}, name={}]", metadata.getId(), metadata.getFilename());
 
         // Record the PROCESSING milestone. This happens in a new, separate transaction
         // and will not be rolled back if the main ingestion transaction fails.
         historyService.recordHistory(metadata.getId(), DocumentStatus.PROCESSING, "Starting to chunk and embed document.");
 
-        if (parsedDocs.isEmpty()) {
-            // Throwing an exception will cause this transaction to roll back.
-            // The caller will catch this and record the FAILED status in the history.
+        Stream<Document> enrichedStream = getEnrichedStream(metadata, (Stream<Document>) parseResult.get("documentStream"));
+
+        // 2. Batch the stream and write to the vector store
+        int batchSize = 50; // A configurable batch size is recommended
+        final AtomicInteger totalChunks = new AtomicInteger(0);
+
+        partition(enrichedStream, batchSize).forEach(batch -> {
+            log.info("Writing batch of {} vector chunks to PgVectorStore for document: {}", batch.size(), metadata.getFilename());
+            vectorStore.add(batch);
+            totalChunks.addAndGet(batch.size());
+        });
+
+        if (totalChunks.get() == 0) {
             throw new IllegalStateException("Document parsing resulted in zero chunks. The document may be empty or unscannable.");
         }
 
-        // 1. Enrich metadata on each chunk
-        List<Document> enrichedChunks = new ArrayList<>();
-        for (int i = 0; i < parsedDocs.size(); i++) {
-            Document chunk = parsedDocs.get(i);
-            Map<String, Object> enrichedMetadata = new HashMap<>(chunk.getMetadata());
-            enrichedMetadata.put("documentId", metadata.getId().toString());
-            enrichedMetadata.put("fileName", metadata.getFilename());
-            enrichedMetadata.put("contentType", metadata.getContentType());
-            enrichedMetadata.put("chunkIndex", i);
+        log.info("Successfully processed document for vectorization [id={}, name={}, chunks={}]", metadata.getId(), metadata.getFilename(), totalChunks.get());
+        return totalChunks.get();
+    }
+
+    private static @NonNull Stream<Document> getEnrichedStream(DocumentMetadata metadata, Stream<Document> documentStream) {
+        if (documentStream == null) {
+            throw new IllegalStateException("Parsing result did not contain a document stream.");
+        }
+
+        // 1. Enrich metadata on each chunk lazily as part of the stream
+        AtomicInteger chunkIndex = new AtomicInteger(0);
+        return documentStream.map(chunk -> {
+            Map<String, Object> newMetadata = new HashMap<>(chunk.getMetadata());
+            newMetadata.put("documentId", metadata.getId().toString());
+            newMetadata.put("fileName", metadata.getFilename());
+            newMetadata.put("contentType", metadata.getContentType());
+            newMetadata.put("chunkIndex", chunkIndex.getAndIncrement());
+
+            // Normalize page number metadata
             Object pageNumber = chunk.getMetadata().get("page_number");
             if (pageNumber == null) {
                 pageNumber = chunk.getMetadata().get("pageNumber");
             }
             if (pageNumber != null) {
-                enrichedMetadata.put("pageNumber", pageNumber);
+                newMetadata.put("pageNumber", pageNumber);
             }
-            Document enrichedDoc = new Document(chunk.getText(), enrichedMetadata);
-            enrichedChunks.add(enrichedDoc);
-        }
+            return new Document(chunk.getText(), newMetadata);
+        });
+    }
 
-        // 2. Write chunks and embeddings to the vector store. This is the main transactional work.
-        log.info("Writing {} vector chunks to PgVectorStore for document: {}", enrichedChunks.size(), metadata.getFilename());
-        vectorStore.add(enrichedChunks);
-
-        log.info("Successfully processed document for vectorization [id={}, name={}, chunks={}]", metadata.getId(), metadata.getFilename(), enrichedChunks.size());
-
-        return enrichedChunks.size();
+    // Helper method to partition a stream into batches
+    private <T> Stream<List<T>> partition(Stream<T> source, int size) {
+        final AtomicInteger counter = new AtomicInteger(0);
+        return source.collect(Collectors.groupingBy(_ -> counter.getAndIncrement() / size)).values().stream();
     }
 }

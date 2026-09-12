@@ -16,6 +16,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ForkJoinPool;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -25,12 +28,14 @@ public class DocumentParserService {
 
     private final static Logger log = LoggerFactory.getLogger(DocumentParserService.class);
     private final TextSplitter textSplitter;
+    private final ForkJoinPool documentProcessingPool;
 
-    public DocumentParserService(TextSplitter textSplitter) {
+    public DocumentParserService(TextSplitter textSplitter, ForkJoinPool documentProcessingPool) {
         this.textSplitter = textSplitter;
+        this.documentProcessingPool = documentProcessingPool;
     }
 
-    public List<Document> parse(MultipartFile file) {
+    public Map<String, Object> parse(MultipartFile file) {
 
         String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "document";
         String contentType = file.getContentType() != null ? file.getContentType().toLowerCase() : "";
@@ -65,7 +70,7 @@ public class DocumentParserService {
 
     }
 
-    private List<Document> parsePdf(Resource resource) {
+    private Map<String, Object> parsePdf(Resource resource) {
 
         PdfDocumentReaderConfig config = PdfDocumentReaderConfig.builder()
                 .withPageBottomMargin(0)
@@ -76,27 +81,52 @@ public class DocumentParserService {
         List<Document> pageDocs = documentReader.get();
 
         // Strategy: Split by paragraph, then by token, to preserve semantic context.
-        return splitIntoParagraphsAndThenChunks(pageDocs);
+        Stream<Document> chunkStream = splitIntoParagraphsAndThenChunks(pageDocs);
+        return Map.of("documentStream", chunkStream, "totalPages", pageDocs.size());
     }
 
-    private List<Document> parseGenericFile(Resource resource) {
+    private Map<String, Object> parseGenericFile(Resource resource) {
         TikaDocumentReader tikaDocumentReader = new TikaDocumentReader(resource);
-        return splitIntoParagraphsAndThenChunks(tikaDocumentReader.get());
+        List<Document> documents = tikaDocumentReader.get();
+        Stream<Document> chunkStream = splitIntoParagraphsAndThenChunks(documents);
+        // For generic files, we consider it as a single "page"
+        return Map.of("documentStream", chunkStream, "totalPages", documents.size());
     }
 
-    private List<Document> splitIntoParagraphsAndThenChunks(List<Document> documents) {
+    private Stream<Document> splitIntoParagraphsAndThenChunks(List<Document> documents) {
         // Use a regex for splitting by one or more blank lines (which separate paragraphs).
         final Pattern paragraphPattern = Pattern.compile("\\n\\s*\\n");
 
-        // 1. Split each document into paragraphs.
-        List<Document> paragraphDocs = documents.stream().flatMap(doc -> {
-            String[] paragraphs = paragraphPattern.split(doc.getText());
-            return Stream.of(paragraphs).map(p -> new Document(p, doc.getMetadata()));
-        }).toList();
+        try {
+            // To correctly use the custom thread pool, the entire parallel stream operation
+            // must be submitted as a task. Calling .parallelStream() by itself would use the
+            // common ForkJoinPool, defeating the purpose of our bulkhead.
+            // We collect the results into a list within the pool to ensure the stream is fully
+            // processed before returning.
+            List<Document> chunks = documentProcessingPool.submit(() ->
+                    documents.parallelStream() // This will now execute within the documentProcessingPool
+                            .flatMap(doc ->
+                                    // For each page, create a stream of its paragraphs
+                                    Stream.of(paragraphPattern.split(doc.getText()))
+                                            // Filter out any empty strings that result from splitting
+                                            .filter(p -> !p.isBlank())
+                                            // Create a temporary Document for each paragraph, preserving metadata
+                                            .map(p -> new Document(p, doc.getMetadata()))
+                            )
+                            .peek(doc -> log.info("Processing paragraph on thread: {}", Thread.currentThread().getName()))
+                            // We now have a lazy stream of paragraph-level documents
+                            .flatMap(paraDoc ->
+                                    // Apply the token splitter to each paragraph and stream the resulting chunks
+                                    textSplitter.apply(List.of(paraDoc)).stream()
+                            )
+                            .collect(Collectors.toList()) // Execute the stream and collect results
+            ).get();
 
-        // 2. Apply the token splitter to the paragraph-level documents.
-        return paragraphDocs.stream()
-                .flatMap(paraDoc -> textSplitter.apply(List.of(paraDoc)).stream())
-                .collect(Collectors.toList());
+            return chunks.stream(); // Return a new stream over the collected chunks
+
+        } catch (InterruptedException | ExecutionException e) {
+            Thread.currentThread().interrupt(); // Preserve the interrupted status
+            throw new DocumentProcessingException("Failed to process document stream in parallel", e);
+        }
     }
 }
