@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.UUID;
 
 @Service
 public class ChatService {
@@ -25,7 +24,7 @@ public class ChatService {
     public String generate(String prompt, String conversationId) {
         return chatClient.prompt()
                 .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId.isBlank()? UUID.randomUUID().toString() : conversationId))
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
     }
@@ -33,7 +32,7 @@ public class ChatService {
     public Flux<String> generateStream(String prompt, String conversationId) {
         return chatClient.prompt()
                 .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId.isBlank()? UUID.randomUUID().toString() : conversationId))
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .stream()
                 .content();
     }
