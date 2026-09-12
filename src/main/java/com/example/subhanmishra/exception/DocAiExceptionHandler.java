@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -48,7 +49,7 @@ public class DocAiExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxSize(MaxUploadSizeExceededException ex) {
         logger.warn("File size limit exceeded: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.PAYLOAD_TOO_LARGE);
+        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.CONTENT_TOO_LARGE);
         problemDetail.setTitle("File Too Large");
         problemDetail.setDetail("The uploaded file exceeds the maximum allowed size of 25MB.");
         problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
@@ -80,6 +81,17 @@ public class DocAiExceptionHandler {
         logger.warn("Illegal argument: {}", ex.getMessage());
         ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
         problemDetail.setTitle("Illegal argument");
+        problemDetail.setDetail(ex.getMessage());
+        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
+        return problemDetail;
+    }
+
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
+        logger.debug("No static resource found: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
+        problemDetail.setTitle("Not Found");
         problemDetail.setDetail(ex.getMessage());
         problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
         return problemDetail;
