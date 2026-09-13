@@ -31,6 +31,9 @@
         <spring-ai.version>2.0.1</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
         <modelmapper.version>3.2.4</modelmapper.version>
+        <!-- Matches the version spring-ai-tika-document-reader already pulls in, so the explicit
+             declaration below does not introduce a second copy on the classpath. -->
+        <jsoup.version>1.22.2</jsoup.version>
     </properties>
     <dependencies>
         <dependency>
@@ -120,6 +123,14 @@
             <groupId>org.modelmapper</groupId>
             <artifactId>modelmapper</artifactId>
             <version>${modelmapper.version}</version>
+        </dependency>
+
+        <!-- Declared rather than used transitively: DocumentParserService parses the XHTML Tika emits
+             with it, to recover tables the default flat-text handler would discard. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
         </dependency>
 
         <dependency>

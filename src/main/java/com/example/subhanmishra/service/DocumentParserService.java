@@ -6,7 +6,7 @@ import com.example.subhanmishra.service.parse.ChunkMetadata;
 import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TableChunker;
 import com.example.subhanmishra.service.parse.TokenCounter;
-import com.example.subhanmishra.service.parse.XhtmlBlockHandler;
+import com.example.subhanmishra.service.parse.XhtmlBlockParser;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +21,12 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.sax.SAXTransformerFactory;
+import javax.xml.transform.sax.TransformerHandler;
+import javax.xml.transform.stream.StreamResult;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -123,15 +128,19 @@ public class DocumentParserService {
      * {@code BodyContentHandler} that {@code TikaDocumentReader} defaults to. Tika already recovers table
      * structure from DOCX, XLSX, PPTX and HTML; the default handler simply discards the markup.
      */
-    private Map<String, Object> parseGenericFile(Resource resource) {
-        XhtmlBlockHandler blockHandler = new XhtmlBlockHandler();
+    private Map<String, Object> parseGenericFile(Resource resource) throws TransformerConfigurationException {
+        // An identity transformer is a ContentHandler that serialises the SAX events back to XML, so
+        // TikaDocumentReader's own toString() of it is the XHTML document. Using the JDK's serialiser
+        // rather than Tika's ToXMLContentHandler keeps tika-core out of our compile dependencies, where
+        // pinning it ourselves would risk holding back the version spring-ai brings.
+        StringWriter xhtml = new StringWriter();
+        TransformerHandler serializer =
+                ((SAXTransformerFactory) SAXTransformerFactory.newInstance()).newTransformerHandler();
+        serializer.setResult(new StreamResult(xhtml));
 
-        // Called for its side effect: get() runs Tika's AutoDetectParser and feeds the SAX events to our
-        // handler. The Document it returns is built from handler.toString() and is of no use here - the
-        // blocks the handler collected are what we want.
-        new TikaDocumentReader(resource, blockHandler, ExtractedTextFormatter.defaults()).get();
+        new TikaDocumentReader(resource, serializer, ExtractedTextFormatter.defaults()).get();
 
-        List<ContentBlock> blocks = blockHandler.blocks();
+        List<ContentBlock> blocks = XhtmlBlockParser.parse(xhtml.toString());
         long tableCount = blocks.stream().filter(ContentBlock.Table.class::isInstance).count();
         log.info("Tika produced {} block(s) for {}, {} of them tables", blocks.size(), resource.getFilename(), tableCount);
 
