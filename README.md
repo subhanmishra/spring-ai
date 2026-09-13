@@ -22,6 +22,31 @@ ollama pull llama3.2
 
 No API key is needed — Ollama is called locally. The default connection is `http://localhost:11434` (`src/main/resources/application-dev.yaml`, `spring.ai.ollama.base-url`); override it there if Ollama runs elsewhere.
 
+### Ollama: enable the integrated GPU
+
+Ollama **ignores an integrated GPU unless you tell it not to**, and embedding then runs on the CPU. This is the single biggest lever on indexing speed — on a test machine it roughly doubled embedding throughput (~830 → ~1,750 tokens/sec), taking a 645-page PDF from 415s to 221s:
+
+```bash
+setx OLLAMA_IGPU_ENABLE 1      # Windows; export it on Linux/macOS
+```
+
+Fully quit and relaunch Ollama afterwards — it only reads its environment at startup. To confirm it took effect, look for `Vulkan0 model buffer size` (rather than `CPU model buffer size`) in Ollama's `server.log`.
+
+Note that `OLLAMA_NUM_PARALLEL` does **not** help here: Ollama pins embedding models to a single slot regardless, so indexing throughput is bounded by how fast one runner embeds.
+
+### Document processing
+
+Indexing behaviour is tuned under `app.rag.*` in `application-dev.yaml`:
+
+| Property | Default | Purpose |
+|---|---|---|
+| `chunk-size` | `400` | Target chunk size in **tokens**. Consecutive paragraphs are joined until adding the next would exceed it, so chunks actually reach this budget |
+| `min-chunk-length-to-embed` | `100` | Discards chunks shorter than this many **characters**. The only setting that drops anything — raise it if single-line noise is polluting retrieval |
+| `min-chunk-size-chars` | `150` | Where the splitter looks for a sentence boundary when cutting an over-budget chunk. Not a minimum chunk length |
+| `batch-size` | `50` | Chunks written to pgvector per batch. The cost it controls is *tokens*, so revisit it if you change `chunk-size` |
+| `ingestion-concurrency` | `4` | Batches written in parallel. Must stay well below `spring.datasource.hikari.maximum-pool-size` |
+| `top-k` / `similarity-threshold` | `5` / `0.6` | Retrieval settings used by the chat endpoints |
+
 ## Running the Application
 
 This project uses Spring Boot's Docker Compose support. Ensure Docker (and Ollama) are running, then start the application:
@@ -68,6 +93,10 @@ curl "http://localhost:8080/ai/generateStream?prompt=Tell%20me%20a%20story"
 ```bash
 curl -F "file=@document.pdf" http://localhost:8080/api/v1/documents/upload
 ```
+
+Uploads are **synchronous** — the request does not return until the document is fully indexed, and a large one takes minutes (a 645-page, 13.6MB PDF indexes in roughly 4 minutes with the GPU enabled). Set a generous client timeout. The response reports the number of chunks created.
+
+Indexing is all-or-nothing: if any batch fails, every chunk already written for that document is removed and the document is marked `FAILED`, so a failed upload never leaves partial content to be retrieved. Re-uploading is the way to retry. Maximum upload size is 25MB per file (`spring.servlet.multipart` in `application.yaml`).
 
 Full OpenAPI docs are available via springdoc once the app is running (default: `/swagger-ui.html`).
 
