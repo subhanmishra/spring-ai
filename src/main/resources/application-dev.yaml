@@ -45,6 +45,18 @@ spring:
     url: jdbc:postgresql://localhost:5432/ragdatabase
     username: myuser
     password: secret
+    hikari:
+      pool-name: rag-hikari-pool
+      maximum-pool-size: 20          # app.rag.ingestion-concurrency must stay well below this
+      minimum-idle: 5                # must be < maximum-pool-size, otherwise idle-timeout never reaps
+      connection-timeout: 30000      # 30s - fail rather than queue forever on an exhausted pool
+      idle-timeout: 300000           # 5m
+      keepalive-time: 120000         # 2m - stops idle connections being silently dropped by NAT/firewalls
+      max-lifetime: 1800000          # 30m - must stay below any DB-side or proxy-side connection lifetime
+      validation-timeout: 5000
+      leak-detection-threshold: 60000
+      data-source-properties:
+        reWriteBatchedInserts: true  # collapse JDBC batches into one multi-row INSERT
   ai:
     retry:
       backoff:
@@ -75,6 +87,8 @@ spring:
       base-url: http://localhost:11434
       embedding:
         model: nomic-embed-text
+        keep-alive: "-1"   # pin the embedding model in memory: avoids the ~28s cold start, and the
+                           # runner-startup race that concurrent batches would otherwise hit
       chat:
         model: llama3.2
     chat:
@@ -107,9 +121,14 @@ app:
   rag:
     chunk-size: 400
     min-chunk-size-chars: 150
-    min-chunk-length-to-embed: 5
+    min-chunk-length-to-embed: 100   # characters; the only floor that actually drops tiny chunks
     max-num-chunks: 10000
     top-k: 5
     similarity-threshold: 0.6
+    batch-size: 50               # chunks per batch; cost scales with TOKENS, and coalescing made
+                                 # chunks ~4.7x heavier, so 50 now carries ~10k tokens
+    ingestion-concurrency: 4
+    ingestion-max-attempts: 3      # only for an unreachable Ollama model runner; other failures fail fast
+    ingestion-retry-backoff: 2s    # doubled on each further attempt
   ai: # New section for Spring AI properties
     max-chat-messages: 10
