@@ -158,7 +158,7 @@
       "id": 7,
       "title": "HikariCP active / idle / pending connections",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
@@ -186,7 +186,7 @@
       "id": 8,
       "title": "JVM live threads",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
@@ -203,7 +203,7 @@
       "title": "Redis memory used",
       "description": "From redis-exporter (job=redis), scraping the ai_redis container's INFO stats",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "targets": [
@@ -219,7 +219,7 @@
       "id": 10,
       "title": "Redis connected clients",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 54 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
@@ -235,7 +235,7 @@
       "id": 11,
       "title": "Redis commands processed rate",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 62 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
@@ -252,7 +252,7 @@
       "title": "Redis keyspace hit rate",
       "description": "hits / (hits + misses), over a 5m rate window",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 62 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
       "targets": [
@@ -261,6 +261,321 @@
           "expr": "100 * rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) / clamp_min(rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) + rate(redis_keyspace_misses_total{job=\"redis\"}[5m]), 1e-9)",
           "legendFormat": "hit rate",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Model call rate — chat & embedding",
+      "description": "Outbound calls to Ollama, split by operation. The embedding series tracks document ingestion; the chat series tracks /ai requests. A non-'none' error label is a failed model call.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"spring-ai-ragr\"}[5m])) by (gen_ai_operation_name, gen_ai_response_model, error)",
+          "exemplar": true,
+          "legendFormat": "{{gen_ai_operation_name}} · {{gen_ai_response_model}} [{{error}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Model call latency (p50/p80/p95/p99) — chat & embedding",
+      "description": "Time per call to Ollama. Chat and embedding differ by an order of magnitude, so they are kept as separate series rather than aggregated.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "p50 {{gen_ai_operation_name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.80, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "p80 {{gen_ai_operation_name}}",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "p95 {{gen_ai_operation_name}}",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, gen_ai_operation_name))",
+          "legendFormat": "p99 {{gen_ai_operation_name}}",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Token throughput — chat & embedding",
+      "description": "Tokens per second by operation and direction. This is the real cost driver for ingestion: embedding time scales with total tokens, not with chunk or request count. 'total' is excluded because it double-counts input + output.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_token_type!=\"total\"}[5m])) by (gen_ai_operation_name, gen_ai_token_type)",
+          "legendFormat": "{{gen_ai_operation_name}} {{gen_ai_token_type}} tok/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Advisor latency (p95) — RAG retrieval",
+      "description": "Time spent inside each ChatClient advisor. QuestionAnswerAdvisor is the pgvector similarity search that grounds a chat answer, so this separates retrieval cost from generation cost.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(spring_ai_advisor_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, spring_ai_advisor_name))",
+          "legendFormat": "p95 {{spring_ai_advisor_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "pgvector operation latency — add vs query",
+      "description": "Client-side timing of vector store calls. 'add' is document ingestion (and includes the Ollama embedding round-trip, since VectorStore.add embeds before inserting); 'query' is the similarity search behind every chat answer.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 70 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, db_operation_name))",
+          "legendFormat": "p50 {{db_operation_name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[5m])) by (le, db_operation_name))",
+          "legendFormat": "p95 {{db_operation_name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "vector_store index vs sequential scans",
+      "description": "Sequential scans on vector_store mean the HNSW index is not being used for that query — the clearest signal that similarity search has degraded. Index scans should dominate.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 70 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_user_tables_idx_scan{relname=\"vector_store\"}[5m])",
+          "legendFormat": "index scans/sec",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_user_tables_seq_scan{relname=\"vector_store\"}[5m])",
+          "legendFormat": "sequential scans/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Postgres connections by state",
+      "description": "Server-side view of the same connections HikariCP reports. A growing 'idle in transaction' count means transactions are being held open — which is what ingestion does while it waits on Ollama to embed.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 78 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(pg_stat_activity_count{datname=\"ragdatabase\"}) by (state)",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Postgres buffer cache hit ratio",
+      "description": "blks_hit / (blks_hit + blks_read) over a 5m window. A sustained drop means the working set no longer fits in shared_buffers and vector reads are hitting disk.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 78 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * rate(pg_stat_database_blks_hit{datname=\"ragdatabase\"}[5m]) / clamp_min(rate(pg_stat_database_blks_hit{datname=\"ragdatabase\"}[5m]) + rate(pg_stat_database_blks_read{datname=\"ragdatabase\"}[5m]), 1e-9)",
+          "legendFormat": "hit ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Postgres transaction rate",
+      "description": "Commits and rollbacks per second. Each ingestion batch is its own REQUIRES_NEW transaction, so the commit rate tracks batch throughput; a rollback spike means batches are failing.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 86 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"ragdatabase\"}[5m])",
+          "legendFormat": "commits/sec",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"ragdatabase\"}[5m])",
+          "legendFormat": "rollbacks/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "vector_store live rows",
+      "description": "Chunks currently stored. Should equal the sum of total_chunks across INDEXED documents; a mismatch points at orphaned chunks from an ingestion that died before its compensating delete ran.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 86 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "pg_stat_user_tables_n_live_tup{relname=\"vector_store\"}",
+          "legendFormat": "live rows",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Embedding throughput — nomic-embed-text",
+      "description": "Live embedding rate. The ceiling is hardware: roughly 830 tok/s on CPU and 1750 tok/s with OLLAMA_IGPU_ENABLE=1, and Ollama serves embeddings from a single slot, so this does not scale with app-side concurrency.",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 2000,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "blue", "value": 1 },
+              { "color": "green", "value": 1200 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[5m]))",
+          "legendFormat": "tok/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Chat generation throughput — llama3.2",
+      "description": "Output tokens per second while generating. Input tokens are excluded because the RAG context makes the prompt far larger than the answer, which would swamp the generation signal.",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "blue", "value": 1 },
+              { "color": "green", "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"}[5m]))",
+          "legendFormat": "tok/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Tokens embedded (cumulative)",
+      "description": "Total input tokens sent to the embedding model since the application started. Resets on restart, since this is a process-scoped counter.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}) by (gen_ai_response_model)",
+          "legendFormat": "{{gen_ai_response_model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Chat tokens in / out (cumulative)",
+      "description": "Prompt versus completion tokens for the chat model since startup. The input figure includes the retrieved RAG context that QuestionAnswerAdvisor injects, so it grows much faster than output.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"input\"})",
+          "legendFormat": "input",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"})",
+          "legendFormat": "output",
+          "refId": "B"
         }
       ]
     }

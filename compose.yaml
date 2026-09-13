@@ -62,6 +62,27 @@ services:
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: ai_postgres-exporter
+    environment:
+      # Same dev credentials as the pgvector service above.
+      DATA_SOURCE_NAME: "postgresql://myuser:secret@pgvector:5432/ragdatabase?sslmode=disable"
+    command:
+      # Per-table and per-index stats are off by default, and vector_store's index-vs-sequential
+      # scan counts are the main reason for running this exporter here.
+      # Note the asymmetric naming: stat_user_tables but statio_user_indexes.
+      - "--collector.stat_user_tables"
+      - "--collector.statio_user_indexes"
+      - "--collector.stat_activity"
+      - "--collector.stat_database"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - pgvector
+    labels:
+      - "org.springframework.boot.readiness-check.skip=true"
+
   # Observability Stack
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

@@ -106,6 +106,7 @@ Full OpenAPI docs are available via springdoc once the app is running (default: 
 * **pgadmin** — Postgres admin UI. Port `5050`, `admin@localhost.com` / `admin`.
 * **redis** — Redis Stack, used as the chat memory store. Ports `6379` (Redis), `8001` (UI).
 * **redis-exporter** — Exposes Redis metrics to Prometheus. Port `9121`.
+* **postgres-exporter** — Exposes server-side Postgres metrics to Prometheus. Port `9187`. Runs with the `stat_user_tables` and `statio_user_indexes` collectors enabled so `vector_store` index-vs-sequential scan counts are visible.
 * **otel-collector** — OpenTelemetry Collector. Ports `4317` (gRPC), `4318` (HTTP).
 * **prometheus** — Metrics. Port `9090`.
 * **grafana** — Dashboards (Prometheus/Loki/Tempo pre-provisioned). Port `3000`, anonymous access with Admin role (no login).

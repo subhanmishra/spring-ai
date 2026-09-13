@@ -107,7 +107,7 @@ The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserS
 
 ## Docker environment (`compose.yaml`)
 
-Services: pgvector, pgadmin, redis, redis-exporter, otel-collector, prometheus, grafana, tempo, loki. Ports and credentials are documented in `README.md`'s Infrastructure section — don't duplicate them here, keep that as the canonical copy.
+Services: pgvector, pgadmin, redis, redis-exporter, postgres-exporter, otel-collector, prometheus, grafana, tempo, loki. The postgres-exporter collector flags are asymmetrically named — `--collector.stat_user_tables` but `--collector.statio_user_indexes` — and an unknown flag makes the container exit(1) rather than warn. Ports and credentials are documented in `README.md`'s Infrastructure section — don't duplicate them here, keep that as the canonical copy.
 
 Config file locations (dev-context, not in README): `docker/otel/otel-collector-config.yaml`, `docker/prometheus/prometheus.yml`, `docker/grafana/grafana.ini`, `docker/grafana/provisioning/datasources/`, `docker/grafana/provisioning/dashboards/`, `docker/tempo/tempo.yaml`, `docker/loki/local-config.yaml`.
 
