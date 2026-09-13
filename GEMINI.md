@@ -87,7 +87,7 @@ This file contains the primary configuration for the `dev` profile:
 ### 5.1. Services
 
 - **`ChatService.java`**: Handles the generation of chat responses, including managing chat history with Redis.
-- **`DocumentParserService.java`**: Parses uploaded documents (PDFs and other types) into paragraphs. It uses the custom `documentProcessingPool` to perform this work in parallel.
+- **`DocumentParserService.java`**: Parses uploaded documents (PDFs and other types) into a list of `ContentBlock`s — prose or tables — and coalesces them into chunks that fill the token budget. It uses the custom `documentProcessingPool` to perform this work in parallel. Supporting types live in `service/parse`: `XhtmlBlockHandler` recovers tables from the SAX events Tika emits for DOCX, XLSX, PPTX and HTML, and `TableChunker` renders a table as Markdown, splitting it between rows and repeating the header on every piece so no chunk holds values without their column names.
 - **`DocumentIngestionService.java`**: Takes the parsed document stream, enriches it with metadata, and ingests the chunks into the PgVector store.
 - **`DocumentMetadataService.java`**: Orchestrates the entire document upload and processing workflow. It creates metadata records, calls the parser and ingestion services, and updates the document status (e.g., `INDEXED`, `FAILED`). It also handles document deletion.
 - **`DocumentHistoryService.java`**: Records the history of document processing statuses.
@@ -103,8 +103,8 @@ This file contains the primary configuration for the `dev` profile:
 
 1.  A file is uploaded via the `DocumentController`.
 2.  `DocumentMetadataService` creates an initial metadata record.
-3.  `DocumentParserService` parses the file into paragraphs using a parallel stream running in the `documentProcessingPool`.
-4.  `DocumentIngestionService` takes the stream of paragraphs, splits them into smaller chunks, and adds them to the PgVector store.
+3.  `DocumentParserService` parses the file into prose and table blocks using a parallel stream running in the `documentProcessingPool`, then coalesces them into chunks. Prose blocks are grouped paragraph by paragraph up to the token budget; tables are emitted as their own chunks and never merged with the prose around them.
+4.  `DocumentIngestionService` takes the stream of chunks, enriches their metadata, and adds them to the PgVector store.
 5.  `DocumentMetadataService` updates the document status to `INDEXED` or `FAILED`.
 
 ### 6.2. Chat

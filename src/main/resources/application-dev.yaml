@@ -123,6 +123,8 @@ app:
     min-chunk-size-chars: 150
     min-chunk-length-to-embed: 100   # characters; the only floor that actually drops tiny chunks
     max-num-chunks: 10000
+    max-embed-tokens: 2048       # nomic-embed-text's context; a chunk above this is truncated by Ollama
+                                 # before embedding, so only an unsplittable table row may exceed it
     top-k: 5
     similarity-threshold: 0.6
     batch-size: 50               # chunks per batch; cost scales with TOKENS, and coalescing made

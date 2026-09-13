@@ -2,13 +2,16 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.exception.DocumentProcessingException;
-import com.knuddels.jtokkit.Encodings;
-import com.knuddels.jtokkit.api.Encoding;
-import com.knuddels.jtokkit.api.EncodingType;
+import com.example.subhanmishra.service.parse.ChunkMetadata;
+import com.example.subhanmishra.service.parse.ContentBlock;
+import com.example.subhanmishra.service.parse.TableChunker;
+import com.example.subhanmishra.service.parse.TokenCounter;
+import com.example.subhanmishra.service.parse.XhtmlBlockHandler;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.reader.ExtractedTextFormatter;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
@@ -20,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -36,14 +40,6 @@ public class DocumentParserService {
     // A regex for splitting by one or more blank lines (which separate paragraphs).
     private final static Pattern PARAGRAPH_PATTERN = Pattern.compile("\\n\\s*\\n");
 
-    /**
-     * The same tokenizer TokenTextSplitter uses by default, so the budget counted here and the budget
-     * the splitter enforces cannot drift apart. jtokkit encodings are stateless and safe to share
-     * across the threads of documentProcessingPool.
-     */
-    private final static Encoding ENCODING =
-            Encodings.newDefaultEncodingRegistry().getEncoding(EncodingType.CL100K_BASE);
-
     private final TextSplitter textSplitter;
     private final ForkJoinPool documentProcessingPool;
     private final RagProperties ragProperties;
@@ -52,6 +48,14 @@ public class DocumentParserService {
         this.textSplitter = textSplitter;
         this.documentProcessingPool = documentProcessingPool;
         this.ragProperties = ragProperties;
+    }
+
+    /**
+     * One unit of source content that chunking may not span: a single PDF page, or a whole Tika document.
+     * Its metadata is inherited by every chunk produced from it, which is why groups may never cross the
+     * boundary - chunk metadata carries {@code pageNumber} and the system prompt asks the model to cite it.
+     */
+    private record SourceUnit(List<ContentBlock> blocks, Map<String, Object> metadata) {
     }
 
     public Map<String, Object> parse(MultipartFile file) {
@@ -89,6 +93,13 @@ public class DocumentParserService {
 
     }
 
+    /**
+     * PDFs still go through {@code PagePdfDocumentReader}, which yields flat page text with no structure,
+     * so every page becomes a single prose block. Recovering tables from a PDF means reconstructing them
+     * from glyph positions, which is separate work; routing PDFs through Tika instead would not help,
+     * because Tika's default PDF handler has no table support either and its marked-content handler works
+     * only on tagged PDFs.
+     */
     private Map<String, Object> parsePdf(Resource resource) {
 
         PdfDocumentReaderConfig config = PdfDocumentReaderConfig.builder()
@@ -99,20 +110,39 @@ public class DocumentParserService {
         PagePdfDocumentReader documentReader = new PagePdfDocumentReader(resource, config);
         List<Document> pageDocs = documentReader.get();
 
-        // Strategy: Split by paragraph, then by token, to preserve semantic context.
-        Stream<Document> chunkStream = splitIntoParagraphsAndThenChunks(pageDocs);
-        return Map.of("documentStream", chunkStream, "totalPages", pageDocs.size());
+        List<SourceUnit> units = pageDocs.stream()
+                                         .map(page -> new SourceUnit(List.of(new ContentBlock.Prose(page.getText())),
+                                                                     page.getMetadata()))
+                                         .toList();
+
+        return Map.of("documentStream", chunk(units), "totalPages", pageDocs.size());
     }
 
+    /**
+     * Everything that is not a PDF is read through Tika, but with our own SAX handler in place of the
+     * {@code BodyContentHandler} that {@code TikaDocumentReader} defaults to. Tika already recovers table
+     * structure from DOCX, XLSX, PPTX and HTML; the default handler simply discards the markup.
+     */
     private Map<String, Object> parseGenericFile(Resource resource) {
-        TikaDocumentReader tikaDocumentReader = new TikaDocumentReader(resource);
-        List<Document> documents = tikaDocumentReader.get();
-        Stream<Document> chunkStream = splitIntoParagraphsAndThenChunks(documents);
-        // For generic files, we consider it as a single "page"
-        return Map.of("documentStream", chunkStream, "totalPages", documents.size());
+        XhtmlBlockHandler blockHandler = new XhtmlBlockHandler();
+
+        // Called for its side effect: get() runs Tika's AutoDetectParser and feeds the SAX events to our
+        // handler. The Document it returns is built from handler.toString() and is of no use here - the
+        // blocks the handler collected are what we want.
+        new TikaDocumentReader(resource, blockHandler, ExtractedTextFormatter.defaults()).get();
+
+        List<ContentBlock> blocks = blockHandler.blocks();
+        long tableCount = blocks.stream().filter(ContentBlock.Table.class::isInstance).count();
+        log.info("Tika produced {} block(s) for {}, {} of them tables", blocks.size(), resource.getFilename(), tableCount);
+
+        Map<String, Object> sourceMetadata = Map.of(TikaDocumentReader.METADATA_SOURCE,
+                                                    resource.getFilename() != null ? resource.getFilename() : "document");
+
+        // Tika reads the file as a whole, so there is exactly one "page".
+        return Map.of("documentStream", chunk(List.of(new SourceUnit(blocks, sourceMetadata))), "totalPages", 1);
     }
 
-    private Stream<Document> splitIntoParagraphsAndThenChunks(List<Document> documents) {
+    private Stream<Document> chunk(List<SourceUnit> units) {
         try {
             // To correctly use the custom thread pool, the entire parallel stream operation
             // must be submitted as a task. Calling .parallelStream() by itself would use the
@@ -120,16 +150,10 @@ public class DocumentParserService {
             // We collect the results into a list within the pool to ensure the stream is fully
             // processed before returning.
             List<Document> chunks = documentProcessingPool.submit(() ->
-                    documents.parallelStream() // This will now execute within the documentProcessingPool
-                            // Join consecutive paragraphs until they fill the token budget. Splitting by
-                            // paragraph alone left every short paragraph as its own chunk, so chunk-size
-                            // was never reached and retrieval saw single-word fragments.
-                            .flatMap(doc -> coalesceParagraphs(doc).stream())
-                            .flatMap(groupDoc ->
-                                    // Only groups that still exceed the budget get cut here; the rest pass through.
-                                    textSplitter.apply(List.of(groupDoc)).stream()
-                            )
-                            .collect(Collectors.toList()) // Execute the stream and collect results
+                    units.parallelStream() // This will now execute within the documentProcessingPool
+                         .flatMap(unit -> coalesceBlocks(unit.blocks(), unit.metadata()).stream())
+                         .flatMap(this::splitIfOverBudget)
+                         .collect(Collectors.toList()) // Execute the stream and collect results
             ).get();
 
             return chunks.stream(); // Return a new stream over the collected chunks
@@ -141,33 +165,112 @@ public class DocumentParserService {
     }
 
     /**
-     * Groups the paragraphs of one source document into units that fill {@code app.rag.chunk-size} tokens.
-     * <p>
-     * Grouping never spans source documents: {@code PagePdfDocumentReader} emits one document per page, so
-     * every group inherits exactly one page's metadata. That matters beyond tidiness - chunk metadata
-     * carries {@code pageNumber}, and the system prompt asks the model to cite page numbers, so merging
-     * across pages would produce wrong citations.
-     *
-     * @param source one page (or one Tika document) to group the paragraphs of
-     * @return budgeted groups, in reading order, each carrying the source's metadata
+     * Only prose still needs the splitter, and only when coalescing could not keep it under budget. A table
+     * chunk is already final: {@code TokenTextSplitter} would cut its Markdown at some sentence-like
+     * boundary partway through a row and would not repeat the header on the remainder, which is precisely
+     * the failure the table path exists to prevent.
      */
-    List<Document> coalesceParagraphs(Document source) {
-        List<Document> groups = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        int currentTokens = 0;
+    private Stream<Document> splitIfOverBudget(Document chunk) {
+        if (ChunkMetadata.TABLE.equals(chunk.getMetadata().get(ChunkMetadata.BLOCK_TYPE))) {
+            return Stream.of(chunk);
+        }
+        return textSplitter.apply(List.of(chunk)).stream();
+    }
 
-        for (String paragraph : PARAGRAPH_PATTERN.split(source.getText())) {
-            if (paragraph.isBlank()) {
-                continue;
+    /**
+     * Groups one source unit's blocks into chunks that fill {@code app.rag.chunk-size} tokens.
+     * <p>
+     * Prose is coalesced paragraph by paragraph until the next paragraph would overflow the budget -
+     * without this, every short paragraph became its own chunk and the configured chunk size was never
+     * reached. A table interrupts that run: the open prose group is closed first, then the table is emitted
+     * as its own chunk, or its own run of chunks split between rows with the header repeated on each.
+     * Prose and table content therefore never share a chunk, so a table is never truncated by the prose
+     * that happened to follow it.
+     *
+     * @param blocks         the blocks of one page or one Tika document, in reading order
+     * @param sourceMetadata metadata carried onto every chunk produced from this unit
+     */
+    List<Document> coalesceBlocks(List<ContentBlock> blocks, Map<String, Object> sourceMetadata) {
+        List<Document> chunks = new ArrayList<>();
+        ProseGroups prose = new ProseGroups(chunks, sourceMetadata, ragProperties.chunkSize());
+        int tableIndex = 0;
+
+        for (ContentBlock block : blocks) {
+            switch (block) {
+                case ContentBlock.Prose paragraphs -> {
+                    for (String paragraph : PARAGRAPH_PATTERN.split(paragraphs.text())) {
+                        prose.add(paragraph);
+                    }
+                }
+                case ContentBlock.Table table -> {
+                    prose.flush();
+                    chunks.addAll(renderTable(table, tableIndex++, sourceMetadata));
+                }
             }
-            int tokens = ENCODING.countTokens(paragraph);
+        }
+        prose.flush();
+
+        log.debug("Coalesced {} block(s) into {} chunk(s) on thread: {}",
+                  blocks.size(), chunks.size(), Thread.currentThread().getName());
+        return chunks;
+    }
+
+    /** Retained for the prose-only case: one flat document in, budgeted prose groups out. */
+    List<Document> coalesceParagraphs(Document source) {
+        return coalesceBlocks(List.of(new ContentBlock.Prose(source.getText())), source.getMetadata());
+    }
+
+    private List<Document> renderTable(ContentBlock.Table table, int tableIndex, Map<String, Object> sourceMetadata) {
+        List<TableChunker.TableChunk> pieces =
+                TableChunker.chunk(table, ragProperties.chunkSize(), ragProperties.maxEmbedTokens());
+
+        List<Document> documents = new ArrayList<>(pieces.size());
+        for (TableChunker.TableChunk piece : pieces) {
+            Map<String, Object> metadata = new HashMap<>(sourceMetadata);
+            metadata.put(ChunkMetadata.BLOCK_TYPE, ChunkMetadata.TABLE);
+            metadata.put(ChunkMetadata.TABLE_INDEX, tableIndex);
+            if (piece.lastRow() > 0) {
+                metadata.put(ChunkMetadata.TABLE_ROWS, piece.firstRow() + "-" + piece.lastRow());
+            }
+            documents.add(new Document(piece.markdown(), metadata));
+        }
+
+        if (documents.size() > 1) {
+            log.debug("Table {} of {} rows split into {} chunks, header repeated on each",
+                      tableIndex, table.rows().size(), documents.size());
+        }
+        return documents;
+    }
+
+    /**
+     * Accumulates paragraphs into budgeted prose chunks. A mutable helper rather than inline state because
+     * a table can interrupt the run at any point and force the open group closed.
+     */
+    private static final class ProseGroups {
+
+        private final List<Document> out;
+        private final Map<String, Object> sourceMetadata;
+        private final int budgetTokens;
+
+        private final StringBuilder current = new StringBuilder();
+        private int currentTokens;
+
+        private ProseGroups(List<Document> out, Map<String, Object> sourceMetadata, int budgetTokens) {
+            this.out = out;
+            this.sourceMetadata = sourceMetadata;
+            this.budgetTokens = budgetTokens;
+        }
+
+        private void add(String paragraph) {
+            if (paragraph.isBlank()) {
+                return;
+            }
+            int tokens = TokenCounter.count(paragraph);
 
             // Close the current group rather than overshoot. A paragraph bigger than the whole budget
             // lands in a group of its own, and textSplitter cuts it just as it did before.
-            if (currentTokens > 0 && currentTokens + tokens > ragProperties.chunkSize()) {
-                groups.add(new Document(current.toString(), source.getMetadata()));
-                current.setLength(0);
-                currentTokens = 0;
+            if (currentTokens > 0 && currentTokens + tokens > budgetTokens) {
+                flush();
             }
 
             if (!current.isEmpty()) {
@@ -177,11 +280,15 @@ public class DocumentParserService {
             currentTokens += tokens;
         }
 
-        if (!current.isEmpty()) {
-            groups.add(new Document(current.toString(), source.getMetadata()));
+        private void flush() {
+            if (current.isEmpty()) {
+                return;
+            }
+            Map<String, Object> metadata = new HashMap<>(sourceMetadata);
+            metadata.put(ChunkMetadata.BLOCK_TYPE, ChunkMetadata.PROSE);
+            out.add(new Document(current.toString(), metadata));
+            current.setLength(0);
+            currentTokens = 0;
         }
-
-        log.debug("Coalesced page into {} chunk group(s) on thread: {}", groups.size(), Thread.currentThread().getName());
-        return groups;
     }
 }

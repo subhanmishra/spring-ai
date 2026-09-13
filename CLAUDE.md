@@ -42,7 +42,9 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │   ├── exception
 │   │   │   ├── repository
 │   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
-│   │   │                   # DocumentMetadataService, DocumentHistoryService
+│   │   │       │           # DocumentMetadataService, DocumentHistoryService
+│   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockHandler,
+│   │   │                   # TableChunker, TokenCounter, ChunkMetadata
 │   │   └── resources
 │   │       ├── application.yaml       # sets active profile to dev
 │   │       ├── application-dev.yaml   # datasource; pgvector store; Ollama (embedding + chat);
@@ -74,9 +76,18 @@ Key Java config:
 
 ## Core workflows
 
-**Document upload**: `DocumentController` → `DocumentMetadataService` creates metadata record → `DocumentParserService` splits into paragraphs, coalesces them to the token budget, then token-chunks, in parallel on `documentProcessingPool` → `DocumentIngestionService` enriches chunk metadata and writes to pgvector → status updated to `INDEXED`/`FAILED`. `DocumentHistoryService` records each status change as history. `DocumentMetadataService` also handles document deletion.
+**Document upload**: `DocumentController` → `DocumentMetadataService` creates metadata record → `DocumentParserService` recovers a list of `ContentBlock`s from the file, coalesces them to the token budget, then token-chunks the prose, in parallel on `documentProcessingPool` → `DocumentIngestionService` enriches chunk metadata and writes to pgvector → status updated to `INDEXED`/`FAILED`. `DocumentHistoryService` records each status change as history. `DocumentMetadataService` also handles document deletion.
 
 The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserService.parse()` returns a `Map<String, Object>` holding a `documentStream` (`Stream<Document>`) plus `totalPages`, and `DocumentIngestionService.ingest()` consumes it, enriching metadata lazily and partitioning it into batches of `app.rag.batch-size` chunks. Chunk count is therefore only known after the stream is drained, which is why `totalPages` is carried separately rather than derived from the chunk list.
+
+**The parser's intermediate representation is `List<ContentBlock>`, not `String`.** `ContentBlock` is sealed over `Prose` and `Table`, and that distinction is what keeps a table intact:
+
+- **Tables are recovered, not flattened.** Tika already reconstructs `<table><tr><td>` from DOCX, XLSX, PPTX and HTML; `TikaDocumentReader`'s default `BodyContentHandler` throws the markup away. `XhtmlBlockHandler` is passed to its three-argument constructor instead and consumes the same SAX events, so the structure survives. `TikaDocumentReader.get()` is called purely for that side effect — the `Document` it returns is built from `handler.toString()` and is discarded. The handler ignores everything outside `<body>`, which is the one thing `BodyContentHandler` was doing that still matters: without it Tika's `<head><title>` is prepended to the first prose chunk.
+- **PDFs are still parsed by `PagePdfDocumentReader`, one prose block per page.** Routing them through Tika would not help: Tika's default `PDF2XHTML` has no table handling at all, and `PDFMarkedContent2XHTML` (`PDFParserConfig.setExtractMarkedContent(true)`) needs a tagged PDF — `src/main/resources/docs/spring-boot-reference.pdf`, the 645-page test corpus, has no `/StructTreeRoot`. Moving PDFs to Tika would also cost the per-page `Document` split that `pageNumber` citations and the never-coalesce-across-pages rule depend on, and would materialise the whole file as one string.
+- **A table is atomic and never shares a chunk with prose.** Hitting a `Table` block closes the open prose group first. The table is rendered as a Markdown pipe table and, when it exceeds `chunk-size`, split **between rows with the caption, header row and separator repeated on every piece** — rows in a later chunk with no header are the most common way a grounded answer misreads a table. Chunks carry `blockType`, `tableIndex` and `tableRows` metadata.
+- **Table chunks must bypass `TokenTextSplitter`.** `splitIfOverBudget` checks `blockType` and passes tables through untouched; sending one to the splitter would cut the Markdown partway through a row and not repeat the header, which is exactly what the table path exists to prevent. A side effect worth knowing: `min-chunk-length-to-embed` therefore does not apply to tables, so a small table is not discarded.
+- **`app.rag.max-embed-tokens` (2048) is the embedding model's context, not a chunking target.** Only a single table row too wide to split can reach it; `TableChunker` logs a warning and emits the row whole rather than separating values from their header, so the stored text is complete while its vector comes from Ollama's server-side truncation.
+- Known, deliberate limitations: `colspan`/`rowspan` are not expanded, and a nested table is flattened into the containing cell.
 
 **`app.rag.chunk-size` is a budget the parser fills, not a cap it happens to hit.** `DocumentParserService.coalesceParagraphs()` joins consecutive paragraphs until adding the next would exceed the budget. Without this step the earlier pipeline called `textSplitter.apply()` on each paragraph *individually*, so any paragraph under the budget passed through untouched and the effective chunk size was the paragraph size — a 645-page manual produced 7,289 chunks with a **median of 27 tokens** against a configured 400, 14% of them under 10 tokens (single words like `• WARN`). Things to know before touching it:
 
