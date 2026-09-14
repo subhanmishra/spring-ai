@@ -63,7 +63,11 @@ public class SpringAiConfig {
         return TokenTextSplitter.builder()
                 .withChunkSize(ragProperties.chunkSize())
                 .withMinChunkSizeChars(ragProperties.minChunkSizeChars())
-                .withMinChunkLengthToEmbed(ragProperties.minChunkLengthToEmbed())
+                // Deliberately 1, not app.rag.min-chunk-length-to-embed. TokenTextSplitter enforces that
+                // floor by DISCARDING a short piece, and the short pieces are ones it manufactures by
+                // cutting an over-budget chunk - which silently deleted real content. The floor is applied
+                // in DocumentParserService instead, by merging a short piece into the one before it.
+                .withMinChunkLengthToEmbed(1)
                 .withMaxNumChunks(ragProperties.maxNumChunks())
                 .withKeepSeparator(true)
                 .build();

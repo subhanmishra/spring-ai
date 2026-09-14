@@ -45,6 +45,9 @@ public class DocumentParserService {
     // A regex for splitting by one or more blank lines (which separate paragraphs).
     private final static Pattern PARAGRAPH_PATTERN = Pattern.compile("\\n\\s*\\n");
 
+    /** What paragraphs are re-joined with inside a group; must stay matched to PARAGRAPH_PATTERN. */
+    private final static String PARAGRAPH_SEPARATOR = "\n\n";
+
     private final TextSplitter textSplitter;
     private final ForkJoinPool documentProcessingPool;
     private final RagProperties ragProperties;
@@ -179,11 +182,41 @@ public class DocumentParserService {
      * boundary partway through a row and would not repeat the header on the remainder, which is precisely
      * the failure the table path exists to prevent.
      */
-    private Stream<Document> splitIfOverBudget(Document chunk) {
+    // Package-private so the chunking tests can drive the splitter path directly.
+    Stream<Document> splitIfOverBudget(Document chunk) {
         if (ChunkMetadata.TABLE.equals(chunk.getMetadata().get(ChunkMetadata.BLOCK_TYPE))) {
             return Stream.of(chunk);
         }
-        return textSplitter.apply(List.of(chunk)).stream();
+        return absorbShortPieces(textSplitter.apply(List.of(chunk))).stream();
+    }
+
+    /**
+     * Applies {@code app.rag.min-chunk-length-to-embed} by <em>merging</em> a short piece into the one
+     * before it, rather than deleting it.
+     * <p>
+     * {@code TokenTextSplitter} enforces that floor by discarding, and the pieces it discards are ones it
+     * manufactured itself: cutting an over-budget group leaves a remainder that is short precisely because
+     * it is a remainder. On an 8-page resume that silently deleted three whole skill lines - 68 tokens of
+     * real content, with nothing logged. The floor is meant to drop parser noise such as a stray {@code
+     * • WARN}, not content the splitter created by cutting. The splitter bean is therefore built with no
+     * floor of its own (see {@code SpringAiConfig}) and the decision is made here.
+     * <p>
+     * A single piece that is under the floor is kept: it is the whole of its block, so dropping it would
+     * lose content rather than tidy it.
+     */
+    private List<Document> absorbShortPieces(List<Document> pieces) {
+        List<Document> kept = new ArrayList<>(pieces.size());
+
+        for (Document piece : pieces) {
+            if (kept.isEmpty() || piece.getText().length() >= ragProperties.minChunkLengthToEmbed()) {
+                kept.add(piece);
+                continue;
+            }
+            Document previous = kept.removeLast();
+            kept.add(new Document(previous.getText() + PARAGRAPH_SEPARATOR + piece.getText(),
+                                  previous.getMetadata()));
+        }
+        return kept;
     }
 
     /**
@@ -270,23 +303,42 @@ public class DocumentParserService {
             this.budgetTokens = budgetTokens;
         }
 
+        /**
+         * The budget is measured on the <em>joined</em> text, never on the sum of the parts.
+         * <p>
+         * Summing each paragraph's own token count understates the group: joining paragraphs with a blank
+         * line adds tokens that the running total never sees. The error is only a few percent, but it was
+         * enough to put every multi-paragraph group just over the budget - 417, 415, 411 tokens against a
+         * configured 400 - and an over-budget group is re-split by {@code TokenTextSplitter}, which sheds
+         * a small trailing piece. That piece either became a chunk holding a single line or, when it fell
+         * under {@code min-chunk-length-to-embed}, was silently discarded: an 8-page resume lost three
+         * whole skill lines that way.
+         */
         private void add(String paragraph) {
             if (paragraph.isBlank()) {
                 return;
             }
-            int tokens = TokenCounter.count(paragraph);
+            int paragraphTokens = TokenCounter.count(paragraph);
+
+            if (current.isEmpty()) {
+                current.append(paragraph);
+                currentTokens = paragraphTokens;
+                return;
+            }
+
+            int joinedTokens = TokenCounter.count(current + PARAGRAPH_SEPARATOR + paragraph);
 
             // Close the current group rather than overshoot. A paragraph bigger than the whole budget
             // lands in a group of its own, and textSplitter cuts it just as it did before.
-            if (currentTokens > 0 && currentTokens + tokens > budgetTokens) {
+            if (joinedTokens > budgetTokens) {
                 flush();
+                current.append(paragraph);
+                currentTokens = paragraphTokens;
+                return;
             }
 
-            if (!current.isEmpty()) {
-                current.append("\n\n");
-            }
-            current.append(paragraph);
-            currentTokens += tokens;
+            current.append(PARAGRAPH_SEPARATOR).append(paragraph);
+            currentTokens = joinedTokens;
         }
 
         private void flush() {

@@ -1,8 +1,10 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.RagProperties;
+import com.example.subhanmishra.config.SpringAiConfig;
 import com.example.subhanmishra.service.parse.ChunkMetadata;
 import com.example.subhanmishra.service.parse.ContentBlock;
+import com.example.subhanmishra.service.parse.TokenCounter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -107,6 +109,69 @@ class DocumentParserServiceTest {
     @DisplayName("a document with no usable text produces no groups")
     void emptyDocumentProducesNoGroups() {
         assertThat(parserService.coalesceParagraphs(new Document("   \n\n   ", Map.of()))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a group's token count is measured on the joined text, so it never exceeds the budget")
+    void groupsNeverExceedTheBudget() {
+        // Many short paragraphs: summing their individual counts ignores the tokens the blank-line joins
+        // add, which used to push every group a few percent over budget.
+        List<ContentBlock> blocks = List.of(new ContentBlock.Prose(
+                java.util.stream.IntStream.rangeClosed(1, 80)
+                                          .mapToObj(i -> "Line number " + i + " of the section.")
+                                          .collect(java.util.stream.Collectors.joining("\n\n"))));
+
+        List<Document> chunks = parserService.coalesceBlocks(blocks, Map.of());
+
+        assertThat(chunks).hasSizeGreaterThan(1);
+        assertThat(chunks).allSatisfy(chunk ->
+                assertThat(TokenCounter.count(chunk.getText()))
+                        .as("chunk must fit the %d token budget", CHUNK_SIZE_TOKENS)
+                        .isLessThanOrEqualTo(CHUNK_SIZE_TOKENS));
+    }
+
+    @Test
+    @DisplayName("no paragraph is lost when prose is coalesced and split")
+    void noContentIsLostThroughTheWholePipeline() {
+        // Built with the app's own splitter configuration, because the content loss came from the
+        // interaction between the budget and the splitter's discard-below-floor behaviour.
+        RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
+                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2));
+        DocumentParserService service = new DocumentParserService(
+                new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
+
+        List<String> paragraphs = java.util.stream.IntStream.rangeClosed(1, 40)
+                                                            .mapToObj(i -> "Distinctive marker " + i + " appears exactly once here.")
+                                                            .toList();
+        List<ContentBlock> blocks = List.of(new ContentBlock.Prose(String.join("\n\n", paragraphs)));
+
+        String combined = String.join(" ", service.coalesceBlocks(blocks, Map.of())
+                                                  .stream()
+                                                  .flatMap(chunk -> service.splitIfOverBudget(chunk))
+                                                  .map(Document::getText)
+                                                  .toList());
+
+        assertThat(paragraphs).allSatisfy(paragraph ->
+                assertThat(combined).as("paragraph must survive chunking: %s", paragraph)
+                                    .contains(paragraph));
+    }
+
+    @Test
+    @DisplayName("a short trailing piece is merged into the chunk before it, never dropped")
+    void shortTailIsMergedNotDropped() {
+        RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
+                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2));
+        DocumentParserService service = new DocumentParserService(
+                new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
+
+        // One paragraph well over the budget, so the splitter has to cut it and will leave a remainder.
+        String oversized = "The quick brown fox jumps over the lazy dog. ".repeat(12) + "Tiny tail.";
+        List<Document> pieces = service.splitIfOverBudget(
+                new Document(oversized, Map.of(ChunkMetadata.BLOCK_TYPE, ChunkMetadata.PROSE))).toList();
+
+        assertThat(pieces).allSatisfy(piece ->
+                assertThat(piece.getText().length()).isGreaterThanOrEqualTo(appLike.minChunkLengthToEmbed()));
+        assertThat(String.join(" ", pieces.stream().map(Document::getText).toList())).contains("Tiny tail.");
     }
 
     @Test

@@ -41,7 +41,7 @@ Indexing behaviour is tuned under `app.rag.*` in `application-dev.yaml`:
 | Property | Default | Purpose |
 |---|---|---|
 | `chunk-size` | `400` | Target chunk size in **tokens**. Consecutive paragraphs are joined until adding the next would exceed it, so chunks actually reach this budget. Tables are chunked separately, by rows |
-| `min-chunk-length-to-embed` | `100` | Discards chunks shorter than this many **characters**. The only setting that drops anything — raise it if single-line noise is polluting retrieval |
+| `min-chunk-length-to-embed` | `100` | Chunks shorter than this many **characters** are merged into the chunk before them, never discarded. Raise it if single-line noise is polluting retrieval |
 | `min-chunk-size-chars` | `150` | Where the splitter looks for a sentence boundary when cutting an over-budget chunk. Not a minimum chunk length |
 | `max-embed-tokens` | `2048` | The embedding model's context. Only a single table row wider than this can exceed it, and the parser warns when one does |
 | `batch-size` | `50` | Chunks written to pgvector per batch. The cost it controls is *tokens*, so revisit it if you change `chunk-size` |
