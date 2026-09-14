@@ -135,8 +135,9 @@ app:
     ingestion-concurrency: 4
     ingestion-max-attempts: 3      # only for an unreachable Ollama model runner; other failures fail fast
     ingestion-retry-backoff: 2s    # doubled on each further attempt
-    table-detection: off          # off | auto | lattice | stream. AUTO picks per page: ruled pages take
-                                 # columns from the rules, unruled ones from text alignment. Enabling this
-                                 # replaces the PDF reader entirely, so prose extraction changes too.
+    table-detection: auto         # off | auto | lattice | stream. AUTO picks per page: ruled pages take
+                                 # columns from the rules, unruled ones from text alignment. This replaces
+                                 # the PDF reader entirely, so prose extraction changes too - documents
+                                 # ingested before it was turned on need re-uploading.
   ai: # New section for Spring AI properties
     max-chat-messages: 10
