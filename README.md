@@ -44,7 +44,7 @@ Indexing behaviour is tuned under `app.rag.*` in `application-dev.yaml`:
 | `min-chunk-length-to-embed` | `100` | Chunks shorter than this many **characters** are merged into the chunk before them, never discarded. Raise it if single-line noise is polluting retrieval |
 | `min-chunk-size-chars` | `150` | Where the splitter looks for a sentence boundary when cutting an over-budget chunk. Not a minimum chunk length |
 | `max-embed-tokens` | `2048` | The embedding model's context. Only a single table row wider than this can exceed it, and the parser warns when one does |
-| `batch-size` | `50` | Chunks written to pgvector per batch. The cost it controls is *tokens*, so revisit it if you change `chunk-size` |
+| `batch-size` | `35` | Chunks written to pgvector per batch. The cost it controls is *tokens* (~10k per batch at the current mean), so revisit it if you change `chunk-size` |
 | `ingestion-concurrency` | `4` | Batches written in parallel. Must stay well below `spring.datasource.hikari.maximum-pool-size` |
 | `top-k` / `similarity-threshold` | `5` / `0.6` | Retrieval settings used by the chat endpoints |
 

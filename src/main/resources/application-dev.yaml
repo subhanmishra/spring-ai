@@ -127,8 +127,10 @@ app:
                                  # before embedding, so only an unsplittable table row may exceed it
     top-k: 5
     similarity-threshold: 0.6
-    batch-size: 50               # chunks per batch; cost scales with TOKENS, and coalescing made
-                                 # chunks ~4.7x heavier, so 50 now carries ~10k tokens
+    batch-size: 35               # chunks per batch; cost scales with TOKENS, not chunk count. At the
+                                 # current mean of 279 tokens/chunk this carries ~10k tokens per batch,
+                                 # the weight the Hikari pool was sized against. Re-check it whenever
+                                 # chunk sizing changes.
     ingestion-concurrency: 4
     ingestion-max-attempts: 3      # only for an unreachable Ollama model runner; other failures fail fast
     ingestion-retry-backoff: 2s    # doubled on each further attempt
