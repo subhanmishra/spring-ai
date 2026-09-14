@@ -35,3 +35,7 @@ build/
 
 ### Claude Code ###
 .claude/
+
+### Sample documents ###
+# Test corpus for the ingestion pipeline; large binaries, kept out of the repo.
+src/main/resources/docs/
