@@ -36,6 +36,40 @@ class XhtmlBlockParserTest {
     }
 
     @Test
+    @DisplayName("a self-closing <title/> does not swallow the document")
+    void selfClosingTitleDoesNotSwallowTheBody() {
+        // Tika emits <title/> whenever the source has no title metadata, which most DOCX, XLSX and PPTX
+        // files do not. Read as HTML, `title` is an RCDATA element that cannot self-close, so the parser
+        // treats it as an unclosed <title> and consumes the rest of the file as its text - which silently
+        // truncated an 8-page resume to its last 1,358 characters. The body must survive intact.
+        StringBuilder xhtml = new StringBuilder("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+                                                + "<meta name=\"dc:creator\" content=\"Someone\"/>"
+                                                + "<title/></head><body>");
+        for (int i = 1; i <= 60; i++) {
+            xhtml.append("<p>Paragraph number ").append(i).append(" of the document body.</p>");
+        }
+        xhtml.append("<p/></body></html>");
+
+        List<ContentBlock> blocks = XhtmlBlockParser.parse(xhtml.toString());
+
+        assertThat(blocks).hasSize(1);
+        ContentBlock.Prose prose = (ContentBlock.Prose) blocks.getFirst();
+        assertThat(prose.text()).startsWith("Paragraph number 1 of the document body.");
+        assertThat(prose.text()).contains("Paragraph number 60 of the document body.");
+        assertThat(prose.text().lines().filter(line -> line.startsWith("Paragraph number"))).hasSize(60);
+        assertThat(prose.text()).doesNotContain("Someone");
+    }
+
+    @Test
+    @DisplayName("an empty self-closing paragraph is skipped without breaking the rest")
+    void selfClosingEmptyParagraphIsHarmless() {
+        List<ContentBlock> blocks = XhtmlBlockParser.parse(
+                "<html><body><p>Before.</p><p/><p>After.</p></body></html>");
+
+        assertThat(blocks).containsExactly(new ContentBlock.Prose("Before.\n\nAfter."));
+    }
+
+    @Test
     @DisplayName("the document title is not read as content")
     void headIsIgnored() {
         List<ContentBlock> blocks = XhtmlBlockParser.parse("""
