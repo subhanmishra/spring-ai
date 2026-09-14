@@ -121,7 +121,8 @@ app:
   rag:
     chunk-size: 400
     min-chunk-size-chars: 150
-    min-chunk-length-to-embed: 100   # characters; the only floor that actually drops tiny chunks
+    min-chunk-length-to-embed: 100   # characters; a shorter chunk is MERGED into the one before it, never
+                                     # dropped - the splitter's own discard behaviour deleted real content
     max-num-chunks: 10000
     max-embed-tokens: 2048       # nomic-embed-text's context; a chunk above this is truncated by Ollama
                                  # before embedding, so only an unsplittable table row may exceed it
@@ -134,5 +135,8 @@ app:
     ingestion-concurrency: 4
     ingestion-max-attempts: 3      # only for an unreachable Ollama model runner; other failures fail fast
     ingestion-retry-backoff: 2s    # doubled on each further attempt
+    table-detection: off          # off | auto | lattice | stream. AUTO picks per page: ruled pages take
+                                 # columns from the rules, unruled ones from text alignment. Enabling this
+                                 # replaces the PDF reader entirely, so prose extraction changes too.
   ai: # New section for Spring AI properties
     max-chat-messages: 10

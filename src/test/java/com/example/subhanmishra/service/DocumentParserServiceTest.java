@@ -40,7 +40,7 @@ class DocumentParserServiceTest {
     @BeforeEach
     void setUp() {
         RagProperties ragProperties = new RagProperties(CHUNK_SIZE_TOKENS, 150, 5, 10000, CEILING_TOKENS, 5, 0.6,
-                                                        200, 4, 3, Duration.ofSeconds(2));
+                                                        200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
         parserService = new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), ragProperties);
     }
 
@@ -136,7 +136,7 @@ class DocumentParserServiceTest {
         // Built with the app's own splitter configuration, because the content loss came from the
         // interaction between the budget and the splitter's discard-below-floor behaviour.
         RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2));
+                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
         DocumentParserService service = new DocumentParserService(
                 new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 
@@ -160,7 +160,7 @@ class DocumentParserServiceTest {
     @DisplayName("a short trailing piece is merged into the chunk before it, never dropped")
     void shortTailIsMergedNotDropped() {
         RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2));
+                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
         DocumentParserService service = new DocumentParserService(
                 new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 

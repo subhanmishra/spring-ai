@@ -7,6 +7,8 @@ import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TableChunker;
 import com.example.subhanmishra.service.parse.TokenCounter;
 import com.example.subhanmishra.service.parse.XhtmlBlockParser;
+import com.example.subhanmishra.service.parse.pdf.PdfBlockReader;
+import com.example.subhanmishra.service.parse.pdf.PdfTableDetector;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,13 +104,15 @@ public class DocumentParserService {
     }
 
     /**
-     * PDFs still go through {@code PagePdfDocumentReader}, which yields flat page text with no structure,
-     * so every page becomes a single prose block. Recovering tables from a PDF means reconstructing them
-     * from glyph positions, which is separate work; routing PDFs through Tika instead would not help,
-     * because Tika's default PDF handler has no table support either and its marked-content handler works
-     * only on tagged PDFs.
+     * With {@code app.rag.table-detection} off, PDFs go through {@code PagePdfDocumentReader}, which yields
+     * flat page text with no structure, so every page becomes a single prose block. Routing them through
+     * Tika instead would not help: Tika's default PDF handler has no table support either, and its
+     * marked-content handler works only on tagged PDFs, which neither sample document is.
      */
-    private Map<String, Object> parsePdf(Resource resource) {
+    private Map<String, Object> parsePdf(Resource resource) throws IOException {
+        if (ragProperties.tableDetection() != RagProperties.TableDetection.OFF) {
+            return parsePdfWithTableDetection(resource);
+        }
 
         PdfDocumentReaderConfig config = PdfDocumentReaderConfig.builder()
                 .withPageBottomMargin(0)
@@ -124,6 +128,38 @@ public class DocumentParserService {
                                          .toList();
 
         return Map.of("documentStream", chunk(units), "totalPages", pageDocs.size());
+    }
+
+    /**
+     * Reads the PDF from its page geometry instead, so a table's columns survive. {@code PDFTextStripper}
+     * pads the gaps between cells with spaces before {@code PagePdfDocumentReader} ever sees the page, by
+     * which point the columns cannot be recovered.
+     */
+    private Map<String, Object> parsePdfWithTableDetection(Resource resource) throws IOException {
+        PdfTableDetector.Mode forced = switch (ragProperties.tableDetection()) {
+            case LATTICE -> PdfTableDetector.Mode.LATTICE;
+            case STREAM -> PdfTableDetector.Mode.STREAM;
+            default -> null;
+        };
+
+        List<PdfBlockReader.Page> pages;
+        try (var stream = resource.getInputStream()) {
+            pages = PdfBlockReader.read(stream, forced);
+        }
+
+        List<SourceUnit> units = pages.stream()
+                                      .map(page -> new SourceUnit(page.blocks(),
+                                                                  Map.of("page_number", page.pageNumber())))
+                                      .toList();
+
+        long tables = pages.stream()
+                           .flatMap(page -> page.blocks().stream())
+                           .filter(ContentBlock.Table.class::isInstance)
+                           .count();
+        log.info("Read {} page(s) of {} with table detection {}, recovering {} table(s)",
+                 pages.size(), resource.getFilename(), ragProperties.tableDetection(), tables);
+
+        return Map.of("documentStream", chunk(units), "totalPages", pages.size());
     }
 
     /**
