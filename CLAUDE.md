@@ -145,6 +145,14 @@ The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserS
 
 **Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
 
+Conversations can be listed, read back one at a time and deleted individually. Three things about the read-back are load-bearing:
+
+- **There is no full transcript to read back, and there never was.** `MessageWindowChatMemory` trims to `app.ai.max-chat-messages` (10) inside `add()`, *before* `saveAll` — so Redis only ever holds the last 10 messages and older turns are unrecoverable by anything, not merely unexposed. Verified: 7 turns on one conversation leaves 10 messages, with the first two turns gone. `ConversationDto` reports `maxRetainedMessages` beside `messageCount` so a caller can tell a short conversation from a truncated one. Raising the limit costs a bigger prompt on every request, since the window is also what gets replayed to the model.
+- **`ChatService.getConversation` reads through `ChatMemoryRepository`, not `ChatMemory.get()`.** The two are identical today — `MessageWindowChatMemory.get()` just delegates to `findByConversationId` and windows only on write — but they answer different questions: the repository reports what is *stored*, `ChatMemory` what the next turn would be *given*. A memory implementation that windowed on read instead would silently truncate this endpoint.
+- **An empty result is reported as 404.** Redis keeps no tombstone, so a conversation that was cleared is indistinguishable from one that never existed; both read as absent. `DELETE` of a single conversation is idempotent by contrast and returns 204 either way.
+
+The bulk `DELETE /ai/conversations` still returns a bare `String` rather than 204, unlike the per-conversation delete beside it. Left as-is deliberately — changing it would break existing callers — but it is the odd one out.
+
 `DocumentController` is based at `/api/v1/documents`. Exact routes for all three controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
 
 **Retrieval diagnostics**: `AdminDiagnosticsController` (base `/api/v1/admin`) → `RetrievalDiagnosticsService` → the same `VectorStore` similarity search the chat path runs, reported with scores and metadata and no generation step. It exists to separate a retrieval failure from a generation failure, which nothing else in the app can do. Things to keep in mind:

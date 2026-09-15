@@ -1,5 +1,6 @@
 package com.example.subhanmishra.controller;
 
+import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -56,9 +57,32 @@ public class ChatController {
         return chatService.getAllConversationIds();
     }
 
+    @GetMapping("/conversations/{conversationId}")
+    @Operation(summary = "Read back one conversation",
+            description = "Returns the messages stored for a conversation, oldest first, so a client can "
+                    + "reload a chat it started earlier. Only the most recent messages survive: chat memory "
+                    + "trims to app.ai.max-chat-messages when it writes, so older turns are already gone from "
+                    + "Redis and cannot be recovered. The response reports that limit alongside the count, so "
+                    + "a short conversation can be told apart from a truncated one. 404 if nothing is stored "
+                    + "under the id - which is also how an already-cleared conversation reads.")
+    public ResponseEntity<ConversationDto> getConversation(@PathVariable String conversationId) {
+        return ResponseEntity.ok(chatService.getConversation(conversationId));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}")
+    @Operation(summary = "Delete one conversation",
+            description = "Drops a single conversation from chat memory, leaving every other conversation "
+                    + "intact. Idempotent: deleting an unknown or already-deleted conversation also returns "
+                    + "204 rather than 404.")
+    public ResponseEntity<Void> clearConversation(@PathVariable String conversationId) {
+        chatService.clearConversation(conversationId);
+        return ResponseEntity.noContent().build();
+    }
+
     @DeleteMapping("/conversations")
     @Operation(summary = "Clear all chat memory",
-            description = "Clears all stored chat conversations from memory.")
+            description = "Clears all stored chat conversations from memory. To drop just one, delete it by "
+                    + "id instead.")
     public String clearMemory() {
         return chatService.clearMemory();
     }

@@ -68,6 +68,8 @@ This automatically starts the containers defined in `compose.yaml` (pgvector, Re
 | GET | `/ai/generate` | Single-shot chat response. Query params: `prompt` (default `"Tell me a joke"`), `conversationId` (optional) |
 | GET | `/ai/generateStream` | Streaming chat response (SSE). Same query params as above |
 | GET | `/ai/conversations` | List all active conversation IDs |
+| GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
+| DELETE | `/ai/conversations/{id}` | Delete a single conversation |
 | DELETE | `/ai/conversations` | Clear all stored chat memory |
 
 Both generate endpoints return the conversation ID in an **`X-Conversation-Id`** response header — a freshly generated UUID when `conversationId` was not supplied. Pass it back on the next call to continue the same conversation.
@@ -80,7 +82,15 @@ curl -i "http://localhost:8080/ai/generate?prompt=Hello" | grep -i x-conversatio
 curl "http://localhost:8080/ai/generate?prompt=And%20what%20did%20I%20just%20ask?&conversationId=<id>"
 
 curl "http://localhost:8080/ai/generateStream?prompt=Tell%20me%20a%20story"
+
+# Reload a conversation, then drop just that one
+curl "http://localhost:8080/ai/conversations/<id>"
+curl -X DELETE "http://localhost:8080/ai/conversations/<id>"
 ```
+
+**Reading a conversation back does not give you the whole transcript.** Chat memory keeps a rolling window of the last `app.ai.max-chat-messages` messages (10 by default) and trims on *write*, so older turns are already gone from Redis and cannot be recovered — by anything. The response reports `maxRetainedMessages` next to `messageCount` so a client can tell a short conversation apart from a truncated one; a `messageCount` equal to the limit means earlier turns were discarded. Measured: after 7 turns (14 messages) on one conversation, 10 remain and the first two turns are unrecoverable. Raise `app.ai.max-chat-messages` if longer history matters — at the cost of a larger prompt on every request, since the window is also what gets replayed to the model.
+
+`GET` returns 404 when nothing is stored under the id, which is also how an already-cleared conversation reads — Redis keeps no tombstone to tell the two apart. `DELETE` of one conversation is idempotent and returns 204 whether or not the id existed.
 
 ### Documents (`/api/v1/documents`)
 
