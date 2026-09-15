@@ -254,8 +254,41 @@ public class DocumentIngestionService {
             if (pageNumber != null) {
                 newMetadata.put("pageNumber", pageNumber);
             }
-            return new Document(chunk.getText(), newMetadata);
+            return new Document(citationHeader(metadata.getFilename(), pageNumber) + chunk.getText(), newMetadata);
         });
+    }
+
+    /**
+     * Builds the citation line prepended to every chunk's text, e.g. {@code [manual.pdf, p. 590]}.
+     *
+     * <p>This is deliberately part of the chunk <em>text</em>, not just its metadata, because
+     * {@code QuestionAnswerAdvisor} builds the RAG context with {@code Document::getText} and discards
+     * metadata entirely - so a page number that lives only in metadata can never reach the model, and the
+     * system prompt's request to cite page numbers is unsatisfiable. Three call sites read {@code getText()}
+     * and all three are affected on purpose:
+     * <ul>
+     *   <li>{@code OllamaEmbeddingModel.embed(Document)} - the header is embedded along with the content;</li>
+     *   <li>{@code PgVectorStore} - the stored {@code content} column includes the header;</li>
+     *   <li>{@code QuestionAnswerAdvisor} - the header reaches the prompt, which is the point.</li>
+     * </ul>
+     *
+     * <p>Known costs, accepted when this was chosen over formatting the citation at prompt-assembly time:
+     * the filename is identical on every chunk, so a constant prefix on every vector compresses the spread
+     * between them (the measured top-5 band was 0.8194-0.7927 before this); the page number varies, adding a
+     * numeric signal unrelated to meaning; and the stored text is no longer verbatim what the document said,
+     * so anything reading chunks back must strip this line. Chunks written before this existed carry no
+     * header and cannot be cited - re-ingest a document to make its citations work.
+     */
+    private static String citationHeader(String fileName, Object pageNumber) {
+        // Tika sources (DOCX/XLSX/PPTX/HTML) have no page attribution, so the page half is omitted rather
+        // than written as a guess - a wrong citation is worse than an absent one.
+        String citation = pageNumber != null
+                ? "[%s, p. %s]".formatted(fileName, pageNumber)
+                : "[%s]".formatted(fileName);
+        // "\n\n", not System.lineSeparator(): this string is persisted in the vector store's content column
+        // and embedded, so letting it follow the host OS would make the stored corpus differ between a
+        // Windows dev machine (CRLF) and a Linux deployment for the same source document.
+        return citation + "\n\n";
     }
 
     // Helper method to partition a stream into batches
