@@ -91,6 +91,20 @@ spring:
                            # runner-startup race that concurrent batches would otherwise hit
       chat:
         model: llama3.2
+        # Nothing else bounds an answer: without num-predict the only stop condition is the context
+        # window, so a looping generation runs to (num-ctx - prompt) tokens. One request generated
+        # 13,468 tokens over 29 minutes before it was killed, holding the HTTP thread the whole time.
+        num-predict: 1024
+        # Ollama's API default is 1.1, but Spring AI sends no value unless one is set here, and
+        # llama.cpp's own default is 1.0 - i.e. repetition penalty DISABLED. The runaway above ran
+        # with `repeat_penalty = 1.000` in the sampler params. Do not remove this.
+        repeat-penalty: 1.1
+        # 8192, not the model's 16384: the KV cache is what made Ollama predict 3.6 GiB for this
+        # model and evict nomic-embed-text to fit it. Must stay well above the worst-case prompt -
+        # system prompt + top-k(5) chunks of up to 445 tokens + max-chat-messages(10) of history -
+        # because Ollama truncates an over-long prompt from the left, which silently drops the
+        # system prompt and the RAG context rather than failing.
+        num-ctx: 8192
     chat:
       # ChatModel-level: the FINAL prompt sent to Ollama, i.e. after QuestionAnswerAdvisor
       # has injected the retrieved document context. This is where the RAG context shows up.
