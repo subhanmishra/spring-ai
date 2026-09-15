@@ -474,7 +474,7 @@
     {
       "id": 23,
       "title": "Embedding throughput — nomic-embed-text (peak, 15m)",
-      "description": "Peak wall-clock embedding rate over the last 15 minutes. Embedding is bursty - it only runs while a document is ingesting (~190s) and is idle otherwise - so a plain live rate reads 0 whenever anyone actually looks at it, which is after an upload finishes. Taking the peak over 15m holds the figure long enough to be read. The inner window is 2m rather than 5m because a 5m window averages a 190s burst against surrounding idle and under-reports it: measured on the same ingestion, 5m peaked at 1599 tok/s where 2m saw 2026 and 1m saw 2189. 2m is the compromise - it fits inside a burst while still spanning 8 scrapes at the 15s scrape interval. This is deliberately wall-clock throughput, not per-request speed: ingestion runs app.rag.ingestion-concurrency requests at once against Ollama's single embedding slot, so dividing by summed request duration would understate it by roughly the concurrency factor. Hardware ceiling is ~830 tok/s on CPU and ~1750+ with OLLAMA_IGPU_ENABLE=1.",
+      "description": "Peak wall-clock embedding rate over the last 15 minutes. Embedding is bursty - it only runs while a document is ingesting (~190s) and is idle otherwise - so a plain live rate reads 0 whenever anyone actually looks at it, which is after an upload finishes. Taking the peak over 15m holds the figure long enough to be read. The inner window is 2m rather than 5m because a 5m window averages a 190s burst against surrounding idle and under-reports it: measured on the same ingestion, 5m peaked at 1599 tok/s where 2m saw 2026 and 1m saw 2189. 2m is the compromise - it fits inside a burst while still spanning 8 scrapes at the 15s scrape interval. This is deliberately wall-clock throughput, not per-request speed: ingestion runs app.rag.ingestion-concurrency requests at once against Ollama's single embedding slot, so dividing by summed request duration would understate it by roughly the concurrency factor. Hardware ceiling is ~830 tok/s on CPU and ~1750+ with OLLAMA_IGPU_ENABLE=1. The trailing '> 50' floor exists so that the single small query embedding every chat performs does not register: a ~16-token question spread over the 2m window reads 0.133 tok/s, which is visually indistinguishable from zero on this scale and implies embedding is running when nothing bulk is. The floor separates the two cleanly - even one ingestion batch (35 chunks, ~7.8k tokens) reads ~65 tok/s over a 2m window, and that holds on CPU too. Below the floor the series is empty and noValue renders 'idle'. Both this gauge and the chat one next to it must stay instant:true - as range queries reduced with lastNotNull they showed the last value the expression held anywhere in the dashboard's time window, so with a 3h window this panel displayed a stale 665 tok/s from an ingestion an hour earlier while nothing was running, contradicting its own title.",
       "type": "gauge",
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -499,7 +499,9 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "max_over_time(sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[2m]))[15m:30s]) > 0",
+          "expr": "max_over_time(sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[2m]))[15m:30s]) > 50",
+          "instant": true,
+          "range": false,
           "legendFormat": "tok/s",
           "refId": "A"
         }
@@ -534,6 +536,8 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"}[30m])) / sum(rate(gen_ai_client_operation_seconds_sum{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\"}[30m])) > 0",
+          "instant": true,
+          "range": false,
           "legendFormat": "tok/s",
           "refId": "A"
         }
