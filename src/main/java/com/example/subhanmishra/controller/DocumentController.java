@@ -55,7 +55,6 @@ public class DocumentController {
     @GetMapping
     @Operation(summary = "List all uploaded documents and their indexing status")
     public ResponseEntity<List<DocumentMetadataDto>> getAllDocuments() {
-        java.util.List<DocumentMetadataDto> documents = documentService.getAllDocuments();
         return ResponseEntity.ok(documentService.getAllDocuments());
     }
 
