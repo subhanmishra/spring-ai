@@ -36,13 +36,14 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   ├── java/.../subhanmishra/
 │   │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
 │   │   │   │               # ModelMapperConfig, RagProperties, SpringAiProperties
-│   │   │   ├── controller  # ChatController, DocumentController
+│   │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │   │   │   ├── dto
 │   │   │   ├── entity
 │   │   │   ├── exception
 │   │   │   ├── repository
 │   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
-│   │   │       │           # DocumentMetadataService, DocumentHistoryService
+│   │   │       │           # DocumentMetadataService, DocumentHistoryService,
+│   │   │       │           # RetrievalDiagnosticsService
 │   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
 │   │   │           │       # TableChunker, TokenCounter, ChunkMetadata
 │   │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
@@ -56,7 +57,9 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │       │                          # app.ai.* max chat-history messages
 │   │       ├── logback-spring.xml     # console + Loki appenders; traceId/spanId structured metadata
 │   │       └── db/migration/          # Flyway migrations (V1..V3, e.g. V3__Set_IST_Timezone.sql)
-│   └── test                           # only default SpringAiApplicationTests.java so far
+│   └── test                           # SpringAiApplicationTests (context load), plus parser tests:
+│                                      # DocumentParserServiceTest, XhtmlBlockParserTest,
+│                                      # TableChunkerTest, PdfTableDetectorTest
 ├── docker/                            # config for the observability stack (see below)
 │   ├── grafana/                       # grafana.ini + provisioning/{datasources,dashboards}
 │   ├── loki/
@@ -142,7 +145,15 @@ The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserS
 
 **Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
 
-`DocumentController` is based at `/api/v1/documents`. Exact routes for both controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
+`DocumentController` is based at `/api/v1/documents`. Exact routes for all three controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
+
+**Retrieval diagnostics**: `AdminDiagnosticsController` (base `/api/v1/admin`) → `RetrievalDiagnosticsService` → the same `VectorStore` similarity search the chat path runs, reported with scores and metadata and no generation step. It exists to separate a retrieval failure from a generation failure, which nothing else in the app can do. Things to keep in mind:
+
+- **Its search parameters must keep defaulting from `RagProperties`** — the same record `SpringAiConfig.chatClient` reads for the `QuestionAnswerAdvisor`'s `SearchRequest`. That shared source is the whole basis of the diagnostic being faithful; hardcoding `topK` or `similarityThreshold` here would let it drift from the thing it reports on. The response echoes the values actually in force so a caller can tell a default from an override.
+- **It does not reproduce chat memory.** `QuestionAnswerAdvisor` searches with the user's message as written, so a single-turn query matches exactly; a follow-up that only makes sense in context retrieves just as poorly here as it does there.
+- **`hasCitationHeader` is the only way to spot pre-header chunks.** Chunks written before `citationHeader()` existed cannot be cited and are otherwise indistinguishable, so the DTO splits the stored text into `citation` + `text` by matching the first line against `^\[...\]$` rather than splitting on the first `"\n\n"` — an unconditional split would eat a real first line from those older chunks.
+- The controller is `@Profile("dev")`, so outside the dev profile the bean is not registered and the paths 404. That is weaker than authentication; there is no Spring Security on the classpath, and when there is, this gate should be replaced rather than supplemented. Verified: under `--spring.profiles.active=prod` the admin path 404s while `/api/v1/documents` still answers.
+- It is also the first endpoint using `@Valid`, which is what finally makes `DocAiExceptionHandler.handleValidation` reachable — that handler had been dead code.
 
 ## Docker environment (`compose.yaml`)
 

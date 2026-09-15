@@ -100,6 +100,26 @@ Uploads are **synchronous** — the request does not return until the document i
 
 Indexing is all-or-nothing: if any batch fails, every chunk already written for that document is removed and the document is marked `FAILED`, so a failed upload never leaves partial content to be retrieved. Re-uploading is the way to retry. Maximum upload size is 25MB per file (`spring.servlet.multipart` in `application.yaml`).
 
+### Admin diagnostics (`/api/v1/admin`)
+
+Operator-facing checks against the live corpus. **Registered only under the `dev` profile** — outside it these paths do not exist. There is no authentication in front of them, so if the `dev` profile is ever run somewhere reachable, block the `/api/v1/admin` prefix at the proxy.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/admin/retrieval/search` | Show what the vector store returns for a query, without generating an answer |
+
+Retrieval search runs the same similarity search the chat path runs, so it tells a *retrieval* failure apart from a *generation* failure — whether the passage an answer needed was never retrieved, or was retrieved and ignored.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/admin/retrieval/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"what is a spring boot starter"}'
+```
+
+`topK` and `similarityThreshold` default to the configured `app.rag` values the chat path uses, and the response echoes back whichever were in force. Override them to see what the threshold is excluding — `{"query":"...","topK":20,"similarityThreshold":0.0}` returns the near misses. Pass `documentId` to restrict the search to one document.
+
+Each hit reports its `score` and the metadata written at ingestion time (`pageNumber`, `chunkIndex`, `blockType`, and for tables `tableIndex` / `tableRows`), plus `citation` and `text` — the two halves of the stored content. `hasCitationHeader: false` marks a chunk ingested before citation headers existed; the model cannot cite those, and re-ingesting the document is the fix.
+
 Full OpenAPI docs are available via springdoc once the app is running (default: `/swagger-ui.html`).
 
 ## Infrastructure (`compose.yaml`)
