@@ -27,6 +27,7 @@
     {
       "id": 2,
       "title": "JVM GC pause time (5m rate)",
+      "description": "Seconds of stop-the-world pause per second, split by cause. The legend must include {{cause}}: jvm_gc_pause_seconds carries both action and cause, and every series this app produces has action=\"end of minor GC\", so a legend of {{action}} alone rendered three different series under three identical labels. G1 Evacuation Pause is the normal young collection and should dominate. CodeCache GC Threshold is JIT code-cache pressure rather than heap pressure, and is normal during warm-up. G1 Humongous Allocation is the one worth watching: heap max is ~4 GiB so the G1 region size is 2 MiB, which makes any allocation of 1 MiB or more humongous - it skips the normal fast path and lands directly in contiguous old-gen regions. Document upload is the obvious source, since the test corpus arrives as a 13.6 MB byte[], so this series is a proxy for ingestion allocating large objects.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -35,7 +36,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "rate(jvm_gc_pause_seconds_sum{application=\"spring-ai-ragr\"}[5m])",
-          "legendFormat": "{{action}}",
+          "legendFormat": "{{action}} · {{cause}}",
           "refId": "A"
         }
       ]
