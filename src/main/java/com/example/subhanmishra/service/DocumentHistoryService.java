@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import java.util.UUID;
 
@@ -26,7 +26,7 @@ public class DocumentHistoryService {
                 .documentMetadataId(documentId)
                 .status(status)
                 .details(details)
-                .createdAt(LocalDateTime.now())
+                .createdAt(Instant.now())
                 .build();
         historyRepository.save(historyRecord);
     }

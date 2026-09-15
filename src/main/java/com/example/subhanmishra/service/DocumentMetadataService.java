@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -55,7 +55,7 @@ public class DocumentMetadataService {
                 .contentType(contentType)
                 .status(DocumentStatus.UPLOADING) // Initial non-terminal status
                 .fileSize(file.getSize())
-                .createdAt(LocalDateTime.now())
+                .createdAt(Instant.now())
                 .build();
         documentMetadata = documentMetadataRepo.save(documentMetadata);
 
@@ -75,7 +75,7 @@ public class DocumentMetadataService {
                     .status(DocumentStatus.INDEXED)
                     .totalChunks(chunksCreated)
                     .totalPages(totalPages)
-                    .updatedAt(LocalDateTime.now())
+                    .updatedAt(Instant.now())
                     .build();
             documentMetadataRepo.save(finalMetadata);
 
@@ -93,7 +93,7 @@ public class DocumentMetadataService {
             DocumentMetadata failedMetadata = documentMetadata.toBuilder()
                     .status(DocumentStatus.FAILED)
                     .errorMessage(errorMessage)
-                    .updatedAt(LocalDateTime.now())
+                    .updatedAt(Instant.now())
                     .build();
             documentMetadataRepo.save(failedMetadata);
 

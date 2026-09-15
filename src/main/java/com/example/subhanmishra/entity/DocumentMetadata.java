@@ -3,7 +3,7 @@ package com.example.subhanmishra.entity;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -19,8 +19,8 @@ public class DocumentMetadata {
     private Integer totalChunks;
     private DocumentStatus status;
     private String errorMessage;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private Instant createdAt;
+    private Instant updatedAt;
 
     public DocumentMetadata() {
     }
@@ -65,8 +65,8 @@ public class DocumentMetadata {
         private Integer totalChunks;
         private DocumentStatus status;
         private String errorMessage;
-        private LocalDateTime createdAt;
-        private LocalDateTime updatedAt;
+        private Instant createdAt;
+        private Instant updatedAt;
 
         public Builder id(UUID id) {
             this.id = id;
@@ -108,12 +108,12 @@ public class DocumentMetadata {
             return this;
         }
 
-        public Builder createdAt(LocalDateTime createdAt) {
+        public Builder createdAt(Instant createdAt) {
             this.createdAt = createdAt;
             return this;
         }
 
-        public Builder updatedAt(LocalDateTime updatedAt) {
+        public Builder updatedAt(Instant updatedAt) {
             this.updatedAt = updatedAt;
             return this;
         }
@@ -155,11 +155,11 @@ public class DocumentMetadata {
         return errorMessage;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
+    public Instant getUpdatedAt() {
         return updatedAt;
     }
 

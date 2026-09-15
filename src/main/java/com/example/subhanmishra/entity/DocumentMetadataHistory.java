@@ -3,7 +3,7 @@ package com.example.subhanmishra.entity;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -15,7 +15,7 @@ public class DocumentMetadataHistory {
     private UUID documentMetadataId;
     private DocumentStatus status;
     private String details;
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     // Private constructor for the builder
     private DocumentMetadataHistory(Builder builder) {
@@ -39,7 +39,7 @@ public class DocumentMetadataHistory {
         private UUID documentMetadataId;
         private DocumentStatus status;
         private String details;
-        private LocalDateTime createdAt;
+        private Instant createdAt;
 
 
         public Builder id(UUID id) {
@@ -62,7 +62,7 @@ public class DocumentMetadataHistory {
             return this;
         }
 
-        public Builder createdAt(LocalDateTime createdAt) {
+        public Builder createdAt(Instant createdAt) {
             this.createdAt = createdAt;
             return this;
         }
@@ -90,7 +90,7 @@ public class DocumentMetadataHistory {
         return details;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
