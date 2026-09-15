@@ -473,8 +473,8 @@
     },
     {
       "id": 23,
-      "title": "Embedding throughput — nomic-embed-text",
-      "description": "Live embedding rate. The ceiling is hardware: roughly 830 tok/s on CPU and 1750 tok/s with OLLAMA_IGPU_ENABLE=1, and Ollama serves embeddings from a single slot, so this does not scale with app-side concurrency.",
+      "title": "Embedding throughput — nomic-embed-text (peak, 15m)",
+      "description": "Peak wall-clock embedding rate over the last 15 minutes. Embedding is bursty - it only runs while a document is ingesting (~190s) and is idle otherwise - so a plain live rate reads 0 whenever anyone actually looks at it, which is after an upload finishes. Taking the peak over 15m holds the figure long enough to be read. The inner window is 2m rather than 5m because a 5m window averages a 190s burst against surrounding idle and under-reports it: measured on the same ingestion, 5m peaked at 1599 tok/s where 2m saw 2026 and 1m saw 2189. 2m is the compromise - it fits inside a burst while still spanning 8 scrapes at the 15s scrape interval. This is deliberately wall-clock throughput, not per-request speed: ingestion runs app.rag.ingestion-concurrency requests at once against Ollama's single embedding slot, so dividing by summed request duration would understate it by roughly the concurrency factor. Hardware ceiling is ~830 tok/s on CPU and ~1750+ with OLLAMA_IGPU_ENABLE=1.",
       "type": "gauge",
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -482,7 +482,8 @@
         "defaults": {
           "unit": "short",
           "min": 0,
-          "max": 2000,
+          "max": 2500,
+          "noValue": "idle",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -498,7 +499,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[5m]))",
+          "expr": "max_over_time(sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[2m]))[15m:30s]) > 0",
           "legendFormat": "tok/s",
           "refId": "A"
         }
@@ -506,8 +507,8 @@
     },
     {
       "id": 24,
-      "title": "Chat generation throughput — llama3.2",
-      "description": "Output tokens per second while generating. Input tokens are excluded because the RAG context makes the prompt far larger than the answer, which would swamp the generation signal.",
+      "title": "Chat generation throughput — llama3.2 (30m avg)",
+      "description": "Output tokens per second of chat request time, averaged over 30 minutes. NOT a rate over wall-clock: gen_ai_client_token_usage_total is incremented once per request when the response completes, so rate() spreads one answer's tokens across the whole window and measures request arrival, not speed - a real 373-token answer generating at 9.36 tok/s registered as 0 on the previous 5m-rate version of this panel. Dividing by gen_ai_client_operation_seconds_sum makes it window-independent. Read it as end-to-end responsiveness, not raw decode speed: the denominator is whole-request duration, which includes prompt evaluation, and prompt eval produces no output tokens. So it approaches Ollama's reported tg when the answer is long and reads below it when the answer is short against a large RAG prompt - measured 10.34 for a 373-token answer (tg 9.36) but 5.76 for a 51-token answer (tg 9.48, with 1.9s of the 9.2s spent evaluating a 347-token prompt). For raw decode speed, read tg in Ollama's server log. This division is valid here only because chat requests are serial - do not copy it to the embedding panel, which runs concurrently. Input tokens are excluded because the RAG context makes the prompt far larger than the answer.",
       "type": "gauge",
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -515,7 +516,8 @@
         "defaults": {
           "unit": "short",
           "min": 0,
-          "max": 100,
+          "max": 40,
+          "noValue": "idle",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -531,7 +533,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"}[5m]))",
+          "expr": "sum(rate(gen_ai_client_token_usage_total{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"}[30m])) / sum(rate(gen_ai_client_operation_seconds_sum{application=\"spring-ai-ragr\", gen_ai_operation_name=\"chat\"}[30m])) > 0",
           "legendFormat": "tok/s",
           "refId": "A"
         }
