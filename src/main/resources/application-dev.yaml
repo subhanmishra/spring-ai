@@ -27,8 +27,27 @@ management:
       application: ${spring.application.name}
       env: local
     distribution:
+      # Histograms only for the four timers the Grafana dashboard actually runs histogram_quantile
+      # against (and http.server.requests additionally carries the dashboard's only exemplars).
+      # `all: true` published buckets for every timer in the app: 2,407 bucket lines out of 2,623
+      # exported lines, i.e. 92% of a 528 KB scrape body every 15s, for eighteen bucket families of
+      # which the dashboard queried four. Everything dropped here still exports _count, _sum and
+      # _max, so rates and averages are unaffected - only quantiles need buckets.
+      #
+      # These keys are PREFIX matches, not exact ones: Micrometer's PropertiesMeterFilter walks a
+      # meter's name from most specific to least, so `spring.ai.advisor` also matches the separate
+      # `spring.ai.advisor.active` LongTaskTimer. Those .active meters are not on the dashboard and
+      # were 319 bucket lines between them, so each is switched off explicitly. Removing a `false`
+      # line silently re-enables it via its parent.
       percentiles-histogram:
-        all: true
+        "[http.server.requests]": true
+        "[gen_ai.client.operation]": true
+        "[spring.ai.advisor]": true
+        "[db.vector.client.operation]": true
+        "[http.server.requests.active]": false
+        "[gen_ai.client.operation.active]": false
+        "[spring.ai.advisor.active]": false
+        "[db.vector.client.operation.active]": false
     enable:
       all: true
 
