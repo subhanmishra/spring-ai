@@ -1,7 +1,9 @@
 package com.example.subhanmishra.controller;
 
+import com.example.subhanmishra.dto.DocumentHistoryDto;
 import com.example.subhanmishra.dto.DocumentMetadataDto;
 import com.example.subhanmishra.dto.DocumentResponseDto;
+import com.example.subhanmishra.service.DocumentHistoryService;
 import com.example.subhanmishra.service.DocumentMetadataService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,9 +25,11 @@ import java.util.UUID;
 public class DocumentController {
 
     private final DocumentMetadataService documentService;
+    private final DocumentHistoryService historyService;
 
-    public DocumentController(DocumentMetadataService documentService) {
+    public DocumentController(DocumentMetadataService documentService, DocumentHistoryService historyService) {
         this.documentService = documentService;
+        this.historyService = historyService;
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -63,6 +67,17 @@ public class DocumentController {
     @Operation(summary = "Get metadata of a specific document by ID")
     public ResponseEntity<DocumentMetadataDto> getDocumentById(@PathVariable UUID id) {
         return ResponseEntity.ok(documentService.getDocumentById(id));
+    }
+
+    @GetMapping("/{id}/history")
+    @Operation(summary = "Get the processing history of a document",
+            description = "Returns every status transition recorded for the document, oldest first, with "
+                    + "the details logged at each step - including the error message on a FAILED entry. "
+                    + "History outlives the document it describes: deleting a document removes its "
+                    + "metadata and vector chunks but keeps the trail, so this still answers for a deleted "
+                    + "document and reports documentExists: false. 404 only when no history exists at all.")
+    public ResponseEntity<DocumentHistoryDto> getDocumentHistory(@PathVariable UUID id) {
+        return ResponseEntity.ok(historyService.getHistory(id));
     }
 
     @DeleteMapping("/{id}")

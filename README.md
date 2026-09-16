@@ -100,6 +100,7 @@ curl -X DELETE "http://localhost:8080/ai/conversations/<id>"
 | POST | `/api/v1/documents/upload-multiple` | Upload and index multiple documents at once |
 | GET | `/api/v1/documents` | List all uploaded documents and their indexing status |
 | GET | `/api/v1/documents/{id}` | Get metadata for a specific document |
+| GET | `/api/v1/documents/{id}/history` | Get the document's processing history, oldest entry first |
 | DELETE | `/api/v1/documents/{id}` | Delete a document and purge its vector embeddings |
 
 ```bash
@@ -109,6 +110,14 @@ curl -F "file=@document.pdf" http://localhost:8080/api/v1/documents/upload
 Uploads are **synchronous** — the request does not return until the document is fully indexed, and a large one takes minutes (a 645-page, 13.6MB PDF indexes in roughly 4 minutes with the GPU enabled). Set a generous client timeout. The response reports the number of chunks created.
 
 Indexing is all-or-nothing: if any batch fails, every chunk already written for that document is removed and the document is marked `FAILED`, so a failed upload never leaves partial content to be retrieved. Re-uploading is the way to retry. Maximum upload size is 25MB per file (`spring.servlet.multipart` in `application.yaml`).
+
+```bash
+curl "http://localhost:8080/api/v1/documents/<id>/history"
+```
+
+The history endpoint returns each status transition with the details recorded at the time — `UPLOADING` → `PROCESSING` → `INDEXED` on success, or `UPLOADING` → `FAILED` carrying the error message when parsing or indexing broke. It is the only place a failure reason is kept once a document has been removed.
+
+**History outlives the document it describes.** `document_metadata_history` is an immutable audit log with deliberately no foreign key to `document_metadata`, so deleting a document removes its metadata and vector chunks while leaving the trail intact. The endpoint therefore still answers for a deleted document, reporting `documentExists: false`; it 404s only when no history exists for that id at all.
 
 ### Admin diagnostics (`/api/v1/admin`)
 
