@@ -35,7 +35,8 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   ├── main
 │   │   ├── java/.../subhanmishra/
 │   │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
-│   │   │   │               # ModelMapperConfig, RagProperties, SpringAiProperties
+│   │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
+│   │   │   │               # SpringAiProperties
 │   │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │   │   │   ├── dto
 │   │   │   ├── entity
@@ -43,7 +44,9 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │   ├── repository
 │   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
 │   │   │       │           # DocumentMetadataService, DocumentHistoryService,
-│   │   │       │           # RetrievalDiagnosticsService
+│   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService
+│   │   │       │           # (every @Service lives directly here, never in a sub-package)
+│   │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
 │   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
 │   │   │           │       # TableChunker, TokenCounter, ChunkMetadata
 │   │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
@@ -56,7 +59,7 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │       │                          # app.rag.* chunking + search (top-k, similarity threshold);
 │   │       │                          # app.ai.* max chat-history messages
 │   │       ├── logback-spring.xml     # console + Loki appenders; traceId/spanId structured metadata
-│   │       └── db/migration/          # Flyway migrations (V1..V3, e.g. V3__Set_IST_Timezone.sql)
+│   │       └── db/migration/          # Flyway migrations (V1..V4, e.g. V4__Add_Pipeline_Provenance.sql)
 │   └── test                           # SpringAiApplicationTests (context load), plus parser tests:
 │                                      # DocumentParserServiceTest, XhtmlBlockParserTest,
 │                                      # TableChunkerTest, PdfTableDetectorTest
@@ -154,6 +157,14 @@ Conversations can be listed, read back one at a time and deleted individually. T
 The bulk `DELETE /ai/conversations` still returns a bare `String` rather than 204, unlike the per-conversation delete beside it. Left as-is deliberately — changing it would break existing callers — but it is the odd one out.
 
 `DocumentController` is based at `/api/v1/documents`. Exact routes for all three controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
+
+**Every indexed document records the pipeline that produced its chunks, and `PipelineProvenance.CURRENT_VERSION` must be bumped by hand when that pipeline changes.** `document_metadata.pipeline_version` + `pipeline_settings` (JSONB) are stamped in `DocumentMetadataService.uploadAndProcess` on the `INDEXED` path only — a `FAILED` document produced no chunks, so provenance for it would describe nothing. `DocumentMetadataDto` exposes them plus a computed `stale` / `staleReason`. Before touching any of it:
+
+- **The version constant is the load-bearing half, and it only works if someone bumps it.** Every pipeline change that has actually invalidated this corpus — the citation header, paragraph coalescing, the jsoup `xmlParser` fix — was a *code* change with no configuration footprint, so the settings snapshot would have missed all three. `CURRENT_VERSION` carries a history list in its javadoc; add a line whenever you bump it.
+- **Only output-affecting settings belong in `PipelineSettings`.** `batchSize`, `ingestionConcurrency`, `ingestionMaxAttempts` and `ingestionRetryBackoff` are throughput-only; `topK` and `similarityThreshold` act at retrieval time. Including any of them would mark the whole corpus stale on exactly the occasions when nothing about the stored chunks changed — and `batch-size` is explicitly expected to be retuned whenever chunk sizing changes. Verified both directions: `chunk-size` 400→500 flips `stale` to true naming `chunkSize`, while `batch-size`, `ingestion-concurrency` and `top-k` together leave it false.
+- **A NULL version means stale, not current.** Documents ingested before this existed report stale with a reason saying what produced them is unknown, which is the honest reading.
+- **`JdbcConversionsConfig` builds its own Jackson 2 `ObjectMapper` rather than injecting one.** Spring Boot 4 ships both Jackson 2 (`com.fasterxml.jackson`) and Jackson 3 (`tools.jackson`) and publishes a bean only for the latter, so injecting `ObjectMapper` fails context startup. The write converter must emit a `PGobject` typed `jsonb`; a plain `String` goes to the driver as `varchar` and Postgres refuses it against a `jsonb` column. Converters are registered for the concrete `PipelineSettings` type, not `Map<String,Object>`, to keep them off every other map-valued property.
+- **`ModelMapperConfig`'s `DocumentMetadata` → `DocumentMetadataDto` mapping is a hand-written converter calling the canonical constructor, not a field-name mapping.** A component added to the record does *not* flow through on its own — it returns null with no error anywhere. Extend both together. It now also takes `PipelineProvenanceService` so the staleness rule lives in one place rather than in the mapper.
 
 **Document history is an immutable audit log, and its lack of a foreign key is deliberate.** `document_metadata_history` has no FK to `document_metadata`, so `deleteDocument` — which removes the metadata row and the vector chunks — leaves the trail behind on purpose. Do not add the constraint, and do not "clean up" the resulting rows; a history row with no surviving parent is the intended state, not corruption. `GET /api/v1/documents/{id}/history` consequently still answers for a deleted document and reports `documentExists: false`, which is the only way to tell that case from a document still present; it 404s only when no history exists for the id at all.
 

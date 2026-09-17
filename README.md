@@ -115,6 +115,14 @@ Indexing is all-or-nothing: if any batch fails, every chunk already written for 
 curl "http://localhost:8080/api/v1/documents/<id>/history"
 ```
 
+Every document reports **pipeline provenance** — the `pipelineVersion` and the settings in force when it was ingested — plus a computed `stale` flag and a `staleReason`. A document is stale when its stored chunks differ from what the same source file would produce now, which is the question "does this need re-uploading?". Stale chunks cannot be corrected in place; the document has to be ingested again.
+
+```bash
+curl -s http://localhost:8080/api/v1/documents | grep -o '"stale":[a-z]*'
+```
+
+Only settings that change what gets **stored** count toward staleness — chunk sizing, table detection, the embedding model and vector dimensions. `batch-size`, `ingestion-concurrency`, `top-k` and `similarity-threshold` are deliberately excluded: the first two affect throughput only and the last two act at retrieval time, so including them would mark the whole corpus stale every time they are retuned. Documents ingested before provenance existed report `stale: true` with a reason saying so, because what produced them is genuinely unknown.
+
 The history endpoint returns each status transition with the details recorded at the time — `UPLOADING` → `PROCESSING` → `INDEXED` on success, or `UPLOADING` → `FAILED` carrying the error message when parsing or indexing broke. It is the only place a failure reason is kept once a document has been removed.
 
 **History outlives the document it describes.** `document_metadata_history` is an immutable audit log with deliberately no foreign key to `document_metadata`, so deleting a document removes its metadata and vector chunks while leaving the trail intact. The endpoint therefore still answers for a deleted document, reporting `documentExists: false`; it 404s only when no history exists for that id at all.
