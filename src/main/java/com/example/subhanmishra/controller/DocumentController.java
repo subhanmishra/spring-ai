@@ -3,6 +3,7 @@ package com.example.subhanmishra.controller;
 import com.example.subhanmishra.dto.DocumentHistoryDto;
 import com.example.subhanmishra.dto.DocumentMetadataDto;
 import com.example.subhanmishra.dto.DocumentResponseDto;
+import com.example.subhanmishra.entity.DocumentStatus;
 import com.example.subhanmishra.service.DocumentHistoryService;
 import com.example.subhanmishra.service.DocumentMetadataService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,12 +48,34 @@ public class DocumentController {
     //    api to upload multiple documents
     @PostMapping(value = "/upload-multiple", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
-            summary = "Upload and index multiple documents simultaneously",
-            description = "This api is used to upload and index multiple documents."
+            summary = "Upload and index multiple documents in one request",
+            description = "Uploads and indexes several documents, reporting one result per file in the "
+                    + "order supplied. A file that fails gets a FAILED entry carrying its id and the "
+                    + "error rather than being dropped from the response, so every file sent is "
+                    + "accounted for. Returns 201 when all files indexed, 207 Multi-Status when some "
+                    + "failed, and 422 when none indexed. Files are processed one at a time: Ollama "
+                    + "serialises embedding regardless, so concurrency here would add contention "
+                    + "without adding throughput."
     )
     public ResponseEntity<List<DocumentResponseDto>> uploadMultipole(@RequestParam("files") List<MultipartFile> files) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(documentService.uploadMultipleDocuments(files));
+        if (files.isEmpty()) {
+            // Guarded explicitly: with no files, "every file failed" is vacuously true, and an empty
+            // batch would otherwise report 422 - a confusing answer to a malformed request.
+            throw new IllegalArgumentException("At least one file must be supplied.");
+        }
+
+        List<DocumentResponseDto> results = documentService.uploadMultipleDocuments(files);
+        long failed = results.stream().filter(r -> r.status() == DocumentStatus.FAILED).count();
+
+        HttpStatus status;
+        if (failed == 0) {
+            status = HttpStatus.CREATED;
+        } else if (failed == results.size()) {
+            status = HttpStatus.UNPROCESSABLE_CONTENT;
+        } else {
+            status = HttpStatus.MULTI_STATUS;
+        }
+        return ResponseEntity.status(status).body(results);
     }
 
     //    list all uploaded documents

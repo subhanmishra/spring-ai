@@ -108,7 +108,10 @@ public class DocumentMetadataService {
             historyService.recordHistory(documentMetadata.getId(), DocumentStatus.FAILED, errorMessage);
 
             // Re-throw the exception to signal failure to the API caller.
-            throw new DocumentProcessingException("Failed to process document: " + errorMessage, e);
+            // The id is carried on the exception so the bulk path can report which file failed and
+            // give the caller a handle to its history; a single upload just surfaces the message.
+            throw new DocumentProcessingException("Failed to process document: " + errorMessage, e,
+                                                  documentMetadata.getId());
         }
 
         // 8. Return the response DTO for successful processing.
@@ -122,14 +125,34 @@ public class DocumentMetadataService {
                 .build();
     }
 
+    /**
+     * Uploads each file in turn, reporting one result per input in the order supplied.
+     *
+     * <p>A failed file gets a {@code FAILED} entry rather than being dropped from the response. It used
+     * to be omitted entirely, so a caller who sent ten files and got seven back could not tell which
+     * three were missing or why - the only record was a server-side log line they could not see. The
+     * entry carries the document's id, which is the handle to {@code /{id}/history} where the full
+     * trail and error detail already live.
+     *
+     * <p>The loop is deliberately serial. Ollama pins embedding runners to a single slot regardless of
+     * concurrency, so uploading in parallel would not embed any faster; it would only contend for the
+     * Hikari pool that {@code app.rag.ingestion-concurrency} already sizes against that single slot.
+     */
     public List<DocumentResponseDto> uploadMultipleDocuments(List<MultipartFile> files) {
         List<DocumentResponseDto> responseDtos = new ArrayList<>();
         for (MultipartFile file : files) {
             try {
-                DocumentResponseDto result = this.uploadAndProcess(file);
-                responseDtos.add(result);
+                responseDtos.add(this.uploadAndProcess(file));
             } catch (DocumentProcessingException e) {
-                log.warn("Skipping file: {} due to processing error: {}", file.getOriginalFilename(), e.getMessage());
+                log.warn("Failed to process file {} in batch: {}", file.getOriginalFilename(), e.getMessage());
+                responseDtos.add(DocumentResponseDto.builder()
+                                                    .id(e.getDocumentId())
+                                                    .fileName(file.getOriginalFilename())
+                                                    .fileSize(file.getSize())
+                                                    .chunksCreated(0)
+                                                    .status(DocumentStatus.FAILED)
+                                                    .message(e.getMessage())
+                                                    .build());
             }
         }
         return responseDtos;
