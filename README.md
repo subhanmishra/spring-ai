@@ -105,7 +105,7 @@ curl -X DELETE "http://localhost:8080/ai/conversations/<id>"
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/documents/upload` | Upload and index a single document (PDF, DOCX, TXT, MD, CSV) |
+| POST | `/api/v1/documents/upload` | Upload and index a single document (PDF, DOCX, XLSX, PPTX, HTML, TXT, MD, CSV) |
 | POST | `/api/v1/documents/upload-multiple` | Upload and index multiple documents at once. 201 all indexed, 207 some failed, 422 none indexed |
 | GET | `/api/v1/documents` | List all uploaded documents and their indexing status |
 | GET | `/api/v1/documents/{id}` | Get metadata for a specific document |
@@ -122,6 +122,10 @@ curl -F "files=@a.pdf" -F "files=@b.docx" http://localhost:8080/api/v1/documents
 **Bulk upload reports every file, including the ones that failed.** A file that cannot be processed gets a `FAILED` entry carrying its document id and the error, rather than being dropped from the response — so a batch of ten that returns seven successes also returns three failures, each identifying itself. Follow a failed entry's `id` to `/{id}/history` for the full trail. The status code summarises the batch: **201** when every file indexed, **207 Multi-Status** when some failed, **422** when none did.
 
 Files are processed one at a time. Ollama serialises embedding regardless of how many requests arrive, so uploading concurrently would add contention without adding throughput.
+
+**Supported types are checked before anything is stored.** `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.html`/`.htm`, `.txt`, `.md` and `.csv` are accepted; anything else returns **415** and leaves no document record behind. The check reads the filename extension, falling back to the declared `Content-Type` only when the filename has no extension — clients frequently send `application/octet-stream`, so a declared type is treated as a fallback rather than as evidence.
+
+This is a type filter, not a content scanner. A supported extension whose contents cannot actually be parsed — a corrupt PDF, say — still returns **422** and *does* leave a `FAILED` record with its history, because that is a processing failure rather than a rejected type. In a bulk upload a rejected file appears as a `FAILED` entry with a **null id**, since no document was ever created for it.
 
 Uploads are **synchronous** — the request does not return until the document is fully indexed, and a large one takes minutes (a 645-page, 13.6MB PDF indexes in roughly 4 minutes with the GPU enabled). Set a generous client timeout. The response reports the number of chunks created.
 

@@ -35,9 +35,11 @@ public class DocumentController {
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
-            summary = "Upload and index a document(PDF, DOCX, TEXT, MD, CSV)",
-            description = "This api is used to upload and index documents files."
-
+            summary = "Upload and index a document (PDF, DOCX, XLSX, PPTX, HTML, TXT, MD, CSV)",
+            description = "Uploads a document, parses it, and stores its chunks as embeddings. The file "
+                    + "type is checked before anything is persisted, so an unsupported type returns 415 "
+                    + "without leaving a document record behind. A supported type whose contents cannot "
+                    + "be parsed returns 422 instead, and does leave a FAILED record with its history."
     )
     public ResponseEntity<DocumentResponseDto> uploadDocument(@RequestParam("file") MultipartFile file) {
         return ResponseEntity.status(HttpStatus.CREATED)

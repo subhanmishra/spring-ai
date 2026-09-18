@@ -6,8 +6,10 @@ import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
 import com.example.subhanmishra.exception.DocumentProcessingException;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
+import com.example.subhanmishra.exception.UnsupportedDocumentTypeException;
 import com.example.subhanmishra.repository.DocumentMetadataRepository;
 import com.example.subhanmishra.repository.VectorStoreRepository;
+import com.example.subhanmishra.service.parse.SupportedDocumentTypes;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +53,17 @@ public class DocumentMetadataService {
 
         String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "document";
         String contentType = file.getContentType() != null ? file.getContentType() : "application/octat-stream";
+
+        // 0. Refuse types the parser cannot handle BEFORE anything is written. Doing this first is the
+        // whole point: a file that was never a candidate should not leave a metadata row and a history
+        // trail behind, and the caller should hear that the type was refused rather than that
+        // processing broke somewhere deep in Tika.
+        if (!SupportedDocumentTypes.isSupported(fileName, contentType)) {
+            log.warn("Rejected unsupported upload: {} (contentType={})", fileName, contentType);
+            throw new UnsupportedDocumentTypeException(
+                    "Unsupported file type for '%s'. Supported types are: %s."
+                            .formatted(fileName, SupportedDocumentTypes.describeAllowed()));
+        }
 
         // 1. Create the initial metadata record. The status here is just an initial marker.
         DocumentMetadata documentMetadata = DocumentMetadata.builder()

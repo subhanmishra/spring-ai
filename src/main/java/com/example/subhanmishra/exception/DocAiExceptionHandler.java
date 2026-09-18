@@ -38,6 +38,25 @@ public class DocAiExceptionHandler {
     }
 
 
+    /**
+     * An upload whose type the parser does not handle.
+     *
+     * <p>Registered on the subclass while {@link DocumentProcessingException} keeps its 422: Spring
+     * resolves to the closest match in the hierarchy, so the two coexist without ambiguity. The
+     * distinction is worth keeping - 422 means the content could not be processed, whereas this means
+     * the type was never accepted, and nothing was written before saying so.
+     */
+    @ExceptionHandler(UnsupportedDocumentTypeException.class)
+    public ProblemDetail handleUnsupportedType(UnsupportedDocumentTypeException ex) {
+        logger.warn("Unsupported document type: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        problemDetail.setTitle("Unsupported File Type");
+        problemDetail.setDetail(ex.getMessage());
+        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
+        return problemDetail;
+    }
+
+
     @ExceptionHandler(DocumentProcessingException.class)
     public ProblemDetail handleProcessingError(DocumentProcessingException ex) {
         logger.error("Document processing error: {}", ex.getMessage(), ex);

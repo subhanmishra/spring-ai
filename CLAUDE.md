@@ -48,7 +48,8 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │       │           # (every @Service lives directly here, never in a sub-package)
 │   │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
 │   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
-│   │   │           │       # TableChunker, TokenCounter, ChunkMetadata
+│   │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
+│   │   │           │       # SupportedDocumentTypes
 │   │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
 │   │   │                   # PdfTextRunExtractor, TextRun, LineSegment
 │   │   └── resources
@@ -182,6 +183,13 @@ The bulk `DELETE /ai/conversations` still returns a bare `String` rather than 20
 - **`handleTypeMismatch` is registered on `MethodArgumentTypeMismatchException`, not its parent `TypeMismatchException`.** `ConversionNotSupportedException` is also a `TypeMismatchException` but means the server has no converter configured, which genuinely is a 500; catching the parent would report a server misconfiguration as the caller's fault.
 
 Genuine 500s now return a fixed generic detail rather than `ex.getMessage()`, which was leaking JDBC and Ollama internals to callers; the real message and stack trace still go to the log. Domain exceptions are unaffected — `DocumentProcessingException` still returns 422 carrying its actual message, which is the thing a caller can act on.
+
+**Unsupported file types are refused before any row is written, by `SupportedDocumentTypes` in `service/parse`.** `uploadAndProcess` calls it as its first statement, ahead of `documentMetadataRepo.save`, so a file that was never a candidate leaves no `document_metadata` row and no history trail — previously a `.exe` was accepted, wrote both, and only failed deep inside Tika. Points that matter:
+
+- **The list is a constant, not an `app.rag.*` property.** It states what the parser has been verified to carry through chunking and the table paths, so adding a format should require checking that it works rather than editing config. It includes DOCX, XLSX, PPTX and HTML because the table-recovery path exists specifically for them — the endpoint's old Swagger text claimed a narrower set and was simply wrong.
+- **It matches the filename extension, with the declared content-type only as a fallback** when the filename has no extension. An extension that is present but disallowed is a rejection whatever the content-type says, otherwise a client sending `application/octet-stream` would bypass the list entirely. Verified: an extensionless file with `text/plain` is accepted, the same file with `application/octet-stream` is refused.
+- **It is a type filter, not a content scanner**, and the distinction is load-bearing. A corrupt `.pdf` still returns **422** and still leaves a FAILED record with history, because its type was fine and its content was not; only the type check produces **415**. Renaming `payload.exe` to `payload.pdf` gets past this and fails in PDFBox instead, by design.
+- **`UnsupportedDocumentTypeException` extends `DocumentProcessingException` deliberately.** `DocAiExceptionHandler` maps the subclass to 415 while the parent keeps 422 — Spring resolves to the closest match, so they coexist — and `uploadMultipleDocuments` catches the parent, so one bad file in a batch becomes a FAILED entry instead of aborting it. That entry has a **null id and no history**, unlike every other failure, precisely because nothing was written.
 
 **Bulk upload reports one result per input file, and a failure is a result rather than an omission.** `uploadMultipleDocuments` used to catch `DocumentProcessingException`, log a warning and drop the file from the response, so a caller who sent ten files and got seven back could not tell which three were missing or why — the only record was a server log line they could not see. It now appends a `FAILED` `DocumentResponseDto` instead. Two things this depends on:
 
