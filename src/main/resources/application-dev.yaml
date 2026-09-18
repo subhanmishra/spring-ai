@@ -109,20 +109,51 @@ spring:
         keep-alive: "-1"   # pin the embedding model in memory: avoids the ~28s cold start, and the
                            # runner-startup race that concurrent batches would otherwise hit
       chat:
-        model: llama3.2
+        # Gemma 4 E2B, switched from llama3.2 for CITATION FIDELITY - the thing the citation header
+        # in DocumentIngestionService and QA_PROMPT_TEMPLATE in SpringAiConfig exist to produce.
+        # Measured on three retrieval-grounded queries against the 645-page manual, with both models
+        # given identical prompts, context and options: llama3.2 cited NOTHING three times out of
+        # three, once parroting the instruction back ("Remember to cite your sources") instead of
+        # obeying it. gemma4:e2b cited seven pages across the same three, every one genuinely in the
+        # retrieved context. A follow-up five-query run cited 18 pages, all valid, none fabricated.
+        #
+        # It is also CHEAPER than the model it replaces, which the 7.2 GB file hides: the E-series
+        # offloads per-layer embeddings, so Ollama reports it resident at 1.59 GB against llama3.2's
+        # 2.81-2.88 GB. It coexists with nomic-embed-text indefinitely (five consecutive turns, 0s
+        # load every time, free RAM steady at ~2 GB), and generates FASTER - 12.8-13.9 tok/s against
+        # 10.7-12.1, i.e. 53-70s per answer against 58-91s.
+        model: gemma4:e2b
+        # Gemma 4 advertises a `thinking` capability and Spring AI 2.0.1 returns that separately, in
+        # OllamaApi.Message.thinking, which ChatService never reads. Left enabled it is pure waste in
+        # BOTH directions: 1,790-2,331 characters per answer of reasoning we discard, AND it pushed
+        # all three answers into the num-predict ceiling below, truncating them mid-sentence. With it
+        # off, the same answers finish on their own in 656-837 tokens. Do not remove this.
+        #
+        # QUOTED deliberately. This binds to the enum OllamaThinkProperties (TRUE/FALSE/HIGH/MEDIUM/
+        # LOW), not to a boolean - so an unquoted `false` is parsed by YAML as a Boolean and only
+        # reaches the enum via Spring Boot's lenient Object-to-enum coercion. The quotes make it a
+        # String and remove the dependency on that coercion.
+        think: "false"
+        # Gemma 4's own Modelfile sets temperature 1, top_k 64, top_p 0.95, and - exactly as with
+        # repeat-penalty below - Spring AI sends NO value unless one is set here, so omitting this
+        # silently runs grounded RAG at temperature 1.0. llama3.2 shipped no temperature at all, so
+        # this is a difference the model swap introduces rather than one inherited from it.
+        temperature: 0.2
         # Nothing else bounds an answer: without num-predict the only stop condition is the context
         # window, so a looping generation runs to (num-ctx - prompt) tokens. One request generated
         # 13,468 tokens over 29 minutes before it was killed, holding the HTTP thread the whole time.
+        # 1024 is comfortably above what this model needs once `think` is off (max measured 837).
         num-predict: 1024
         # Ollama's API default is 1.1, but Spring AI sends no value unless one is set here, and
         # llama.cpp's own default is 1.0 - i.e. repetition penalty DISABLED. The runaway above ran
         # with `repeat_penalty = 1.000` in the sampler params. Do not remove this.
         repeat-penalty: 1.1
-        # 8192, not the model's 16384: the KV cache is what made Ollama predict 3.6 GiB for this
-        # model and evict nomic-embed-text to fit it. Must stay well above the worst-case prompt -
-        # system prompt + top-k(5) chunks of up to 445 tokens + max-chat-messages(10) of history -
-        # because Ollama truncates an over-long prompt from the left, which silently drops the
-        # system prompt and the RAG context rather than failing.
+        # 8192, far below the 131072 this model reports as its native context: the KV cache is what
+        # made Ollama predict 3.6 GiB for the previous chat model and evict nomic-embed-text to fit
+        # it. Must stay well above the worst-case prompt - system prompt + top-k(5) chunks of up to
+        # 445 tokens + max-chat-messages(10) of history - because Ollama truncates an over-long
+        # prompt from the left, which silently drops the system prompt and the RAG context rather
+        # than failing. Measured prompts on the manual reach ~2,430 tokens, so there is ample room.
         num-ctx: 8192
     chat:
       # ChatModel-level: the FINAL prompt sent to Ollama, i.e. after QuestionAnswerAdvisor

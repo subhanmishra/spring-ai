@@ -11,11 +11,11 @@ This project uses Spring AI with a locally-running **Ollama** model (no external
 * Java 26
 * Maven
 * Docker (for pgvector, Redis, and the observability stack via Docker Compose)
-* [Ollama](https://ollama.com) running locally with the `nomic-embed-text` (embedding) and `llama3.2` (chat) models pulled:
+* [Ollama](https://ollama.com) running locally with the `nomic-embed-text` (embedding) and `gemma4:e2b` (chat) models pulled:
 
 ```bash
 ollama pull nomic-embed-text
-ollama pull llama3.2
+ollama pull gemma4:e2b
 ```
 
 ## Configuration
