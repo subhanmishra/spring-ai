@@ -65,8 +65,8 @@ This automatically starts the containers defined in `compose.yaml` (pgvector, Re
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/ai/generate` | Single-shot chat response. Query params: `prompt` (default `"Tell me a joke"`), `conversationId` (optional) |
-| GET | `/ai/generateStream` | Streaming chat response (SSE). Same query params as above |
+| POST | `/ai/generate` | Single-shot chat response. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional) |
+| POST | `/ai/generateStream` | Streaming chat response (SSE). Same JSON body as above |
 | GET | `/ai/conversations` | List all active conversation IDs |
 | GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
 | DELETE | `/ai/conversations/{id}` | Delete a single conversation |
@@ -74,14 +74,23 @@ This automatically starts the containers defined in `compose.yaml` (pgvector, Re
 
 Both generate endpoints return the conversation ID in an **`X-Conversation-Id`** response header — a freshly generated UUID when `conversationId` was not supplied. Pass it back on the next call to continue the same conversation.
 
+Because `/ai/generateStream` is a `POST`, a browser client **cannot** consume it with the native `EventSource` API, which only issues `GET` requests. Use `fetch` with a `ReadableStream` instead.
+
+The prompt travels in a **JSON request body, not a query parameter** — a `GET` with `?prompt=` would put every question anyone asks into access logs, browser history and proxy logs, and would cap the prompt at whatever URL length the infrastructure allows. A blank or missing prompt, or one over 4000 characters, returns a 400 `ProblemDetail`.
+
 ```bash
-curl "http://localhost:8080/ai/generate?prompt=Hello"
+curl -X POST http://localhost:8080/ai/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Hello"}'
 
 # Capture the conversation ID, then continue that conversation
-curl -i "http://localhost:8080/ai/generate?prompt=Hello" | grep -i x-conversation-id
-curl "http://localhost:8080/ai/generate?prompt=And%20what%20did%20I%20just%20ask?&conversationId=<id>"
+curl -i -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' -d '{"prompt":"Hello"}' | grep -i x-conversation-id
+curl -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' \
+  -d '{"prompt":"And what did I just ask?","conversationId":"<id>"}'
 
-curl "http://localhost:8080/ai/generateStream?prompt=Tell%20me%20a%20story"
+curl -N -X POST http://localhost:8080/ai/generateStream \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Tell me a story"}'
 
 # Reload a conversation, then drop just that one
 curl "http://localhost:8080/ai/conversations/<id>"

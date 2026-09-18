@@ -149,7 +149,13 @@ The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserS
 - **Cost scales with total tokens, not chunk or request count.** Paragraph coalescing cut chunk count by 79% but wall-clock by only ~19%, because it rearranges tokens without removing them. Do not expect batching or concurrency changes to move ingestion time.
 - Connection-hold time follows `elapsed × ingestion-concurrency ÷ batches`. That is why halving elapsed time on the GPU removed the Hikari leak warnings outright (8 → 0) without changing `ingestion-concurrency`.
 
-**Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
+**Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied, in `resolveConversationId`) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
+
+**`/ai/generate` and `/ai/generateStream` are `POST` with a JSON body, not `GET` with a query parameter**, taking a `@Valid ChatRequestDto`. A prompt in a query string lands in access logs, browser history and proxy logs — for a RAG assistant that is the most sensitive text in the system — and is bounded by URL length rather than by anything the application controls. Consequences:
+
+- **A browser cannot consume the streaming endpoint with `EventSource`**, which only issues `GET`. A web UI must use `fetch` with a `ReadableStream`. This is the one real cost of the change and there is no frontend yet to have noticed it.
+- **`prompt` is required and capped at 4000 characters.** The cap is about the context window, not politeness: `num-ctx` is 8192 tokens and `QuestionAnswerAdvisor` spends most of it on retrieved passages, so a larger prompt would crowd out the passages the answer is meant to be grounded in. There is no longer a `"Tell me a joke"` default.
+- **Wrong-method requests to these paths return 500, not 405.** `DocAiExceptionHandler`'s `@ExceptionHandler(Exception.class)` catches Spring's `HttpRequestMethodNotSupportedException` before it can map to 405, so the old `GET /ai/generate?prompt=…` answers `500 "Unexpected error"` with detail `Request method 'GET' is not supported`. That affects every endpoint, not just these; it predates this change but this change makes it much likelier to be hit.
 
 Conversations can be listed, read back one at a time and deleted individually. Three things about the read-back are load-bearing:
 
