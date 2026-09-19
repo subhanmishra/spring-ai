@@ -152,6 +152,49 @@ class CitationParserTest {
         }
 
         @Test
+        @DisplayName("a section number written as a page is kept verbatim, not truncated")
+        void keepsASectionNumberAsALabel() {
+            // Measured: gemma4:e2b answered a question grounded on page 277 with "(…, p. 5.3)", 5.3
+            // being the heading "5.3. Endpoints" inside the passage. Parsing that as page 5 reported a
+            // fabrication of a page the model never claimed, which made the failure list misleading.
+            List<Citation> citations = CitationParser.parseAnswerCandidates(
+                    "Endpoints are exposed over HTTP (spring-boot-reference.pdf, p. 5.3).");
+
+            assertThat(citations).hasSize(1);
+            Citation citation = citations.getFirst();
+            assertThat(citation.pageNumber()).isNull();
+            assertThat(citation.pageLabel()).isEqualTo("5.3");
+            assertThat(citation.hasMalformedPage()).isTrue();
+            assertThat(citation).hasToString("spring-boot-reference.pdf p.5.3");
+        }
+
+        @Test
+        @DisplayName("a deeper section number is handled the same way")
+        void keepsADeeperSectionNumber() {
+            List<Citation> citations = CitationParser.parseAnswerCandidates("See (manual.pdf, p. 5.2.5).");
+
+            assertThat(citations).extracting(Citation::pageLabel).containsExactly("5.2.5");
+        }
+
+        @Test
+        @DisplayName("a sentence-ending period after a page is not part of the page")
+        void ignoresATrailingPeriod() {
+            List<Citation> citations = CitationParser.parseAnswerCandidates("See (manual.pdf, p. 12.)");
+
+            assertThat(citations).extracting(Citation::pageNumber).containsExactly(12);
+            assertThat(citations.getFirst().hasMalformedPage()).isFalse();
+        }
+
+        @Test
+        @DisplayName("two different section numbers on one file are two citations")
+        void doesNotConflateSectionLabels() {
+            List<Citation> citations = CitationParser.parseAnswerCandidates(
+                    "See (manual.pdf, p. 5.3) and (manual.pdf, p. 5.2.5).");
+
+            assertThat(citations).extracting(Citation::pageLabel).containsExactly("5.3", "5.2.5");
+        }
+
+        @Test
         @DisplayName("ordinary prose in parentheses is not a citation")
         void ignoresNonFilenameParentheticals() {
             String answer = "Set the property (see the section on configuration) and restart (it is quick).";

@@ -161,6 +161,7 @@ public class EvalScoringService {
 
         List<Citation> emitted = CitationParser.parseAnswerCandidates(answer).stream()
                 .filter(candidate -> candidate.pageNumber() != null
+                        || candidate.hasMalformedPage()
                         || availableNames.contains(candidate.fileName().toLowerCase(Locale.ROOT)))
                 .toList();
 
@@ -171,7 +172,7 @@ public class EvalScoringService {
         List<Citation> fabricated = new ArrayList<>();
         int valid = 0;
         for (Citation citation : emitted) {
-            if (available.stream().anyMatch(citation::matches)) {
+            if (isSupported(citation, available, availableNames)) {
                 valid++;
             } else {
                 fabricated.add(citation);
@@ -179,6 +180,35 @@ public class EvalScoringService {
         }
         return new CitationScores(emitted.size(), valid, fabricated.size(), available.size(),
                                   List.copyOf(fabricated));
+    }
+
+    /**
+     * Whether the retrieved context actually supports this citation.
+     *
+     * <p>A citation carrying a page number has to match a retrieved chunk exactly - that is the
+     * fabrication check, and the whole point of the metric.
+     *
+     * <p>A citation with <em>no</em> page is judged on its filename alone, and that distinction is
+     * deliberate rather than lax. "(spring-boot-reference.pdf)" names a document that really was
+     * retrieved; it is less precise than it could be, but nothing about it is invented, and lumping it
+     * in with a page number the model made up conflates imprecision with dishonesty. It is also the
+     * only correct form for a Tika source - DOCX, XLSX, PPTX and HTML have no page attribution, so
+     * {@code citationHeader} omits the page half and a pageless citation is exactly right there.
+     *
+     * <p>Found by the evaluation suite itself: a run flagged a bare "[spring-boot-reference.pdf]" as
+     * fabricated, which was the scorer being wrong rather than the model.
+     *
+     * <p>A <em>malformed</em> page reference is the case in between, and it is never supported. "(…, p.
+     * 5.3)" is a section number written where a page belongs: the model did claim a location, so the
+     * leniency above does not apply, and the location it claimed is not one the context offered.
+     */
+    private static boolean isSupported(Citation citation, List<Citation> available, Set<String> availableNames) {
+        if (citation.hasMalformedPage()) {
+            return false;
+        }
+        return citation.pageNumber() == null
+                ? availableNames.contains(citation.fileName().toLowerCase(Locale.ROOT))
+                : available.stream().anyMatch(citation::matches);
     }
 
     private AnswerScores scoreAnswer(String answer, @Nullable GoldenCase goldenCase) {

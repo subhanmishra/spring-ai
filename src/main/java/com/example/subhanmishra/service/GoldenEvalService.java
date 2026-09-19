@@ -273,6 +273,7 @@ public class GoldenEvalService {
         int citationsEmitted = 0;
         int citationsValid = 0;
         int citationsFabricated = 0;
+        long inventedPages = 0;
         int relevancyJudged = 0;
         int relevancyPassed = 0;
         int groundednessJudged = 0;
@@ -300,6 +301,9 @@ public class GoldenEvalService {
             citationsEmitted += scores.citations().emitted();
             citationsValid += scores.citations().valid();
             citationsFabricated += scores.citations().fabricated();
+            inventedPages += scores.citations().fabricatedCitations().stream()
+                                     .filter(citation -> !citation.hasMalformedPage())
+                                     .count();
 
             // Counted separately from caseCount: a null verdict means the case was not judged, and
             // folding those into the denominator would report unjudged cases as judged failures.
@@ -325,6 +329,7 @@ public class GoldenEvalService {
                                    citationsEmitted > 0 ? (double) citationsValid / citationsEmitted : 1.0,
                                    citationsEmitted > 0 ? (double) citationsFabricated / citationsEmitted : 0.0,
                                    citationsEmitted,
+                                   (int) inventedPages,
                                    judged && relevancyJudged > 0
                                            ? (double) relevancyPassed / relevancyJudged : null,
                                    judged && groundednessJudged > 0
@@ -436,6 +441,15 @@ public class GoldenEvalService {
      * @param citationValidity    1.0 when no citations were emitted at all, which is why
      *                            {@code citationsEmitted} sits beside it. An assistant that stopped
      *                            citing entirely would otherwise show perfect validity.
+     * @param inventedPageCount   fabricated citations that named a plain page number the context never
+     *                            offered - the failure the citation header, the prompts and the parser
+     *                            strippers all exist to prevent. Reported separately from
+     *                            {@code citationFabrication} because the two behave nothing alike: this
+     *                            has been 0 on every run since the footer and contents strippers
+     *                            landed, whereas the rate beside it is dominated by the model writing
+     *                            section numbers where pages belong, which varies from 0.22 to 0.33 run
+     *                            to run on an unchanged pipeline. A regression guard needs the stable
+     *                            one; see {@code EvalSuiteIT}.
      */
     public record GoldenRunResult(String suite,
                                   int caseCount,
@@ -445,6 +459,7 @@ public class GoldenEvalService {
                                   double citationValidity,
                                   double citationFabrication,
                                   int citationsEmitted,
+                                  int inventedPageCount,
                                   @Nullable Double relevancyRate,
                                   @Nullable Double groundednessRate,
                                   long durationMillis,

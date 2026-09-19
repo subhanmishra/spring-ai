@@ -7,8 +7,10 @@ import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TableChunker;
 import com.example.subhanmishra.service.parse.TokenCounter;
 import com.example.subhanmishra.service.parse.XhtmlBlockParser;
+import com.example.subhanmishra.service.parse.pdf.PageFooterStripper;
 import com.example.subhanmishra.service.parse.pdf.PdfBlockReader;
 import com.example.subhanmishra.service.parse.pdf.PdfTableDetector;
+import com.example.subhanmishra.service.parse.pdf.TocEntryStripper;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,12 +124,59 @@ public class DocumentParserService {
         PagePdfDocumentReader documentReader = new PagePdfDocumentReader(resource, config);
         List<Document> pageDocs = documentReader.get();
 
+        // Both the printed page-number footer and the table-of-contents entries have to be removed here
+        // as well as in PdfBlockReader, or turning table detection off silently reinstates the
+        // wrong-citation bug. Each is a line of the page's text layer, so this reader picks them up
+        // exactly as the geometric one does.
+        PageFooterStripper stripper = PageFooterStripper.detect(
+                pageDocs.stream()
+                        .filter(page -> pageNumberOf(page) != null)
+                        .collect(Collectors.toMap(DocumentParserService::pageNumberOf,
+                                                  Document::getText,
+                                                  (first, second) -> first)));
+        TocEntryStripper tocStripper = TocEntryStripper.detect(pageDocs.stream().map(Document::getText).toList());
+
         List<SourceUnit> units = pageDocs.stream()
-                                         .map(page -> new SourceUnit(List.of(new ContentBlock.Prose(page.getText())),
-                                                                     page.getMetadata()))
+                                         .map(page -> {
+                                             Integer pageNumber = pageNumberOf(page);
+                                             String text = pageNumber != null
+                                                     ? stripper.strip(pageNumber, page.getText())
+                                                     : page.getText();
+                                             return new SourceUnit(
+                                                     List.of(new ContentBlock.Prose(tocStripper.strip(text))),
+                                                     page.getMetadata());
+                                         })
+                                         // A page holding nothing but its footer or its contents entries
+                                         // becomes empty, and an empty prose block would still produce a
+                                         // chunk.
+                                         .filter(unit -> unit.blocks().stream()
+                                                             .anyMatch(b -> !(b instanceof ContentBlock.Prose p)
+                                                                     || !p.text().isBlank()))
                                          .toList();
 
         return Map.of("documentStream", chunk(units), "totalPages", pageDocs.size());
+    }
+
+    /**
+     * The 1-based page number {@code PagePdfDocumentReader} put on a page document, or null when it
+     * carries none.
+     *
+     * <p>The metadata round-trips through readers that are not consistent about the value's type, so it
+     * is read defensively rather than cast - the same reason {@code getEnrichedStream} normalises it.
+     */
+    private static Integer pageNumberOf(Document page) {
+        Object value = page.getMetadata().get(PagePdfDocumentReader.METADATA_START_PAGE_NUMBER);
+        return switch (value) {
+            case Number number -> number.intValue();
+            case String string -> {
+                try {
+                    yield Integer.valueOf(string.trim());
+                } catch (NumberFormatException e) {
+                    yield null;
+                }
+            }
+            case null, default -> null;
+        };
     }
 
     /**
@@ -142,10 +191,11 @@ public class DocumentParserService {
             default -> null;
         };
 
-        List<PdfBlockReader.Page> pages;
+        PdfBlockReader.Pdf pdf;
         try (var stream = resource.getInputStream()) {
-            pages = PdfBlockReader.read(stream, forced);
+            pdf = PdfBlockReader.read(stream, forced);
         }
+        List<PdfBlockReader.Page> pages = pdf.pages();
 
         List<SourceUnit> units = pages.stream()
                                       .map(page -> new SourceUnit(page.blocks(),
@@ -156,10 +206,10 @@ public class DocumentParserService {
                            .flatMap(page -> page.blocks().stream())
                            .filter(ContentBlock.Table.class::isInstance)
                            .count();
-        log.info("Read {} page(s) of {} with table detection {}, recovering {} table(s)",
-                 pages.size(), resource.getFilename(), ragProperties.tableDetection(), tables);
+        log.info("Read {} of {} page(s) of {} with table detection {}, recovering {} table(s)",
+                 pages.size(), pdf.pageCount(), resource.getFilename(), ragProperties.tableDetection(), tables);
 
-        return Map.of("documentStream", chunk(units), "totalPages", pages.size());
+        return Map.of("documentStream", chunk(units), "totalPages", pdf.pageCount());
     }
 
     /**

@@ -81,9 +81,11 @@ public final class CitationParser {
     private static final Pattern CITATION_IN_SPAN = Pattern.compile(
             "([^,;\\n]*?[^,;\\s.\\n]\\.[A-Za-z][A-Za-z0-9]{1,9})"
             + "(?:\\s*,)?"
-            // An optional page marker and number, then only what can continue a page reference - a
-            // range ("pp. 12-14") or a list ("pp. 12, 14").
-            + "(?:\\s*(?:pp?\\.?|pages?)\\s*(\\d{1,5})[-–\\s\\d]*)?");
+            // An optional page marker and reference, then only what can continue a page reference - a
+            // range ("pp. 12-14") or a list ("pp. 12, 14"). The reference is captured whole, dots and
+            // all: "p. 5.3" is a section number written where a page goes, and truncating it to 5
+            // would report a page the model never claimed. Citation decides which it is.
+            + "(?:\\s*(?:pp?\\.?|pages?)\\s*(\\d{1,5}(?:\\.\\d{1,3})*)[-–\\s\\d]*)?");
 
     /** Splits a header's inner text into its filename and page halves, e.g. {@code ", p. 590"}. */
     private static final Pattern HEADER_PAGE_SUFFIX = Pattern.compile(",\\s*p\\.\\s*(\\d{1,5})\\s*$");
@@ -152,11 +154,11 @@ public final class CitationParser {
                 if (fileName.isEmpty()) {
                     continue;
                 }
-                Integer page = inner.group(2) != null ? Integer.valueOf(inner.group(2)) : null;
+                Citation citation = citationOf(fileName, inner.group(2));
                 // De-duplicated: an answer citing the same page in three sentences has cited one
                 // source, and counting it three times would flatter the validity rate.
-                if (seen.add(key(fileName, page))) {
-                    citations.add(new Citation(fileName, page));
+                if (seen.add(key(citation))) {
+                    citations.add(citation);
                 }
             }
         }
@@ -172,7 +174,7 @@ public final class CitationParser {
         List<Citation> citations = new ArrayList<>();
         for (Document document : retrieved) {
             Citation citation = parseHeader(document.getText());
-            if (citation != null && seen.add(key(citation.fileName(), citation.pageNumber()))) {
+            if (citation != null && seen.add(key(citation))) {
                 citations.add(citation);
             }
         }
@@ -188,8 +190,24 @@ public final class CitationParser {
         return names;
     }
 
-    private static String key(String fileName, @Nullable Integer page) {
-        return fileName.toLowerCase(Locale.ROOT) + "#" + page;
+    /**
+     * A citation from a filename and whatever the model wrote where a page belongs.
+     *
+     * <p>A reference containing a dot is a section number, not a page - "5.3" is the heading
+     * "5.3. Endpoints". It is kept verbatim as a label so the failure reads as what the model wrote.
+     */
+    private static Citation citationOf(String fileName, @Nullable String pageRef) {
+        if (pageRef == null) {
+            return new Citation(fileName, null);
+        }
+        return pageRef.indexOf('.') < 0
+                ? new Citation(fileName, Integer.valueOf(pageRef))
+                : new Citation(fileName, null, pageRef);
+    }
+
+    private static String key(Citation citation) {
+        String page = citation.pageLabel() != null ? citation.pageLabel() : String.valueOf(citation.pageNumber());
+        return citation.fileName().toLowerCase(Locale.ROOT) + "#" + page;
     }
 
     private static @Nullable String firstLineOf(@Nullable String text) {

@@ -86,6 +86,47 @@ class EvalScoringServiceTest {
         }
 
         @Test
+        @DisplayName("a pageless citation to a retrieved document is imprecise, not fabricated")
+        void pagelessCitationToRetrievedDocumentIsValid() {
+            // Found by the eval suite flagging a bare "[spring-boot-reference.pdf]" as fabricated. The
+            // document really was retrieved, so nothing was invented - and for a Tika source, which has
+            // no pages at all, this is the only correct citation form.
+            List<Document> retrieved = List.of(chunk("manual.pdf", 277, "actuator endpoints", 0.81));
+
+            EvalScores scores = service.score("As described in (manual.pdf).", retrieved);
+
+            assertThat(scores.citations().emitted()).isEqualTo(1);
+            assertThat(scores.citations().valid()).isEqualTo(1);
+            assertThat(scores.citations().fabricated()).isZero();
+        }
+
+        @Test
+        @DisplayName("a pageless citation to a document never retrieved is still fabricated")
+        void pagelessCitationToUnretrievedDocumentIsFabricated() {
+            List<Document> retrieved = List.of(chunk("manual.pdf", 277, "actuator endpoints", 0.81));
+
+            EvalScores scores = service.score("As described in (other-manual.pdf, p. 3).", retrieved);
+
+            assertThat(scores.citations().fabricated()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a section number cited as a page is fabricated, not an imprecise citation")
+        void sectionNumberCitedAsAPageIsFabricated() {
+            // The model did claim a location, so the leniency granted to a bare filename does not
+            // apply - and the location it claimed is not one the context offered.
+            List<Document> retrieved = List.of(chunk("manual.pdf", 277, "5.3. Endpoints", 0.81));
+
+            EvalScores scores = service.score("Exposed over HTTP (manual.pdf, p. 5.3).", retrieved);
+
+            assertThat(scores.citations().emitted()).isEqualTo(1);
+            assertThat(scores.citations().fabricated()).isEqualTo(1);
+            assertThat(scores.citations().fabricatedCitations())
+                    .extracting(Object::toString)
+                    .containsExactly("manual.pdf p.5.3");
+        }
+
+        @Test
         @DisplayName("an answer citing nothing is vacuously valid, which is why coverage exists")
         void uncitedAnswer() {
             List<Document> retrieved = List.of(chunk("manual.pdf", 277, "actuator", 0.81));

@@ -23,9 +23,21 @@ public record PipelineProvenance(Integer version, PipelineSettings settings) {
      * <ul>
      *   <li><b>1</b> - first version to record provenance at all. Documents ingested before this
      *       carry no version and are reported stale, because what produced them is unknown.</li>
+     *   <li><b>2</b> - PDF page-number footers are stripped. The printed page number sat at the end of
+     *       every page's text, which made the model cite it in preference to the correct PDF page in
+     *       the citation header (the reference manual's two numberings differ by 19), and left 15% of
+     *       that document's chunks holding nothing but a page number. Chunks written under version 1
+     *       still contain those footers, so their citations remain 19 pages out and their junk chunks
+     *       keep competing for top-k - re-ingest to fix both.</li>
+     *   <li><b>3</b> - table-of-contents entries are stripped. The same defect as version 2 in a second
+     *       place: a contents line ends in the printed page it refers to, and the model cited one of
+     *       those (page 263, read off a contents page it had retrieved) after the footers were already
+     *       gone. The entries were also an eighth of the reference manual's chunks and duplicated
+     *       headings that appear in the body, so they competed with the real text for the same
+     *       queries.</li>
      * </ul>
      */
-    public static final int CURRENT_VERSION = 1;
+    public static final int CURRENT_VERSION = 3;
 
     /**
      * Why a document's chunks are out of date, or {@code null} when they are current.

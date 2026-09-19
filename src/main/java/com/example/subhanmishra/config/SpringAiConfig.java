@@ -49,8 +49,15 @@ public class SpringAiConfig {
 
             When you use a passage, cite it inline as (filename, p. N) using the values from
             that passage's own source line. Do not cite a filename or page number that does
-            not appear in a source line above. Prefer the context over prior knowledge; if
-            you go beyond it, say which part is not from the documents.
+            not appear in a source line above.
+
+            N is always a whole number copied from a source line. A heading inside a passage,
+            such as "5.3. Endpoints" or "5.5.1. Configure a Logger", is a section number and
+            never a page - do not write (filename, p. 5.3). Cite the page from the source line
+            of the passage the heading appears in.
+
+            Prefer the context over prior knowledge; if you go beyond it, say which part is not
+            from the documents.
             """);
 
     @Bean
@@ -65,7 +72,7 @@ public class SpringAiConfig {
         return builder.defaultSystem("""
                                         You are DocAI, an intelligent, versatile, and friendly AI document intelligence assistant.
                                         Your Capabilities:
-                                        1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line.
+                                        1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line. A page number is always a whole number; a dotted heading number inside a passage, such as "5.3", is a section and must never be cited as a page.
                                         2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
                                         3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
                                         4. Tone & Format: Always be warm, professional, clear, and structured. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
