@@ -25,6 +25,10 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 ./mvnw spring-boot:run     # auto-starts compose.yaml (pgvector, redis, observability stack) via Spring Boot Docker Compose support
 ./mvnw test
 ./mvnw clean package
+
+# RAG evaluation suite. Needs the corpus indexed and Ollama up; takes minutes.
+# -Dgroups=eval alone does NOT work - see the Evaluation section.
+./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
 
 ## Project structure
@@ -36,7 +40,7 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   ├── java/.../subhanmishra/
 │   │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
 │   │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
-│   │   │   │               # SpringAiProperties
+│   │   │   │               # SpringAiProperties, EvalConfig, EvalProperties
 │   │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │   │   │   ├── dto
 │   │   │   ├── entity
@@ -44,8 +48,13 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │   ├── repository
 │   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
 │   │   │       │           # DocumentMetadataService, DocumentHistoryService,
-│   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService
+│   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
+│   │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
+│   │   │       │           # GoldenEvalService
 │   │   │       │           # (every @Service lives directly here, never in a sub-package)
+│   │   │       ├── eval    # CitationParser, Citation, EvalScores, RetrievalScores,
+│   │   │       │           # CitationScores, AnswerScores, ExpectationScores,
+│   │   │       │           # GoldenCase, GoldenDataset, GoldenDatasetLoader
 │   │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
 │   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
 │   │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
@@ -60,10 +69,14 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │       │                          # app.rag.* chunking + search (top-k, similarity threshold);
 │   │       │                          # app.ai.* max chat-history messages
 │   │       ├── logback-spring.xml     # console + Loki appenders; traceId/spanId structured metadata
-│   │       └── db/migration/          # Flyway migrations (V1..V4, e.g. V4__Add_Pipeline_Provenance.sql)
+│   │       ├── eval/golden-dataset.yaml # curated regression cases; expected pages VERIFIED against
+│   │       │                          # the live corpus by reading chunk text, never guessed
+│   │       └── db/migration/          # Flyway migrations (V1..V5, e.g. V5__Add_Eval_Results.sql)
 │   └── test                           # SpringAiApplicationTests (context load), plus parser tests:
 │                                      # DocumentParserServiceTest, XhtmlBlockParserTest,
 │                                      # TableChunkerTest, PdfTableDetectorTest
+│                                      # eval: CitationParserTest, EvalScoringServiceTest, and
+│                                      # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
 ├── docker/                            # config for the observability stack (see below)
 │   ├── grafana/                       # grafana.ini + provisioning/{datasources,dashboards}
 │   ├── loki/
@@ -222,6 +235,57 @@ Genuine 500s now return a fixed generic detail rather than `ex.getMessage()`, wh
 - The controller is `@Profile("dev")`, so outside the dev profile the bean is not registered and the paths 404. That is weaker than authentication; there is no Spring Security on the classpath, and when there is, this gate should be replaced rather than supplemented. Verified: under `--spring.profiles.active=prod` the admin path 404s while `/api/v1/documents` still answers.
 - It is also the first endpoint using `@Valid`, which is what finally makes `DocAiExceptionHandler.handleValidation` reachable — that handler had been dead code.
 
+## Evaluation
+
+**Answer quality is measured continuously on real traffic, and on demand against a curated dataset. The split between the two is the whole design, and it follows from one question: does the metric need to know what the right answer was?**
+
+Most do not. Citation validity and fabrication, zero-hit rate, score spread, refusals and the LLM judges are all **reference-free** — they compare the answer against the context it was given, which is available on every real chat turn. Only recall metrics (hit-rate@k, MRR) and expected-phrase coverage need ground truth, and those are the only things the golden suite adds. Getting this backwards and building only a batch harness would leave the dashboard showing a picture of the last time someone ran a script.
+
+**Online evaluation hangs off the live chat path and must never delay a response.** `ChatService` takes the `ChatResponse` rather than `content()`, reads the retrieved chunks from `QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS` (`"qa_retrieved_documents"`, which the advisor's `after()` copies into the response metadata), and hands them to `OnlineEvalService`. Points that are load-bearing:
+
+- **Deterministic scoring runs inline; LLM judging is fired and forgotten.** The deterministic half is regex over data already in hand — microseconds, no network — so it runs on 100% of turns with no sampling and no drops. Judging goes to a virtual thread after the answer has already been returned.
+- **Async does not make judging free, it relocates the cost.** Ollama serialises on one runner slot, so a judge call occupies the chat model and the *next* user's generation queues behind it. Hence `app.eval.online.judge-sample-rate` (0.1) and `max-concurrent-judgements` (1).
+- **Admission is non-blocking and drops rather than queues.** The permit is taken with `tryAcquire` *before* a thread is started. Submitting first and blocking on the permit inside would accumulate parked virtual threads without limit — the bound has to be enforced at the door. A rising `rag_eval_online_judgements_dropped_total` means the sample rate is too high for the traffic, not that anything is broken.
+- **Judges are built from a fresh prototype `ChatClient.Builder`** (`ChatClientAutoConfiguration` declares it `@Scope("prototype")`). A judge inheriting the app's builder would carry the `QuestionAnswerAdvisor` and chat memory — it would retrieve its own context into the grading prompt and accumulate history across verdicts. Neither failure throws or logs; the scores just quietly stop meaning anything.
+- **Ungrounded turns are never judged.** Both judges score an answer *against its context*; with nothing retrieved, `FactCheckingEvaluator` is asked whether a claim is supported by a blank document and says no. Feeding those in would drag groundedness down in proportion to how much general conversation the assistant handles — a capability its system prompt promises.
+- **The streaming path accumulates.** `BaseAdvisor.adviseStream` calls `after()` only on the chunk carrying a finish reason, so the retrieved documents arrive on the *final* response and the answer text exists only as the concatenation of the chunks. Evaluation hangs off `doOnComplete`, so a cancelled or failed stream is not scored — judging a half-delivered answer would report a truncation as a quality problem.
+
+**The judge is `gemma4:e2b` — the chat model itself — and that is a memory decision, not a quality one.** Measured on the dev host: gemma4:e2b resident at **1.59 GiB**, nomic-embed-text at **0.30 GiB**, leaving **0.74 GB** free of 15.63 GB (2.81 GB with nothing loaded). `bespoke-minicheck`, the smallest purpose-built grounded-factuality judge, ships only at 7B with a **4.39 GiB** weights layer — it does not fit even after evicting *both* resident models, so every judgement would page. Verify with `/api/ps` and `\Memory\Available MBytes` before revisiting; file size predicts nothing here, since gemma4:e2b is a 7.16 GB file resident at 1.59 GiB.
+
+- **Self-judging bias is real and these numbers are optimistic.** A model grading its own output is more generous than an independent one. The bias is roughly a constant offset, so a *drop* after a prompt or model change is meaningful — read the judged rates as a trend, never quote the absolute number.
+
+**The golden suite is triggered by a tagged test, not an endpoint.** A run takes minutes (375s for 9 cases, unjudged), which would need async submission, polling and single-flight machinery to expose over HTTP safely. Note the command, because the obvious one does not work:
+
+```bash
+./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+```
+
+`-Dgroups=eval` alone does **not** work: in JUnit 5 tag filtering an exclusion beats an inclusion, so the tag stays excluded however it is included. The exclusion itself has to be cleared, which is why `<excludedGroups>` is bound to the `surefire.excludedGroups` property rather than hardcoded.
+
+- **Each case gets a fresh conversation id, cleared in a `finally`.** `MessageWindowChatMemory` would otherwise feed case N's answer into case N+1's prompt, so the dataset's order would change its scores. Clearing also keeps eval conversations out of the chat API's conversation list.
+- **Cases run serially, and generation is a separate phase from judging.** Serial for the same reason bulk upload is. Two-phase because interleaving would swap models twice per case rather than once per run — worth nothing today with a self-judge, and the difference between 1 and 2N model loads the day someone points `app.eval.judge-model` elsewhere.
+- **Golden gauges are fed from Postgres, not from the run that produced them.** The suite runs in the *test* JVM, with its own meter registry that Prometheus never scrapes — so a run published its gauges into a registry that was thrown away, and the dashboard sat at zero while the results were in the database all along. `EvalMetricsService` now refreshes the golden gauges from the latest `eval_run` row, driven by the scrape itself (a Micrometer gauge's value function is evaluated when Prometheus scrapes), so no `@EnableScheduling` is needed. **Golden gauges therefore require `app.eval.golden.persist=true`.**
+- **`relevancy`/`groundedness` are NULL for "not judged", never FALSE.** Judging is off by default, so the common case is no verdicts; any aggregate must exclude nulls rather than coalesce them, and the gauges report `NaN` until some run has actually judged, because 0.0 renders as a scarlet "zero percent passed" for something nobody measured.
+- **Expected pages in the dataset were verified by reading retrieved chunk text**, not inferred from a good similarity score. Re-verify after any chunking change, since page attribution comes from the citation header.
+
+**Every fixed-tag online meter is pre-registered at zero in `EvalMetricsService`'s constructor, and removing that would blank three panels.** A Micrometer counter is created lazily on first use, so a counter for an event that has not happened yet has **no series at all** — Prometheus returns nothing and Grafana renders "No data" rather than `0`. That is precisely backwards for the health signals, whose good state *is* zero: "no refusals have occurred" and "the refusal metric is broken" looked identical, and the judge-throughput and answer-health panels read as empty on a perfectly working system. `register()` is idempotent, so pre-registration only forces creation and never resets a count. Two consequences:
+
+- **Tagged counters must be enumerated over their whole tag cross-product**, since a series exists per tag combination, not per name — `judgements.total` is `{relevancy, groundedness} × {pass, fail}`, so four series. `DistributionSummary` is lazy in the same way, hence the four `registry.summary(...)` calls.
+- **The golden `cases.total{suite,case}` and `runs.total{suite}` counters are deliberately *not* pre-registered.** Their tag values come from whichever dataset runs, so they cannot be enumerated in advance; no panel reads them (the golden row reads gauges), and they appear on the first suite run.
+
+**A ratio must not be guarded with `clamp_min(denominator, 1)` when the denominator being zero means "not measured".** The guard avoids a divide-by-zero but substitutes a confident `0` for "nothing to report" — with counters now existing at zero, the judge pass-rate panel rendered a scarlet **0%** when nothing had been judged, and citation validity did the same before any answer had cited anything. Plain division yields NaN, which Prometheus omits and Grafana shows as no-data, which is the honest reading. Same principle as the `NaN` on the judged golden gauges.
+
+**Rate panels are the wrong instrument for this deployment.** `rate(...[5m])` over a handful of manual chat turns an hour is blank except for the few minutes after a request, and a per-second rate of a rare event (a refusal, a dropped judgement) rounds to a flat zero indistinguishable from a broken metric. The cumulative counter is shown instead on the citation-outcome, judge-throughput and answer-health panels — it always renders, and a flat line reads correctly as "nothing has happened". Retrieval-quality means use a rolling `[1h]` rather than `[5m]` for the same reason. Revisit if this ever sees continuous traffic.
+
+**A bracketed filename is not necessarily a citation, and treating it as one makes the fabrication rate useless.** Answers about this corpus are full of parentheses holding filenames — `(application.properties)`, `(pom.xml)` — which are prose. `EvalScoringService` therefore counts a candidate only when it carries a page number *or* its filename is one of the documents actually retrieved. A page number on an unretrieved file (`(application.properties, p. 12)`) still counts and is still fabricated, which is the case worth catching. Two parsing traps, both found by real output rather than reasoning:
+
+- **Several citations share one pair of brackets**: `(manual.pdf, p. 283; manual.pdf, p. 299)`. A pattern anchored on a closing bracket right after the page number matches *neither*. `CitationParser` finds bracketed spans first, then parses citations within each span.
+- **The extension must start with a letter**, or `(version 3.14)` parses as a file named `3.14`; and it must allow ten characters, because `properties` is one.
+
+**KNOWN DEFECT — the model cites printed page numbers, not PDF page numbers.** The suite's first run measured a **0.25 citation fabrication rate**, and every one of those was the same bug rather than random invention: the manual's front matter makes the printed page number differ from the PDF page by exactly **19** (PDF 299 = printed 280, PDF 404 = printed 385, PDF 392 = printed 373), and the printed number sits in the page footer *inside the chunk body* because the PDF reader extracts it with the content. Offered `[spring-boot-reference.pdf, p. 299]` in the header and a bare `280` at the end of the passage, the model prefers the number that looks like part of the document. A reader following the citation lands 19 pages early, so this is a genuine defect. `EvalSuiteIT.MAX_CITATION_FABRICATION` is a **ratchet at 0.30 documenting it**, not a target — fixing it means stripping the page footer during parsing or reconciling the header against the printed number, and the threshold should drop to 0 the moment that happens.
+
+Retrieval itself is in good shape and the suite says so: **hit rate 1.000 and MRR 1.000** on that same run — the correct page was not merely retrieved but ranked first, every time.
+
 ## Docker environment (`compose.yaml`)
 
 Services: pgvector, pgadmin, redis, redis-exporter, postgres-exporter, otel-collector, prometheus, grafana, tempo, loki. The postgres-exporter collector flags are asymmetrically named — `--collector.stat_user_tables` but `--collector.statio_user_indexes` — and an unknown flag makes the container exit(1) rather than warn. Ports and credentials are documented in `README.md`'s Infrastructure section — don't duplicate them here, keep that as the canonical copy.
@@ -238,6 +302,13 @@ The app exports metrics (Prometheus scrape on management port `9095`), traces (O
 - **Tempo's metrics generator is enabled per tenant** via `overrides.defaults.metrics_generator.processors`. Configuring the `metrics_generator` block alone does not switch it on.
 - **Grafana datasource links**: Loki `derivedFields` needs an explicit `url` even when `datasourceUid` is set. Metrics → logs has no built-in link and uses a **correlation**, which is provisioned *inside* the datasource file — Grafana silently ignores a `provisioning/correlations/` directory.
 - **Dashboard exemplars** require `"exemplar": true` per target. It is set on the `http_server_requests_seconds_*` targets only; gauges (JVM, Hikari) and redis-exporter series cannot carry exemplars.
+- **There is a fourth datasource, Postgres**, provisioned in `docker/grafana/provisioning/datasources/4_postgres.yml` solely for the evaluation dashboard's per-case tables. It reaches the database as `pgvector:5432` — the compose service name and *internal* port, since Grafana resolves it on the compose network where the host port mapping does not apply. Prometheus holds every eval score; this exists for the detail that must not go into a metrics store, namely the per-case answer text and failure reasons.
+- **That datasource needs `database` set under `jsonData`, not only at the top level, and the plugin id is `grafana-postgresql-datasource`.** Both were wrong at first and both failed *only in the browser*, which is what makes them worth recording. The backend reads the top-level `database` and resolves the datasource by `uid`, so `/api/ds/query` answered every panel's SQL perfectly while all four table panels rendered completely blank — no table, no "No data", no error on the panel, the sole trace being a console message reading "You do not currently have a default database configured". Grafana 13.2.1 registers no `postgres` alias for the renamed plugin, so a dashboard declaring `"type": "postgres"` cannot load the plugin client-side either. **Testing a Grafana panel through the API proves nothing about whether it renders** — read the browser console, and check `/api/datasources/uid/postgres` for how the datasource was actually stored rather than trusting the YAML.
+- **Grafana stops rendering panels while `document.hidden` is true**, and a table panel has been measured taking 17 seconds to paint. Both matter when checking a dashboard from an automated browser: a blank panel there is far more likely to be a hidden or still-painting document than a broken query. Poll for the rendered content rather than waiting a fixed interval.
+- **Three dashboards, split by the question they answer, and every one grouped into rows.** `spring-ai-ragr-overview` answers "is the *application* healthy" — rows for JVM runtime, HTTP/Spring MVC, HikariCP and backing services (Redis and Postgres, from their exporters). `spring-ai-rag-metrics` answers "is the *AI pipeline* healthy" — rows for Ollama model calls, tokens and throughput, the RAG advisor chain and the vector store. `spring-ai-rag-evals` answers "are the *answers* any good" (see Evaluation). Keep new panels on the dashboard matching that question rather than adding AI panels back to the overview, which is what the split undid.
+- **Five overview panels were duplicates of AI/RAG panels and were merged, not moved.** Model call rate, call latency, token throughput, advisor latency and pgvector latency existed on both dashboards in slightly different forms. The surviving versions keep the better query in each case — the advisor panel now carries the mean *and* the p95 together, and the vector-store latency panel splits `add` from `query` rather than aggregating them.
+- **`spring.ai.chat.client` needs `percentiles-histogram` enabled or its latency panel is permanently empty.** The "ChatClient end-to-end latency" panel ran `histogram_quantile` against a timer that published no buckets, so it had never once shown data. Enabling it also requires `"[spring.ai.chat.client.active]": false` alongside, because these keys are prefix matches — exactly the trap already documented for `spring.ai.advisor`. Verified after the change: 69 `spring_ai_chat_client_seconds_bucket` lines, and 0 for the `.active` variant.
+- **Three AI/RAG panels are empty by design and say so in their descriptions.** The embedding-throughput gauge ends in `> 50` so it reports genuine ingestion peaks rather than idle noise; the chat-throughput gauge ends in `> 0`; and the LLM error-rate panel filters `error!="none"`, which Spring AI creates no series for until a call actually fails. Do not "fix" these by removing the guards — check whether ingestion or a failure has actually happened first.
 
 ## See also
 

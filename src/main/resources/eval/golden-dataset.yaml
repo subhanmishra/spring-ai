@@ -1,0 +1,119 @@
+suite: spring-boot-reference
+corpus: spring-boot-reference.pdf
+description: >-
+  Regression suite for the RAG pipeline, scored against the 645-page Spring Boot reference manual.
+
+  Every expectedPages value below was VERIFIED against the live corpus rather than guessed: each query
+  was run through the retrieval probe and the returned chunk text was read to confirm the page really
+  does contain the answer. A page that merely scored well was not accepted. Re-verify them after any
+  change that alters chunking, because page attribution comes from the chunk's citation header and a
+  different chunking produces different page boundaries.
+
+  The suite deliberately mixes three kinds of case, because a dataset of nothing but "find the right
+  page" questions would miss most of the ways this pipeline has actually broken:
+
+    - recall cases, which assert a specific page is retrieved;
+    - grounding cases, where the corpus cannot answer and the correct behaviour is to answer anyway
+      without inventing a citation;
+    - capability cases, which guard the system prompt's promise to handle ordinary conversation
+      against a change that makes the assistant refuse everything off-corpus.
+
+cases:
+
+  - id: actuator-http-exposure
+    query: How are actuator endpoints exposed over HTTP, and what URL prefix do they use?
+    description: >-
+      Baseline retrieval case. Page 277 states the /actuator prefix and the mapping rule directly, and
+      is retrieved at a comfortable margin (0.81 against a 0.60 threshold), so a failure here means
+      something has broken in embedding or chunking rather than that the question was marginal.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [277, 278]
+    mustContain:
+      - actuator
+
+  - id: logging-level-property
+    query: Which property sets the log level for a specific logger, and what values does it accept?
+    description: >-
+      Asserts an exact property name reaches the answer. Pages 111 and 112 carry
+      logging.level.<logger-name> and the TRACE..OFF value list across a page boundary, which makes
+      this the case most sensitive to paragraph coalescing: the answer needs both halves, and they are
+      in different chunks because coalescing never spans a page.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [111, 112]
+    mustContain:
+      - logging.level
+
+  - id: profiles-activation
+    query: How do I activate a specific Spring profile?
+    description: >-
+      Page 107 names spring.profiles.active explicitly. A dotted property name is a good mustContain
+      token precisely because a model cannot paraphrase it - either it came from the context or it did
+      not.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [107]
+    mustContain:
+      - spring.profiles.active
+
+  - id: starter-parent-purpose
+    query: What does the spring-boot-starter-parent POM provide to a project that uses it?
+    description: >-
+      Page 32 describes the dependency-management section and the Maven defaults. Retrieved at 0.80.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [32]
+    mustContain:
+      - spring-boot-starter-parent
+
+  - id: datasource-pool-configuration
+    query: How is a DataSource connection pool configured, and what happens if I define my own DataSource bean?
+    description: >-
+      Page 158 states both halves - the spring.datasource.* properties and the rule that defining your
+      own bean disables auto-configuration. A two-part question, which is where a retrieval system that
+      returns only the single best-matching chunk starts to show.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [158]
+    mustContain:
+      - spring.datasource
+
+  - id: executable-jar-maven-plugin
+    query: How do I use the Spring Boot Maven plugin to build an executable jar?
+    description: >-
+      Page 427 carries the actual plugin XML. Included because a code block is chunked differently
+      from prose and is a common casualty of a chunking change.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [343, 427]
+    mustContain:
+      - spring-boot-maven-plugin
+
+  - id: actuator-port-separation
+    query: How do I make the actuator endpoints listen on a different port from the main application?
+    description: >-
+      Page 419 answers this, and the case is here as a trap. The near-miss question "how do I change
+      the server port" retrieves this same page - the manual's own wording is about the ACTUATOR port -
+      so a pipeline that conflates the two looks correct on one phrasing and is wrong on the other.
+      Asserting the actuator phrasing pins down which of the two the corpus actually supports.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [419]
+    mustContain:
+      - management.server
+
+  - id: out-of-corpus-no-fabrication
+    query: What were the total quarterly revenue figures for Acme Corporation in 2019?
+    description: >-
+      Nothing in a Spring Boot manual can answer this. The failure being guarded against is not a wrong
+      answer but a CONFIDENT one - the model attaching a plausible page number to an answer it invented.
+      expectGrounded false means any citation emitted here is by definition fabricated. Note this case
+      is not judged by the LLM judges: with no usable context there is nothing to judge against.
+    expectGrounded: false
+
+  - id: general-knowledge-not-refused
+    query: In one sentence, what is the difference between a stack and a queue?
+    description: >-
+      Guards capability 2 of the system prompt, which promises to answer general questions that are not
+      in the uploaded documents. This is the case that fails if anyone restores QuestionAnswerAdvisor's
+      stock closing line ("Given the context ... and not prior knowledge ... inform the user that you
+      can't answer"), which SpringAiConfig.QA_PROMPT_TEMPLATE softens for exactly this reason. A
+      refusal here is a regression even though it looks like caution.
+    expectGrounded: false
+    expectRefusal: false
+    mustNotContain:
+      - I don't have enough information

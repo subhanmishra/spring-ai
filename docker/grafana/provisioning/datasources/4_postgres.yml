@@ -1,0 +1,54 @@
+apiVersion: 1
+
+# Postgres, read-only, for the evaluation dashboard's per-case tables.
+#
+# Prometheus carries every eval SCORE; this datasource exists for the detail Prometheus deliberately
+# does not hold. A gauge can say the suite's citation validity fell to 0.7 - only a row can say which
+# case failed, what it was asked, what it answered, and which page number it invented. Putting that in
+# Prometheus would mean a label per case and the answer text as a label value, which is exactly how a
+# metrics store is destroyed.
+#
+# Reaching the database by its compose SERVICE name and internal port (5432), not the published one:
+# Grafana resolves this on the compose network, where the host's port mapping does not apply.
+datasources:
+  - name: Postgres
+    # The plugin id, spelled exactly as the plugin registry has it. Grafana renamed this from the
+    # legacy `postgres` and, as of 13.2.1, registers NO alias for the old name. Provisioning happens
+    # to accept `postgres` and silently stores the canonical id - but a DASHBOARD carrying
+    # `"type": "postgres"` cannot resolve the plugin in the browser and its panels render empty,
+    # while `/api/ds/query` answers perfectly because the backend resolves by uid and ignores the
+    # type. That split is worth remembering: testing a panel through the API proves nothing about
+    # whether it renders.
+    type: grafana-postgresql-datasource
+    uid: postgres
+    access: proxy
+    url: pgvector:5432
+    user: myuser
+    # Set in BOTH places on purpose, and leaving out the jsonData one silently breaks the dashboard.
+    # The backend reads the top-level `database`, so /api/ds/query answers correctly with only that -
+    # but the modern SQL datasource frontend reads `jsonData.database`, and without it every panel
+    # fails client-side with "You do not currently have a default database configured" and renders
+    # completely blank: no table, no "No data", no error on the panel itself. The only trace is a
+    # browser console message. That asymmetry is what made this hard to find, because every
+    # server-side test of these queries passes while the panels show nothing.
+    database: ragdatabase
+    editable: false
+    secureJsonData:
+      # Same credentials as spring.datasource in application-dev.yaml. This is a local development
+      # stack whose password is already committed in compose.yaml; anything real belongs in an env var.
+      password: secret
+    jsonData:
+      # The location the browser actually reads - see the note above.
+      database: ragdatabase
+      sslmode: disable
+      postgresVersion: 1600
+      # The eval tables are tiny - one row per case per run - so no connection pooling pressure, but
+      # bound it anyway rather than letting a dashboard refresh loop open connections against the same
+      # Postgres the application's Hikari pool is sized against.
+      maxOpenConns: 4
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      # Read-only: this datasource must never be able to write to the application's database. Grafana
+      # cannot enforce that itself, so if this stack ever leaves a laptop, create a dedicated role with
+      # SELECT on eval_run and eval_case_result only and use it here.
+      timescaledb: false

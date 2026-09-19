@@ -49,6 +49,46 @@ Indexing behaviour is tuned under `app.rag.*` in `application-dev.yaml`:
 | `ingestion-concurrency` | `4` | Batches written in parallel. Must stay well below `spring.datasource.hikari.maximum-pool-size` |
 | `top-k` / `similarity-threshold` | `5` / `0.6` | Retrieval settings used by the chat endpoints |
 
+### Evaluation
+
+Answer quality is measured in two places, configured under `app.eval.*`.
+
+**Live traffic is scored automatically.** Every real chat turn is checked against the context it was
+actually given — how many citations it emitted, how many of those pointed at a page that was really
+retrieved, whether anything was retrieved at all, whether the assistant refused. This is pure string
+comparison over data already in the response, so it runs on 100% of turns and adds no measurable
+latency. The results appear on the **"spring-ai-ragr — RAG evaluation"** Grafana dashboard.
+
+A fraction of turns is additionally sent to two LLM judges (relevancy and groundedness). **Judging
+never blocks the response** — the answer is already on its way back to the caller before a judgement
+starts. It is still sampled, because Ollama serialises on one runner slot, so a judge call occupies
+the chat model and the next user's generation queues behind it.
+
+| Property | Default | Purpose |
+|---|---|---|
+| `enabled` | `true` | Master switch for all evaluation |
+| `judge-model` | `gemma4:e2b` | Model used by the LLM judges — the chat model itself, see below |
+| `online.judge-sample-rate` | `0.1` | Fraction of live answers sent to the judges. `0.0` keeps the free deterministic metrics and switches off the model calls |
+| `online.max-concurrent-judgements` | `1` | Judgements in flight. Over this bound a judgement is **dropped and counted**, never queued |
+| `golden.judged` | `false` | Whether a suite run also asks the judges. Roughly triples the run time |
+| `golden.persist` | `true` | Write run and per-case rows to Postgres. Required for the dashboard's per-case tables **and** for its golden score panels |
+
+**The judge is the chat model grading its own answers**, which makes these rates optimistic. A
+dedicated judge would be better, but the smallest purpose-built one (`bespoke-minicheck`) needs
+4.39 GiB and does not fit on a machine already holding the chat and embedding models. Read the judged
+rates as a trend — a drop after a change is meaningful — rather than as an absolute quality score.
+
+**The curated regression suite** replays a fixed set of questions with known-correct pages, which is
+the only way to measure retrieval recall. It needs the corpus indexed and takes several minutes:
+
+```bash
+./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+```
+
+Note that `-Dgroups=eval` on its own will **not** run it: a JUnit tag exclusion beats an inclusion, so
+the exclusion itself has to be cleared. Results are written to the `eval_run` and `eval_case_result`
+tables and picked up by the dashboard within 30 seconds.
+
 ## Running the Application
 
 This project uses Spring Boot's Docker Compose support. Ensure Docker (and Ollama) are running, then start the application:
@@ -178,7 +218,12 @@ Full OpenAPI docs are available via springdoc once the app is running (default: 
 * **postgres-exporter** — Exposes server-side Postgres metrics to Prometheus. Port `9187`. Runs with the `stat_user_tables` and `statio_user_indexes` collectors enabled so `vector_store` index-vs-sequential scan counts are visible.
 * **otel-collector** — OpenTelemetry Collector. Ports `4317` (gRPC), `4318` (HTTP).
 * **prometheus** — Metrics. Port `9090`.
-* **grafana** — Dashboards (Prometheus/Loki/Tempo pre-provisioned). Port `3000`, anonymous access with Admin role (no login).
+* **grafana** — Dashboards (Prometheus/Loki/Tempo/Postgres pre-provisioned). Port `3000`, anonymous access with Admin role (no login). Three dashboards, each grouped into collapsible rows and each answering a different question:
+  * **overview** — *is the application healthy?* JVM runtime, HTTP / Spring MVC, HikariCP, and the backing services (Redis, Postgres).
+  * **AI / RAG metrics** — *is the AI pipeline healthy?* Ollama model calls, token throughput, the RAG advisor chain, and the pgvector store.
+  * **RAG evaluation** — *are the answers any good?* Live citation fidelity and retrieval quality, plus the curated regression suite.
+
+  The Postgres datasource exists for the evaluation dashboard's per-case tables and reads `eval_run` / `eval_case_result`.
 * **tempo** — Distributed tracing backend. Port `3200`.
 * **loki** — Log aggregation. Port `3100`.
 

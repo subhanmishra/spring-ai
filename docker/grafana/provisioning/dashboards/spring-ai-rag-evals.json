@@ -1,0 +1,1105 @@
+{
+  "uid": "spring-ai-rag-evals",
+  "title": "spring-ai-ragr — RAG evaluation",
+  "tags": [
+    "spring-ai",
+    "rag",
+    "eval",
+    "quality"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Live traffic — every real chat turn",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "Citation fabrication rate (live)",
+      "description": "Fraction of citations in real answers that named a page NOT present in the retrieved context — the model invented it. This is the single most damaging failure this pipeline can produce, because a fabricated page number is indistinguishable from a real one to the reader and looks like diligence. Three separate mechanisms exist to keep this at zero: the citation header prepended to every chunk in DocumentIngestionService, the restated citation rule in SpringAiConfig.QA_PROMPT_TEMPLATE, and the choice of gemma4:e2b as chat model. If this leaves zero, suspect the chat model before rewriting the prompt — swapping llama3.2 for gemma4 is what took citations from 0 valid to 18 valid with none fabricated. Computed deterministically on 100% of turns, no LLM judge involved.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area",
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\", outcome=\"fabricated\"}) / sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "fabricated",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Citation validity rate (live)",
+      "description": "Fraction of citations in real answers that matched a chunk actually retrieved. Read it together with 'Uncited answers' to its right: an answer that cites nothing scores a vacuously perfect validity, so an assistant that quietly stopped citing altogether would show 100% here.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area",
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\", outcome=\"valid\"}) / sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "valid",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Uncited answers (live)",
+      "description": "Fraction of grounded turns whose answer contained no citation at all. This is the blind spot of the validity rate beside it. A rise here with validity still at 100% means the model has stopped citing rather than started citing badly — the exact failure mode observed with llama3.2, which once answered by parroting the instruction ('Remember to cite your sources') instead of obeying it. That specific case is counted separately as rag_eval_online_instruction_echoes_total.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.6
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area",
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_uncited_answers_total{application=\"spring-ai-ragr\"}) / sum(rag_eval_online_turns_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "uncited",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Zero-hit rate (live)",
+      "description": "Fraction of turns where retrieval returned nothing — the similarity threshold (app.rag.similarity-threshold, currently 0.6) excluded every chunk. Some of this is normal and correct: the assistant also answers general conversation, which retrieves nothing by design. A sustained rise is the signal to check whether the threshold is too high for the corpus, or whether documents were ingested by an older pipeline version.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.4
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area",
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_zero_hit_total{application=\"spring-ai-ragr\"}) / sum(rag_eval_online_turns_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "zero-hit",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Citation outcomes, cumulative (live)",
+      "description": "rag_eval_online_citations_total by outcome, as a running total rather than a per-second rate. Deliberate: a rate is the right instrument for continuous traffic, but this application handles a handful of chat turns an hour, so rate() rounds to a flat zero and the panel reads as broken. A cumulative counter always renders, and the shape you want is a 'valid' line that climbs while 'fabricated' stays flat on the floor. The line resets to zero when the application restarts; that is the counter restarting, not the metric breaking.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fabricated"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "valid"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"}) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Retrieval quality distribution (live)",
+      "description": "Mean top similarity score and mean score spread across retrieved chunks, averaged over a rolling hour. The window is an hour rather than the usual five minutes because this application sees occasional manual traffic rather than a steady stream — at [5m] the panel is blank for all but the few minutes after a request, which looks like a broken metric rather than an idle system. The spread is the one to watch as the corpus grows: every chunk's embedded text begins with an identical filename prefix (the citation header), which compresses the distance between vectors. The measured top-5 band was 0.8194-0.7927 — a spread of ~0.027 — when the header was introduced. A spread trending towards zero means top-k ranking is becoming arbitrary and the ordering of retrieved passages no longer carries information.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(rag_eval_online_top_score_sum{application=\"spring-ai-ragr\"}[1h]) / clamp_min(rate(rag_eval_online_top_score_count{application=\"spring-ai-ragr\"}[1h]), 0.0000001)",
+          "legendFormat": "mean top score",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(rag_eval_online_score_spread_sum{application=\"spring-ai-ragr\"}[1h]) / clamp_min(rate(rag_eval_online_score_spread_count{application=\"spring-ai-ragr\"}[1h]), 0.0000001)",
+          "legendFormat": "mean spread",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "LLM judge verdicts (live, sampled)",
+      "description": "Relevancy and groundedness pass rates from the LLM judges, over whatever fraction of traffic app.eval.online.judge-sample-rate selects (default 0.1). IMPORTANT: the judge is gemma4:e2b — the same model that produced the answer. Self-judging is measurably more generous than an independent judge, so treat these as a TREND rather than an absolute quality score; the bias is roughly a constant offset, so a drop after a prompt or model change is real even though the level is flattering. A dedicated judge was rejected on memory grounds: the smallest purpose-built one, bespoke-minicheck, needs 4.39 GiB and does not fit on this host even after evicting both resident models.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (metric) (rag_eval_online_judgements_total{application=\"spring-ai-ragr\", outcome=\"pass\"}) / sum by (metric) (rag_eval_online_judgements_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "{{metric}} pass rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Judge throughput, drops and errors — cumulative (live)",
+      "description": "Running totals, not rates: judging is sampled at 10% of a handful of turns an hour, so a per-second rate is indistinguishable from zero and the panel reads as broken. Judgements are fired off the response path onto a virtual thread and NEVER block the caller — but they are not free to the system, because Ollama serialises on a single runner slot, so a judge call occupies the chat model and the next user's generation queues behind it. Admission is bounded by app.eval.online.max-concurrent-judgements (default 1) and is non-blocking: over that bound a judgement is DROPPED, not queued. Climbing drops are not a fault — they mean the sample rate is set higher than the traffic can absorb, and the fix is to lower it. Errors, by contrast, are judge calls that started and broke. All three series exist at zero from startup, so a flat zero line here means 'nothing has happened', not 'no data'.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_judgements_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "completed",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_judgements_dropped_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "dropped (over concurrency bound)",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_judgements_errors_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "errors",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Answer health signals — cumulative (live)",
+      "description": "Three counters that each mark a distinct way an answer can be wrong while looking fine. All three are rare events whose healthy value is zero, so they are shown as running totals — a per-second rate of something that happens a few times a day is a flat zero indistinguishable from a broken metric, and these series are pre-registered at zero precisely so that a flat line here reads as 'nothing has gone wrong' rather than 'no data'. Refusals: the assistant declining — some are correct, but a sustained climb suggests something has reintroduced QuestionAnswerAdvisor's stock 'not prior knowledge' wording, which contradicts the system prompt's General Knowledge capability. Instruction echoes: the model repeating the citation rule instead of following it. Chunks without headers: retrieved chunks ingested before citation headers existed, which cannot be cited at all — any climb means the citation metrics above are being scored against a context that was never fully citable, and the fix is to re-ingest those documents, not to tune the prompt.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "retrieved chunks without citation header"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_refusals_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "refusals",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_instruction_echoes_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "instruction echoes",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"spring-ai-ragr\"})",
+          "legendFormat": "retrieved chunks without citation header",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Golden suite — curated regression dataset",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "Age of the last golden run",
+      "description": "READ THIS BEFORE TRUSTING ANY GOLDEN SCORE ON THIS ROW. A suite run is a batch job, so its scores are published as gauges — and a gauge holds its last value forever. A run from three weeks ago is still being scraped now and looks exactly as current as one from an hour ago. This panel is the only thing that distinguishes them. Runs are triggered deliberately with './mvnw test -Dgroups=eval'; there is no scheduler, so this growing is normal and simply means nobody has run the suite lately.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 604800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(rag_eval_golden_last_run_timestamp_seconds{application=\"spring-ai-ragr\"})",
+          "legendFormat": "age",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Hit rate @ top-k (golden)",
+      "description": "Fraction of recall-scoring cases where a page the dataset declared as correct appeared in the retrieved set. This is the one metric that CANNOT be computed from live traffic: it needs to know which pages were the right ones, which only a curated dataset supplies. Every expected page in the dataset was verified by reading the retrieved chunk text, not assumed from a good similarity score.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.6
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_hit_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Mean reciprocal rank (golden)",
+      "description": "Average of 1/rank of the first correct page. 1.0 means the right page was always the top hit; 0.5 means typically second. More sensitive than hit rate: a chunking or embedding change often keeps the right page in the top-k while pushing it down the ordering, which MRR shows and hit rate does not. That matters because QuestionAnswerAdvisor concatenates passages in rank order, and a model attends unevenly across a long context.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_mrr{application=\"spring-ai-ragr\"})",
+          "legendFormat": "MRR",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Case pass rate (golden)",
+      "description": "Fraction of cases with no failure reason at all — no fabricated citation, no missing expected phrase, no unmet expectation, no failed judge verdict. The strictest single number here, and the one that moves first when anything regresses.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "green",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_pass_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "pass rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Golden scores over time",
+      "description": "The trend view of the gauges above. Note these only step when a suite is actually run, so the lines are flat between runs by construction — this is not a continuously sampled series, and a long flat stretch means no run happened rather than that nothing changed.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "citation fabrication"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_hit_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_mrr{application=\"spring-ai-ragr\"})",
+          "legendFormat": "MRR",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_citation_validity_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "citation validity",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_citation_fabrication_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "citation fabrication",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_pass_rate{application=\"spring-ai-ragr\"})",
+          "legendFormat": "pass rate",
+          "refId": "E"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Latest run — failing cases",
+      "description": "The per-case detail Prometheus deliberately does not hold: which case failed, what it was asked, and exactly why. Sourced from Postgres, because putting an answer's text into a metric label is how a metrics store gets destroyed. Empty is the healthy state. Note relevancy_pass and groundedness_pass are NULL when a run did not judge — that is 'not measured', not 'failed'.",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT r.case_id AS \"case\", r.query, r.failure_reasons AS \"why it failed\", r.retrieved_count AS \"chunks\", r.first_relevant_rank AS \"rank of correct page\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", r.pages_retrieved AS \"pages\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) AND r.passed = false ORDER BY r.citations_fabricated DESC, r.case_id",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Latest run — all cases",
+      "description": "Every case of the most recent run, worst first. The answer column is truncated for readability; query the eval_case_result table directly for the full text, which is stored deliberately — a score tells you a case regressed, only the answer tells you how, and re-running it gives a different answer because generation is not deterministic even at temperature 0.2.",
+      "type": "table",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "passed"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "pass"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "false": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "FAIL"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.retrieved_count AS \"chunks\", ROUND(r.top_score::numeric, 3) AS \"top score\", r.first_relevant_rank AS \"rank\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"phrase %\", r.relevancy_pass AS \"relevant\", r.groundedness_pass AS \"grounded\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.case_id",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Run history",
+      "description": "Every suite run with the configuration that produced it. A score is only comparable to another score when the chat model, judge model, top-k, threshold AND pipeline version all match — comparing across a PipelineProvenance.CURRENT_VERSION bump silently compares two different corpora, because a re-ingest changes the chunks being retrieved. That is why those columns are recorded per run rather than assumed. A run stuck in RUNNING was killed partway through.",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 65
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval_run e ORDER BY e.started_at DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Per-case pass history",
+      "description": "How each case has behaved across runs — the view that identifies WHICH case a regression belongs to. A case that flips between pass and fail on an unchanged pipeline is a flaky case rather than a flaky pipeline, and should either be loosened or removed: generation is not deterministic, so a case asserting something the model only usually says will produce noise that masks real regressions.",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT r.case_id AS \"case\", COUNT(*) AS \"runs\", SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS \"passed\", ROUND(AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END)::numeric, 2) AS \"pass rate\", SUM(r.citations_fabricated) AS \"total fabricated\", ROUND(AVG(r.first_relevant_rank)::numeric, 2) AS \"avg rank\", ROUND(AVG(r.latency_millis)::numeric, 0) AS \"avg ms\" FROM eval_case_result r GROUP BY r.case_id ORDER BY AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END) ASC, r.case_id",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

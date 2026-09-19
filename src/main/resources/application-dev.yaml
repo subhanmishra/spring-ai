@@ -44,10 +44,19 @@ management:
         "[gen_ai.client.operation]": true
         "[spring.ai.advisor]": true
         "[db.vector.client.operation]": true
+        # Added for the AI/RAG dashboard's "ChatClient end-to-end latency" panel, which had been
+        # querying histogram_quantile against a timer that published no buckets and was therefore
+        # permanently empty. This is the user-facing number - the whole turn including retrieval and
+        # generation - so quantiles on it are worth the bucket cost.
+        "[spring.ai.chat.client]": true
         "[http.server.requests.active]": false
         "[gen_ai.client.operation.active]": false
         "[spring.ai.advisor.active]": false
         "[db.vector.client.operation.active]": false
+        # Required alongside the `true` above, NOT optional: these keys are PREFIX matches, so
+        # `spring.ai.chat.client` also switches on the separate `spring.ai.chat.client.active`
+        # LongTaskTimer, which no panel queries and which was 319 bucket lines for its siblings.
+        "[spring.ai.chat.client.active]": false
     enable:
       all: true
 
@@ -205,3 +214,50 @@ app:
                                  # ingested before it was turned on need re-uploading.
   ai: # New section for Spring AI properties
     max-chat-messages: 10
+
+  eval:
+    enabled: true
+    # The SAME model the chat path uses, and that is a memory decision rather than a quality one.
+    # Measured on this host: gemma4:e2b is resident at 1.59 GiB and nomic-embed-text at 0.30 GiB,
+    # leaving 0.74 GB free of 15.63 GB total (2.81 GB with nothing loaded). The smallest purpose-built
+    # grounded-factuality judge, bespoke-minicheck, ships only at 7B with a 4.39 GiB weights layer - it
+    # does not fit even after evicting BOTH resident models, so every judgement would page to disk.
+    # Reusing the chat model evicts nothing and costs nothing.
+    #
+    # The price is self-judging bias: a model grading its own output is more generous than an
+    # independent one, so these rates are optimistic in absolute terms. Read them as a TREND - the bias
+    # is a roughly constant offset, so a drop after a prompt or model change is real - and never quote
+    # the absolute number as a quality score.
+    judge-model: gemma4:e2b
+    # Pinned for the same reason the chat path pins it: Spring AI sends NO temperature unless one is
+    # set here, and Gemma's Modelfile defaults to 1.0. A judge sampling at 1.0 returns different
+    # verdicts for the same answer on consecutive runs, turning a regression signal into noise.
+    judge-temperature: 0.0
+    # A judge's whole answer is one word. Without a cap, a judge that starts explaining itself holds
+    # Ollama's single runner slot for minutes - and on the online path that delays a real user.
+    judge-num-predict: 8
+    # Must hold the retrieved context plus the answer being judged. Ollama truncates an over-long
+    # prompt FROM THE LEFT, which would silently drop the context the judgement is about and produce a
+    # confident wrong verdict rather than an error.
+    judge-num-ctx: 8192
+    online:
+      enabled: true
+      # Deterministic metrics (citations, zero-hit, score spread, refusals) run on 100% of turns
+      # regardless of this - they are regex over data already in the response and cost microseconds.
+      # This rate governs only the LLM judges. Judging never blocks the caller that triggered it, but
+      # it is NOT free to the system: Ollama serialises on one runner slot, so a judge call occupies
+      # the chat model and the NEXT user's generation queues behind it. Set 0.0 to keep the free
+      # metrics and switch the model calls off entirely.
+      judge-sample-rate: 0.1
+      # One in flight at a time, so the worst case is a single queued generation rather than a pile-up.
+      # Admission is non-blocking - over this bound a judgement is DROPPED and counted, never queued.
+      # A rising rag_eval_online_judgements_dropped_total means the sample rate is too high for the
+      # traffic, not that anything is broken.
+      max-concurrent-judgements: 1
+      judge-timeout-seconds: 120
+    golden:
+      dataset-location: classpath:eval/golden-dataset.yaml
+      # Judging roughly triples a run's wall clock. Off by default so the tagged test stays a quick
+      # retrieval-and-citation regression check; the test can switch it on explicitly.
+      judged: false
+      persist: true

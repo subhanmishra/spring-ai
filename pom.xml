@@ -34,6 +34,9 @@
         <!-- Matches the version spring-ai-tika-document-reader already pulls in, so the explicit
              declaration below does not introduce a second copy on the classpath. -->
         <jsoup.version>1.22.2</jsoup.version>
+        <!-- Test tags excluded from the ordinary build. Cleared on the command line to run the
+             evaluation suite: ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT -->
+        <surefire.excludedGroups>eval</surefire.excludedGroups>
     </properties>
     <dependencies>
         <dependency>
@@ -177,6 +180,26 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- EvalSuiteIT replays the curated evaluation dataset through the real chat path.
+                         It needs Postgres, Redis and Ollama up with the reference manual already
+                         indexed, and it takes minutes - one grounded answer on the dev host is 53-70
+                         seconds - so it must not run as part of the ordinary build.
+
+                         Run it deliberately with:
+
+                             ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+
+                         Note -Dgroups=eval on its own does NOT work, which is the obvious thing to
+                         try: in JUnit 5 tag filtering an exclusion beats an inclusion, so the tag
+                         stays excluded however it is included. The exclusion itself has to be cleared,
+                         which is why it is bound to an overridable property rather than hardcoded. -->
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
+                </configuration>
             </plugin>
         </plugins>
     </build>

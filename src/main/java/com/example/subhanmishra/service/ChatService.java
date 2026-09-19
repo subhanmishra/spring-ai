@@ -4,15 +4,20 @@ import com.example.subhanmishra.config.SpringAiProperties;
 import com.example.subhanmishra.dto.ChatMessageDto;
 import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
+import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class ChatService {
@@ -21,31 +26,98 @@ public class ChatService {
     private final ChatMemory chatMemory;
     private final ChatMemoryRepository chatMemoryRepository;
     private final SpringAiProperties springAiProperties;
+    private final OnlineEvalService onlineEvalService;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
                        ChatMemoryRepository chatMemoryRepository,
-                       SpringAiProperties springAiProperties) {
+                       SpringAiProperties springAiProperties,
+                       OnlineEvalService onlineEvalService) {
         this.chatClient = chatClient;
         this.chatMemoryRepository = chatMemoryRepository;
         this.chatMemory = chatMemory;
         this.springAiProperties = springAiProperties;
+        this.onlineEvalService = onlineEvalService;
     }
 
+    /**
+     * Answers a prompt, and scores the turn on the way out.
+     *
+     * <p>Takes the {@code ChatResponse} rather than {@code content()} so the retrieved documents can be
+     * read back. {@code QuestionAnswerAdvisor.after} copies the chunks it retrieved into the response
+     * metadata under {@link QuestionAnswerAdvisor#RETRIEVED_DOCUMENTS}, which is the only way to see
+     * the context an answer was actually built on without re-running the search - and a second search
+     * would be a different search, since it would not share this one's filters or timing.
+     *
+     * <p>The evaluation call returns immediately: deterministic scoring is a few regex passes, and any
+     * LLM judging is handed to a virtual thread. Nothing about it is on this method's critical path.
+     */
     public String generate(String prompt, String conversationId) {
-        return chatClient.prompt()
+        ChatResponse chatResponse = chatClient.prompt()
                 .user(prompt)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
-                .content();
+                .chatResponse();
+
+        String answer = answerOf(chatResponse);
+        onlineEvalService.evaluate(prompt, answer, retrievedDocuments(chatResponse));
+        return answer;
     }
 
+    /**
+     * Streams an answer, scoring the turn once the stream completes.
+     *
+     * <p>The accumulation is unavoidable rather than lazy design. {@code BaseAdvisor.adviseStream} calls
+     * the advisor's {@code after} only on the chunk carrying a finish reason, so the retrieved documents
+     * arrive attached to the <em>final</em> response rather than to an aggregate, and the answer text
+     * exists only as the concatenation of every chunk that came before it. Both halves therefore have
+     * to be collected as they go past.
+     *
+     * <p>The evaluation hangs off {@code doOnComplete}, so it runs after the subscriber has seen the
+     * last element. A cancelled or failed stream is not scored at all: a half-delivered answer is not
+     * an answer, and judging one would report a truncation as a quality problem.
+     */
     public Flux<String> generateStream(String prompt, String conversationId) {
+        StringBuilder answer = new StringBuilder();
+        AtomicReference<List<Document>> retrieved = new AtomicReference<>(List.of());
+
         return chatClient.prompt()
                 .user(prompt)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .stream()
-                .content();
+                .chatResponse()
+                .map(chatResponse -> {
+                    List<Document> documents = retrievedDocuments(chatResponse);
+                    if (!documents.isEmpty()) {
+                        retrieved.set(documents);
+                    }
+                    String text = answerOf(chatResponse);
+                    answer.append(text);
+                    return text;
+                })
+                .doOnComplete(() -> onlineEvalService.evaluate(prompt, answer.toString(), retrieved.get()));
+    }
+
+    private static String answerOf(@Nullable ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResult() == null
+                || chatResponse.getResult().getOutput() == null) {
+            return "";
+        }
+        String text = chatResponse.getResult().getOutput().getText();
+        return text != null ? text : "";
+    }
+
+    /**
+     * The chunks the advisor retrieved for this turn, or empty when the turn was not grounded - which
+     * is normal, since the assistant also answers general conversation with no retrieval behind it.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Document> retrievedDocuments(@Nullable ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getMetadata() == null) {
+            return List.of();
+        }
+        Object documents = chatResponse.getMetadata().get(QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS);
+        return documents instanceof List<?> list ? (List<Document>) list : List.of();
     }
 
     public List<String> getAllConversationIds() {
