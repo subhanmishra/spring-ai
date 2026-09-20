@@ -1,35 +1,47 @@
 # CLAUDE.md
 
-Persistent context for iterative work on `spring-ai-ragr`. Keep this in sync as the project evolves — it's the summary loaded at the start of every session; `GEMINI.md` is the longer-form companion doc.
+Orientation for `spring-ai-ragr`. This file is deliberately short: it is loaded into every session, so
+it carries only what is needed *before* opening any file. Detailed context lives in
+`.claude/context/`, loaded on demand — see **Context documents** below.
 
 ## Overview
 
-A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documents, which are parsed, chunked, and stored as embeddings in a Postgres/pgvector store. A chat interface answers questions grounded in the content of the uploaded documents, with chat history kept in Redis.
+A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documents, which are parsed,
+chunked, and stored as embeddings in a Postgres/pgvector store. A chat interface answers questions
+grounded in the content of the uploaded documents, with chat history kept in Redis. Answer quality is
+measured continuously on live traffic and on demand against a curated dataset.
 
 ## Stack & versions
 
 - **Java 26**, **Spring Boot 4.1.0** (parent), **Spring AI 2.0.1** (BOM)
-- **LLM**: Ollama (local model runner) — `gemma4:e2b` for chat, `nomic-embed-text` for embeddings (768 dims). No API key; OpenAI config is present but commented out.
-- **Vector store**: PostgreSQL + `pgvector` extension
+- **LLM**: Ollama — `gemma4:e2b` for chat, `nomic-embed-text` for embeddings (768 dims). No API key;
+  OpenAI config is present but commented out.
+- **Vector store**: PostgreSQL + `pgvector`
 - **Chat memory**: Redis (`spring-ai-model-chat-memory-repository-redis`)
 - **Migrations**: Flyway (`flyway-database-postgresql`)
 - **API docs**: springdoc-openapi 3.1.0 (`springdoc-openapi-starter-webmvc-ui`)
 - **Mapping**: modelmapper 3.2.4
-- **Document parsing**: `spring-ai-pdf-document-reader`, `spring-ai-tika-document-reader`
-- **Observability**: `spring-boot-starter-actuator`, `micrometer-registry-prometheus`, `spring-boot-opentelemetry`, `spring-boot-micrometer-tracing-opentelemetry`, `micrometer-tracing-bridge-otel`, `opentelemetry-exporter-otlp`, `loki-logback-appender` (loki4j 2.0.3)
-- Also: `spring-ai-vector-store-advisor`, optional runtime `spring-boot-docker-compose` / `spring-ai-spring-boot-docker-compose` (auto-starts `compose.yaml`)
+- **Document parsing**: `spring-ai-pdf-document-reader`, `spring-ai-tika-document-reader`, jsoup
+- **Observability**: actuator, `micrometer-registry-prometheus`, `spring-boot-opentelemetry`,
+  `spring-boot-micrometer-tracing-opentelemetry`, `micrometer-tracing-bridge-otel`,
+  `opentelemetry-exporter-otlp`, `loki-logback-appender` (loki4j 2.0.3)
+- Also: `spring-ai-vector-store-advisor`, optional runtime `spring-boot-docker-compose` /
+  `spring-ai-spring-boot-docker-compose` (auto-starts `compose.yaml`)
 
 ## Build / run / test
 
 ```bash
-./mvnw spring-boot:run     # auto-starts compose.yaml (pgvector, redis, observability stack) via Spring Boot Docker Compose support
+./mvnw spring-boot:run     # auto-starts compose.yaml (pgvector, redis, observability stack)
 ./mvnw test
 ./mvnw clean package
+```
 
-# RAG evaluation suite. Needs the corpus indexed and Ollama up; takes minutes.
-# -Dgroups=eval alone does NOT work - see the Evaluation section.
+```bash
 ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
+
+The eval command is not the obvious one and `-Dgroups=eval` alone does not work — see
+`.claude/context/evaluation.md`. It needs the corpus indexed and Ollama up, and takes minutes.
 
 ## Project structure
 
@@ -51,7 +63,6 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
 │   │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
 │   │   │       │           # GoldenEvalService
-│   │   │       │           # (every @Service lives directly here, never in a sub-package)
 │   │   │       ├── eval    # CitationParser, Citation, EvalScores, RetrievalScores,
 │   │   │       │           # CitationScores, AnswerScores, ExpectationScores,
 │   │   │       │           # GoldenCase, GoldenDataset, GoldenDatasetLoader
@@ -63,275 +74,71 @@ A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documen
 │   │   │                   # PdfTextRunExtractor, TextRun, LineSegment,
 │   │   │                   # PageFooterStripper, TocEntryStripper
 │   │   └── resources
-│   │       ├── application.yaml       # sets active profile to dev
-│   │       ├── application-dev.yaml   # datasource; pgvector store; Ollama (embedding + chat);
-│   │       │                          # management.* actuator/tracing/metrics (port 9095);
-│   │       │                          # BOTH Spring AI observation levels (see Observability);
-│   │       │                          # app.rag.* chunking + search (top-k, similarity threshold);
-│   │       │                          # app.ai.* max chat-history messages
-│   │       ├── logback-spring.xml     # console + Loki appenders; traceId/spanId structured metadata
-│   │       ├── eval/golden-dataset.yaml # curated regression cases; expected pages VERIFIED against
-│   │       │                          # the live corpus by reading chunk text, never guessed
-│   │       └── db/migration/          # Flyway migrations (V1..V5, e.g. V5__Add_Eval_Results.sql)
-│   └── test                           # SpringAiApplicationTests (context load), plus parser tests:
-│                                      # DocumentParserServiceTest, XhtmlBlockParserTest,
-│                                      # TableChunkerTest, PdfTableDetectorTest
-│                                      # eval: CitationParserTest, EvalScoringServiceTest, and
-│                                      # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
-├── docker/                            # config for the observability stack (see below)
-│   ├── grafana/                       # grafana.ini + provisioning/{datasources,dashboards}
-│   ├── loki/
-│   ├── otel/
-│   ├── pgadmin/
-│   ├── prometheus/
-│   └── tempo/
-├── docker-volume/  # gitignored — runtime volume data (grafana plugins etc.), not source
+│   │       ├── application.yaml          # active profile = dev, multipart limits
+│   │       ├── application-dev.yaml      # everything else
+│   │       ├── logback-spring.xml        # console + Loki appenders
+│   │       ├── eval/golden-dataset.yaml  # curated regression cases
+│   │       └── db/migration/             # Flyway V1..V5
+│   └── test                              # SpringAiApplicationTests, parser tests, eval tests,
+│                                         # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
+├── docker/          # observability stack config (grafana, loki, otel, pgadmin, prometheus, tempo)
+├── docker-volume/   # gitignored runtime volume data, not source
+├── .claude/         # gitignored; context documents + hooks (see below)
 ├── pom.xml
 ├── compose.yaml
-├── CLAUDE.md       # this file — auto-loaded context
-├── GEMINI.md       # longer-form companion doc
-└── README.md       # user-facing quick-start; canonical for endpoint tables + infra ports/creds
+├── CLAUDE.md        # this file
+└── README.md        # user-facing quick-start; canonical for endpoint tables + infra ports/creds
 ```
 
-Key Java config:
-- `SpringAiConfig` — `ChatClient` (system prompt, chat-memory + question-answer advisors), Redis `ChatMemoryRepository`, `TokenTextSplitter`.
-- `ThreadPoolConfig` — custom `ForkJoinPool` (`documentProcessingPool`, threads named `doc-chunk-pool-*`) used as a bulkhead for document parsing. Parallelism is `availableProcessors / 2` (min 1), LIFO, with an uncaught-exception handler. Parallel work must be submitted to this pool explicitly — a bare `parallelStream()` runs on the common pool and defeats the bulkhead. This pool is for **parsing only**: ingestion is I/O-bound and deliberately uses virtual threads instead (see below), so don't consolidate the two — blocking I/O on this pool would starve parsing.
-
-## Core workflows
-
-**Document upload**: `DocumentController` → `DocumentMetadataService` creates metadata record → `DocumentParserService` recovers a list of `ContentBlock`s from the file, coalesces them to the token budget, then token-chunks the prose, in parallel on `documentProcessingPool` → `DocumentIngestionService` enriches chunk metadata and writes to pgvector → status updated to `INDEXED`/`FAILED`. `DocumentHistoryService` records each status change as history. `DocumentMetadataService` also handles document deletion.
-
-The parse → ingest hand-off is a **lazy stream, not a list**: `DocumentParserService.parse()` returns a `Map<String, Object>` holding a `documentStream` (`Stream<Document>`) plus `totalPages`, and `DocumentIngestionService.ingest()` consumes it, enriching metadata lazily and partitioning it into batches of `app.rag.batch-size` chunks. Chunk count is therefore only known after the stream is drained, which is why `totalPages` is carried separately rather than derived from the chunk list.
-
-**The parser's intermediate representation is `List<ContentBlock>`, not `String`.** `ContentBlock` is sealed over `Prose` and `Table`, and that distinction is what keeps a table intact:
-
-- **Tables are recovered, not flattened.** Tika already reconstructs `<table><tr><td>` from DOCX, XLSX, PPTX and HTML; `TikaDocumentReader`'s default `BodyContentHandler` throws the markup away. A `TransformerHandler` (a JDK identity transformer) is passed to its three-argument constructor instead, so the SAX events are serialised straight back to XHTML, and `XhtmlBlockParser` walks that with jsoup. The JDK serialiser is used rather than Tika's own `ToXMLContentHandler` so that `tika-core` stays out of our compile dependencies — nothing in the Boot parent or the Spring AI BOM manages its version, so declaring it would mean pinning it ourselves and silently holding back whatever version spring-ai later brings. jsoup *is* declared explicitly (`jsoup.version`, matched to what Tika pulls in) because we use its API directly. `XhtmlBlockParser` reads only `<body>`: Tika's XHTML skeleton always carries a `<head><title>`, which would otherwise be prepended to the first prose chunk.
-- **`XhtmlBlockParser` must read that XHTML with jsoup's `Parser.xmlParser()`, never `Jsoup.parse()`.** Tika emits a self-closing `<title/>` whenever the source has no title metadata, which most DOCX/XLSX/PPTX files do not have. In HTML, `title` is an RCDATA element that cannot self-close, so the HTML parser reads `<title/>` as an *unclosed* `<title>` and swallows the rest of the file as its text content — an 8-page resume came through as 1,358 characters out of 14,718, the tail only, with no exception and nothing in the logs. Two corollaries: tag names must be lower-cased before comparison (the XML parser preserves case, the HTML one folds it), and `Element.text()` must not be used to flatten a cell — it inserts separators from jsoup's registry of block-level *HTML* tags, and the XML parser registers none, so DOCX's per-line `<p>` elements inside one `<td>` concatenate into "Overheatin the manifold". `XhtmlBlockParser.flatten()` walks the nodes and separates at the same boundaries the prose walker uses.
-- **Parser fixtures must be captured from Tika, not hand-written to look like it.** Every test passed through this bug because the fixtures used either a properly closed `<title>` or none at all, and the one real end-to-end file was small enough that the truncated tail happened to be the whole document.
-- **PDF tables are recovered from page geometry, via `app.rag.table-detection` (now `auto`).** Set it to `off` and PDFs go through `PagePdfDocumentReader` again, one prose block per page. Switching it on is not only about tables: reading from positioned runs instead of `PDFTextStripper`'s assembled lines drops the space padding it inserts between cells, which on the manual was **a third of the whole corpus** — 428,851 tokens down to 285,706, with parse time falling from 7.6s to 5.4s. Since ingestion cost scales with total tokens, that is a proportional cut in embedding time. Routing them through Tika would not help either way: Tika's default `PDF2XHTML` has no table handling at all, and `PDFMarkedContent2XHTML` (`PDFParserConfig.setExtractMarkedContent(true)`) needs a tagged PDF — `src/main/resources/docs/spring-boot-reference.pdf`, the 645-page test corpus, has no `/StructTreeRoot`. Moving PDFs to Tika would also cost the per-page split that `pageNumber` citations depend on, and would materialise the whole file as one string.
-- **The two PDF table strategies exist because two real documents fail in opposite ways.** Both were measured, not assumed:
-  - The Asciidoctor manual draws **no** table borders — its 47,000 line operations are code-block backgrounds and admonition boxes, so ruling-line detection would fire on most of the book and still find no table — but lays cells out left-aligned on constant x positions (51/218/384, identical across pages). `STREAM` takes columns from where runs start.
-  - The SSRS invoice rules every cell but centres and right-aligns their contents, so a cell's start x moves with its text length (530 vs 537 for the same column). `LATTICE` takes columns from the rules and bins each run by the interval containing it, which is what makes it immune to alignment.
-  - `AUTO` chooses per page, on whether the page carries at least three distinct vertical rules.
-- Things that were wrong before they were right, and will be again if the geometry changes:
-  - **Rules must be taken from those crossing the band, never pooled across the page.** An invoice draws several unrelated grids on one page; pooling their x positions invents boundaries belonging to none of them.
-  - **In lattice mode rows come from the horizontal rules, not from guessing continuations.** The "a band that leaves the last column empty is a wrapped line" heuristic cannot tell `Road,` continuing an address from `GSTIN: | … | From:` starting a row, and folded whole tables into their first row. It is still used for `STREAM`, which has no rules to consult.
-  - **Empty columns must be dropped before anything else.** The outermost rules are the page frame, so the first and last columns are margins no text occupies — and while they are present every row looks like it leaves the last column empty.
-  - **A band's runs must be re-sorted by x.** Cells on one visual row do not share an exact baseline, so the y-ordering the banding needs leaves a row's cells out of reading order.
-  - Coordinates are converted into the text layer's top-down frame as they leave `PdfLineExtractor`; rotated pages are not handled.
-- **Two line-level strippers run after the whole PDF is read, and both must stay wired into *both* PDF paths.** `PageFooterStripper` removes the printed page number from the end of a page; `TocEntryStripper` removes a dot leader running into a page number. `PdfBlockReader` applies them, and `DocumentParserService.parsePdf` applies them again on the `table-detection: off` path — omitting either there would let the config flag silently reinstate the wrong-citation bug, since both artefacts are ordinary lines of the text layer that `PagePdfDocumentReader` picks up identically. See the evaluation section for what they fix and what they measured.
-  - **Both decide by consensus across the document, not by the shape of one line, and refuse rather than guess.** A trailing number alone is not a footer — a code block or a table could end that way — so the footer stripper takes the modal offset between PDF page and printed number (19 here) and strips only a number matching *that*. The TOC stripper's guard runs the other way: a file that is *mostly* contents entries is an index, and stripping it would index an empty document silently, so above half the document's non-blank lines nothing is stripped. On the manual, entries are 705 of 19,715 lines (3.6%).
-  - **A contents page is dropped whole, heading and all.** Removing only the entries leaves a chunk reading "Table of Contents" and nothing else, which is the junk-chunk problem the stripper partly exists to remove. Two guards keep that from eating real text: the block must hold at least five entries and they must be at least half of it, so a chapter opening with a short summary list keeps its prose.
-  - **`PdfBlockReader.read` returns a `Pdf` record carrying the true page count**, because dropping 18 contents pages would otherwise report a 645-page PDF as 627 in `totalPages`. The surviving-page list and the page count are different facts and must stay separate.
-  - The strippers are verified against the real corpus, not only fixtures: the TOC pattern matches on pages 2–19 and no other page of 645, correctly skipping the Spring Boot banner's `....... . . .` (no trailing number) and `........ Started Example in 2.536 seconds (…)` (dots leading, not trailing).
-- **A table is atomic and never shares a chunk with prose.** Hitting a `Table` block closes the open prose group first. The table is rendered as a Markdown pipe table and, when it exceeds `chunk-size`, split **between rows with the caption, header row and separator repeated on every piece** — rows in a later chunk with no header are the most common way a grounded answer misreads a table. Chunks carry `blockType`, `tableIndex` and `tableRows` metadata.
-- **Table chunks must bypass `TokenTextSplitter`.** `splitIfOverBudget` checks `blockType` and passes tables through untouched; sending one to the splitter would cut the Markdown partway through a row and not repeat the header, which is exactly what the table path exists to prevent. A side effect worth knowing: `min-chunk-length-to-embed` therefore does not apply to tables, so a small table is not discarded.
-- **`app.rag.max-embed-tokens` (2048) is the embedding model's context, not a chunking target.** Only a single table row too wide to split can reach it; `TableChunker` logs a warning and emits the row whole rather than separating values from their header, so the stored text is complete while its vector comes from Ollama's server-side truncation.
-- Known, deliberate limitations: `colspan`/`rowspan` are not expanded, and a nested table is flattened into the containing cell.
-
-**`app.rag.chunk-size` is a budget the parser fills, not a cap it happens to hit.** `DocumentParserService.coalesceParagraphs()` joins consecutive paragraphs until adding the next would exceed the budget. Without this step the earlier pipeline called `textSplitter.apply()` on each paragraph *individually*, so any paragraph under the budget passed through untouched and the effective chunk size was the paragraph size — a 645-page manual produced 7,289 chunks with a **median of 27 tokens** against a configured 400, 14% of them under 10 tokens (single words like `• WARN`). Things to know before touching it:
-
-- Coalescing **must not span source documents**. `PagePdfDocumentReader` emits one document per page, so a group inherits exactly one page's metadata; `getEnrichedStream` puts `pageNumber` on every chunk and the system prompt asks the model to cite page numbers, so merging across pages yields wrong citations. This also floors the chunk count at one per page.
-- Token counting uses jtokkit `CL100K_BASE` — deliberately the same as `TokenTextSplitter.DEFAULT_ENCODING_TYPE`, so the budget counted in the parser and the budget the splitter enforces cannot drift. Do not substitute a character-count approximation: PDF tables are space-padded, so chars-per-token varies wildly.
-- `min-chunk-size-chars` is **not** a minimum chunk length — it is how far the splitter scans before looking for a sentence boundary when cutting an over-budget chunk.
-- **The budget must be measured on the joined text, never on the sum of the paragraphs.** `ProseGroups.add` counts `current + "\n\n" + paragraph`, because joining adds tokens that a running per-paragraph total never sees. Summing the parts understated groups by only a few percent — but that was enough to put every multi-paragraph group just over budget (417, 415, 411 against a configured 400), and an over-budget group gets re-split by `TokenTextSplitter`, which sheds a small trailing piece. Those pieces became chunks holding a single line, or were silently deleted (see below). This costs a re-count per paragraph; on the 645-page manual the whole parse is ~5s, against ~220s of embedding, so it is not worth optimising away.
-- **`min-chunk-length-to-embed` merges, it does not discard.** It is measured in **characters**. `TokenTextSplitter` enforces it by *dropping* a short piece, and the short pieces are ones it manufactures itself when cutting an over-budget chunk — on an 8-page resume that silently deleted three whole skill lines, 68 tokens of real content, with nothing logged. So `SpringAiConfig` builds the splitter with `withMinChunkLengthToEmbed(1)` and `DocumentParserService.absorbShortPieces` applies the floor instead, merging a short piece into the one before it. A single piece below the floor is kept, since it is the whole of its block. The consequence is that a chunk can finish slightly over `chunk-size` (max 445 tokens on the manual) — deliberate, and far below `max-embed-tokens`.
-
-**Every chunk's text begins with a citation line — `[filename, p. N]` — and that is the only reason the model can cite pages.** `QuestionAnswerAdvisor` builds the RAG context with `Document::getText` (verified in `spring-ai-vector-store-advisor-2.0.1`), which returns content *only* and discards metadata entirely; `Document.getFormattedContent(MetadataMode.ALL)` would include it, but the advisor never calls it, and the flattening happens *before* the prompt template renders, so a custom `PromptTemplate` cannot recover it either. So a `pageNumber` that lives only in metadata can never reach the model, and the system prompt's instruction to cite page numbers is unsatisfiable. `DocumentIngestionService.citationHeader()` therefore prepends the citation to the chunk *text*. Consequences, all accepted deliberately:
-
-- **Three call sites read `getText()` and all three are affected.** `OllamaEmbeddingModel.embed(Document)` (so the header is embedded), `PgVectorStore` (so the stored `content` column includes it), and `QuestionAnswerAdvisor` (the point of the exercise). The alternative — a custom advisor formatting the citation at prompt-assembly time — leaves vectors and stored text untouched and needs no re-ingestion; it was rejected in favour of this, but that trade is worth re-reading before extending this code.
-- **The filename is identical on all chunks**, so a constant prefix on every vector compresses the spread between them. Measured top-5 similarity before the header was 0.8194–0.7927, a spread of ~0.027; watch `similarity-threshold` and top-k ranking if that band narrows as the corpus grows. The page number varies, which adds a numeric signal unrelated to meaning.
-- **The stored text is no longer verbatim what the document said.** This is the mirror image of the `min-chunk-length-to-embed` bug below (which silently *deleted* real content); anything reading chunks back — export, re-ranking, re-chunking — must strip this line.
-- **Chunks written before this existed carry no header and cannot be cited**, with nothing externally distinguishing them. Re-ingest a document to make its citations work; a mixed corpus silently answers some questions with citations and some without.
-- **The separator is a literal `"\n\n"`, never `System.lineSeparator()`** — this string is persisted and embedded, so following the host OS would make the same source document produce a different corpus on Windows (CRLF) than on Linux.
-- **The header alone does not produce citations — the instruction has to sit next to the context, and even that is not sufficient.** With all five headers present and correctly attached in the final prompt, llama3.2 still answered "According to the reference documentation" and cited nothing, because the citation rule lived in item 1 of the system prompt's four-item capability list, thousands of tokens from the passages. `SpringAiConfig.QA_PROMPT_TEMPLATE` is passed to `QuestionAnswerAdvisor.builder(...).promptTemplate(...)` and restates the rule immediately after `{question_answer_context}`. **Keep the template — but do not believe it fixed the problem.** An earlier version of this file claimed the restatement "is what made a 3B model comply", citing a run that produced pages 18, 267 and 594. That does not reproduce: with the template in force, llama3.2 cited **nothing on three of three** retrieval-grounded queries, once parroting the instruction back ("Remember to cite your sources when referencing configuration values from documents") in place of obeying it. Compliance with a 3B model was luck, not a property of the prompt.
-- **The chat model is the load-bearing half of citation fidelity.** Swapping llama3.2 for `gemma4:e2b` — same prompts, same context, same options — took citations from 0 of 3 queries to 7 valid pages across those 3, then 18 valid pages across a 5-query run, with **zero fabricated page numbers** in either. If citations regress, suspect the model before rewriting the prompt. Two settings are mandatory with it and are commented at length in `application-dev.yaml`: `think: false` (Spring AI 2.0.1 returns Gemma's reasoning in a *separate* `OllamaApi.Message.thinking` field that `ChatService` never reads, so leaving it on both discards those tokens and truncates the answer against `num-predict`), and an explicit `temperature` (Gemma's Modelfile sets 1.0, and Spring AI sends no value unless one is configured).
-- That custom template also **softens the stock template's closing line** ("Given the context ... and not prior knowledge ... inform the user that you can't answer"), which contradicts the system prompt's Hybrid Synthesis and General Knowledge capabilities — the stock wording forbids answers this assistant is explicitly meant to give. Anyone replacing the template must keep both the citation rule and that softening.
-- The header format, the system prompt, and `QA_PROMPT_TEMPLATE` all describe the same `[filename, p. N]` convention and must change together.
-
-**Ingestion is concurrent and not transactional as a whole.** `DocumentIngestionService.writeBatches()` runs one virtual thread per batch (`doc-ingest-*`), bounded by a `Semaphore` sized from `app.rag.ingestion-concurrency` — the permit count, not the thread count, is what protects the Hikari pool, since `vectorStore.add()` holds a connection across the Ollama embedding round-trip. Non-obvious consequences, all of them load-bearing:
-
-- `ingest()` **must not** be `@Transactional`. A JDBC transaction is bound to one thread and one connection, so batch threads can never join it; an enclosing transaction would just pin an idle connection for the whole run while the real writes committed outside it.
-- Each batch commits in its own `TransactionTemplate` (`REQUIRES_NEW`). All-or-nothing is preserved by **compensation**: any failure triggers `VectorStoreRepository.deleteByDocumentId(...)` — the same method `deleteDocument` uses — so a failed upload still leaves no chunks behind.
-- The batch threads must be wrapped with a micrometer `ContextSnapshot` captured on the caller's thread. Without it they log with an empty `traceId` and the logs↔traces correlation silently breaks.
-- **The first batch is written inline, before the fan-out, on purpose.** Ollama loads the embedding model lazily; requests arriving while its `llama-server` runner is still starting get proxied to a port nothing is listening on yet and fail with `dial tcp 127.0.0.1:<port>: ... refused` wrapped in an **HTTP 400**, which Spring AI maps to `NonTransientAiException` and therefore never retries. Writing one batch first guarantees the runner is loaded before any concurrency arrives, and `writeBatch` additionally retries (`app.rag.ingestion-max-attempts` / `ingestion-retry-backoff`) **only** for that failure, matched on the dial-error text since HTTP 400 is all Ollama gives to distinguish it — every other 400 still fails fast. Re-adding a batch is safe because the vector store upserts on chunk id. Cold starts are otherwise avoided by `spring.ai.ollama.embedding.keep-alive: "-1"` in `application-dev.yaml`, which pins the embedding model from the app's first embed call, scoped to the embedding model rather than machine-wide. **`OLLAMA_KEEP_ALIVE=-1` is nonetheless also set in the dev machine's environment** (alongside `OLLAMA_IGPU_ENABLE=1`), so the chat model gets pinned too — `/api/ps` shows `llama3.2` with `expires_at` in the year 2318. An earlier version of this file claimed no env var was set; it is, and it is not captured in the repo, so verify with `env | grep -i ollama` before reasoning about residency.
-- **`keep-alive` does not survive memory pressure — it only governs *idle* unload.** Ollama will evict a pinned model to make room for another one. Loading `llama3.2` for a chat answer logged `llama-server model predicted to exceed available memory, evicting` with `predicted="3.6 GiB"` against `available="1.8 GiB"` and `system_limited=true`, and threw out `nomic-embed-text`. On an iGPU the reported `gpu_free` (6.9 GiB) is misleading: the binding constraint is `system_free`, because the iGPU shares system RAM. The practical consequence is that chat and embedding trade places on every request once RAM is tight, and each swap costs a model load — so an idle-looking embedding throughput gauge may just mean the embedding model is not currently resident.
-  - **That eviction was measured with the old `llama3.2` chat model and no longer describes the current configuration.** `gemma4:e2b` is resident at ~1.6-1.7 GiB against llama3.2's 2.8-2.9 GiB, and it coexists with `nomic-embed-text` indefinitely: five consecutive grounded turns reported `load_duration` of **0s every time**, with free system RAM steady at ~2 GiB. Do not carry the trading-places behaviour forward as a property of this app — it is a property of a chat model that no longer runs here.
-  - **It does still reproduce whenever a third model enters, which is easy to do by accident.** Running a second app instance on another port while the first was still up put `llama3.2`, `gemma4:e2b` and `nomic-embed-text` in contention at once; gemma4 evicted **both** of the others despite `OLLAMA_KEEP_ALIVE=-1` pinning them. The rule to remember is that two models fit on this machine and three do not, so stop an old instance before starting a new one rather than leaving both running.
-- `StructuredTaskScope` is the natural fit but is **still a preview API on JDK 26** (verify by compiling, not by reading the class file's minor version); adopting it would force `--enable-preview` on both compiler and launcher and pin class files to exactly Java 26.
-- `spring.datasource.hikari.*` is now configured explicitly in `application-dev.yaml`. Note `minimum-idle` must stay below `maximum-pool-size` or `idle-timeout` never reaps anything, and `app.rag.ingestion-concurrency` must stay well below `maximum-pool-size` to leave connections for web requests and the `REQUIRES_NEW` history writes.
-- **`app.rag.batch-size` counts chunks, but the cost it controls is tokens.** `vectorStore.add()` embeds *inside* the batch transaction, so a pooled connection is held for the whole Ollama round-trip — and with `ingestion-concurrency` batches queued against Ollama's single embedding slot, that wait multiplies. When paragraph coalescing raised mean tokens-per-chunk from 44 to 207, batch weight rose ~4.7x with nobody touching `batch-size`, and Hikari's `leak-detection-threshold` (60s) started firing: 2 warnings before, 8 after. They were false positives — every one was followed by `was returned to the pool`, with zero connection timeouts — but the fix is to keep batch *weight* sane (≈ 10k tokens) rather than to raise the threshold and leave connections parked for minutes. **Re-check `batch-size` whenever chunk sizing changes.** Latest measurement on the manual, with `table-detection: auto`: 1,275 chunks (305 of them tables), mean 224 tokens, so `batch-size: 35` carries ~7.8k tokens. That is *under* the ~10k target rather than over, which is the safe direction — it only means slightly more round trips, and Ollama serialises the embedding calls anyway. With detection off the same document gives mean 279 and ~9.8k per batch. Raise to 45 to restore ~10k if round trips ever matter more than hold time.
-
-**Ingestion throughput is bounded by Ollama's embedding speed, and `ingestion-concurrency` cannot raise it.** All of the following was measured on the same 13.6MB/645-page PDF, not inferred:
-
-- **Ollama 0.34 pins embedding runners to a single slot unconditionally.** `OLLAMA_NUM_PARALLEL` appears honoured in Ollama's own server config yet is ignored for embedding models — verified by setting `OLLAMA_NUM_PARALLEL=4` with `OLLAMA_CONTEXT_LENGTH=512` so the budget fit `n_ctx_train=2048` exactly, and still getting `-np 1, n_slots = 1`. So `ingestion-concurrency > 1` overlaps the pgvector inserts but never the embedding calls.
-- **That single slot costs about 10%, and it is not worth engineering around.** The iGPU is already saturated by one stream, so the limit is the hardware rather than Ollama's scheduling. Measured directly against `/api/embed` with 35 texts per request (~4.4k tokens), two passes, model fully offloaded (`size_vram == size`):
-
-  | concurrency | wall clock | tokens | aggregate |
-  |---|---|---|---|
-  | 1 | 3.04s / 3.00s | 4,411 | **1,456 tok/s** |
-  | 2 | 6.02s / 5.66s | 8,916 | 1,528 tok/s (+5%) |
-  | 4 | 11.22s / 10.52s | 17,744 | 1,634 tok/s (+12%) |
-
-  Wall clock tracks the work, not the concurrency: 4× the tokens at concurrency 4 took ~3.5× as long, where genuine parallelism would have finished in roughly the time of a single request. The ~12% that does appear is HTTP and tokenization overhead overlapping compute, not parallel GPU execution. On the 285,706-token corpus that is 196s serial against 175s four-way — **a best case of ~21s off a 220.9s ingestion**. Note this run measured 1,456–1,634 tok/s against the ~1,750 recorded below; the app was running and free RAM was ~1.5 GiB, so treat the older figure as a quieter-machine number.
-- **Switching model runtimes does not help, and Docker Model Runner specifically risks a regression.** DMR is llama.cpp underneath, the same as Ollama, so it inherits the same Vulkan ceiling on this iGPU; its Vulkan support (since Oct 2025) does detect Iris Xe, but there are open reports of it falling back to CPU on Windows because the inference server loads `ggml-vulkan.dll` where the Vulkan loader cannot find the ICD manifests. That fallback would cost ~45% (830 vs 1,456+ tok/s) — risking ~90s to chase ~21s. SYCL / `ipex-llm` is not an answer either: benchmarks put Vulkan *ahead* of SYCL on Intel iGPUs by ~3–7%, and `ipex-llm`'s embedding optimisation only covers HuggingFace BGE models. vLLM is CUDA-oriented and degrades to CPU here.
-- **Spring AI already batches embeddings**, so there is no per-chunk request overhead to recover. `OllamaEmbeddingModel.ollamaEmbeddingRequest` passes `embeddingRequest.getInstructions()` — the whole list — as one `EmbeddingsRequest`, so at `batch-size: 35` the manual is ~37 requests of 35 texts, not 1,275 single calls.
-- **Embedding is CPU-only by default and that is the bottleneck.** Ollama drops the integrated GPU unless `OLLAMA_IGPU_ENABLE=1` is set (it logs `dropping integrated GPU`). On this machine: ~830 tok/s across 8 CPU threads vs **~1,750 tok/s** on the Iris Xe via Vulkan, taking a full ingestion from 415.7s to 220.9s. It is an environment variable, so it is not captured in the repo — see `README.md`.
-- **Cost scales with total tokens, not chunk or request count.** Paragraph coalescing cut chunk count by 79% but wall-clock by only ~19%, because it rearranges tokens without removing them. Do not expect batching or concurrency changes to move ingestion time. **Cutting tokens is the only lever that has ever worked**: PDF table detection took the corpus from 428,851 to 285,706 tokens, and ingestion cost fell proportionally. Reach for that before any runtime or concurrency change.
-- Connection-hold time follows `elapsed × ingestion-concurrency ÷ batches`. That is why halving elapsed time on the GPU removed the Hikari leak warnings outright (8 → 0) without changing `ingestion-concurrency`.
-
-**Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor` retrieves relevant chunks from pgvector → Ollama generates the response → history persisted to Redis. The controller resolves the conversation ID (generating a UUID when none is supplied, in `resolveConversationId`) and returns it in the `X-Conversation-Id` response header; `ChatService` does not generate IDs.
-
-**`/ai/generate` and `/ai/generateStream` are `POST` with a JSON body, not `GET` with a query parameter**, taking a `@Valid ChatRequestDto`. A prompt in a query string lands in access logs, browser history and proxy logs — for a RAG assistant that is the most sensitive text in the system — and is bounded by URL length rather than by anything the application controls. Consequences:
-
-- **A browser cannot consume the streaming endpoint with `EventSource`**, which only issues `GET`. A web UI must use `fetch` with a `ReadableStream`. This is the one real cost of the change and there is no frontend yet to have noticed it.
-- **`prompt` is required and capped at 4000 characters.** The cap is about the context window, not politeness: `num-ctx` is 8192 tokens and `QuestionAnswerAdvisor` spends most of it on retrieved passages, so a larger prompt would crowd out the passages the answer is meant to be grounded in. There is no longer a `"Tell me a joke"` default.
-- The old `GET` form now correctly answers **405 Method Not Allowed**. It briefly answered 500 — see the exception-handling note below for why, and why that matters beyond this endpoint.
-
-Conversations can be listed, read back one at a time and deleted individually. Three things about the read-back are load-bearing:
-
-- **There is no full transcript to read back, and there never was.** `MessageWindowChatMemory` trims to `app.ai.max-chat-messages` (10) inside `add()`, *before* `saveAll` — so Redis only ever holds the last 10 messages and older turns are unrecoverable by anything, not merely unexposed. Verified: 7 turns on one conversation leaves 10 messages, with the first two turns gone. `ConversationDto` reports `maxRetainedMessages` beside `messageCount` so a caller can tell a short conversation from a truncated one. Raising the limit costs a bigger prompt on every request, since the window is also what gets replayed to the model.
-- **`ChatService.getConversation` reads through `ChatMemoryRepository`, not `ChatMemory.get()`.** The two are identical today — `MessageWindowChatMemory.get()` just delegates to `findByConversationId` and windows only on write — but they answer different questions: the repository reports what is *stored*, `ChatMemory` what the next turn would be *given*. A memory implementation that windowed on read instead would silently truncate this endpoint.
-- **An empty result is reported as 404.** Redis keeps no tombstone, so a conversation that was cleared is indistinguishable from one that never existed; both read as absent. `DELETE` of a single conversation is idempotent by contrast and returns 204 either way.
-
-The bulk `DELETE /ai/conversations` still returns a bare `String` rather than 204, unlike the per-conversation delete beside it. Left as-is deliberately — changing it would break existing callers — but it is the odd one out.
-
-`DocumentController` is based at `/api/v1/documents`. Exact routes for all three controllers are in `README.md`'s API Endpoints tables — kept canonical there, not duplicated here.
-
-**Every indexed document records the pipeline that produced its chunks, and `PipelineProvenance.CURRENT_VERSION` must be bumped by hand when that pipeline changes.** `document_metadata.pipeline_version` + `pipeline_settings` (JSONB) are stamped in `DocumentMetadataService.uploadAndProcess` on the `INDEXED` path only — a `FAILED` document produced no chunks, so provenance for it would describe nothing. `DocumentMetadataDto` exposes them plus a computed `stale` / `staleReason`. Before touching any of it:
-
-- **The version constant is the load-bearing half, and it only works if someone bumps it.** Every pipeline change that has actually invalidated this corpus — the citation header, paragraph coalescing, the jsoup `xmlParser` fix — was a *code* change with no configuration footprint, so the settings snapshot would have missed all three. `CURRENT_VERSION` carries a history list in its javadoc; add a line whenever you bump it.
-- **Only output-affecting settings belong in `PipelineSettings`.** `batchSize`, `ingestionConcurrency`, `ingestionMaxAttempts` and `ingestionRetryBackoff` are throughput-only; `topK` and `similarityThreshold` act at retrieval time. Including any of them would mark the whole corpus stale on exactly the occasions when nothing about the stored chunks changed — and `batch-size` is explicitly expected to be retuned whenever chunk sizing changes. Verified both directions: `chunk-size` 400→500 flips `stale` to true naming `chunkSize`, while `batch-size`, `ingestion-concurrency` and `top-k` together leave it false.
-- **A NULL version means stale, not current.** Documents ingested before this existed report stale with a reason saying what produced them is unknown, which is the honest reading.
-- **`JdbcConversionsConfig` builds its own Jackson 2 `ObjectMapper` rather than injecting one.** Spring Boot 4 ships both Jackson 2 (`com.fasterxml.jackson`) and Jackson 3 (`tools.jackson`) and publishes a bean only for the latter, so injecting `ObjectMapper` fails context startup. The write converter must emit a `PGobject` typed `jsonb`; a plain `String` goes to the driver as `varchar` and Postgres refuses it against a `jsonb` column. Converters are registered for the concrete `PipelineSettings` type, not `Map<String,Object>`, to keep them off every other map-valued property.
-- **`ModelMapperConfig`'s `DocumentMetadata` → `DocumentMetadataDto` mapping is a hand-written converter calling the canonical constructor, not a field-name mapping.** A component added to the record does *not* flow through on its own — it returns null with no error anywhere. Extend both together. It now also takes `PipelineProvenanceService` so the staleness rule lives in one place rather than in the mapper.
-
-**`DocAiExceptionHandler`'s catch-all must never be the thing that decides a Spring MVC exception's status.** `@ExceptionHandler(Exception.class)` claims every exception, including Spring's own, and for a long time flattened all of them to `500 "Unexpected error"` — a wrong HTTP method, an unsupported `Content-Type` and malformed JSON all read as server failures. The symptom that exposed it was `GET /ai/generate` answering `500 "Request method 'GET' is not supported"` after that endpoint moved to POST, which tells a caller close to the opposite of the truth. Three things now stand between the catch-all and that outcome, and they are not interchangeable:
-
-- **`handleGeneric` delegates when the exception is an `ErrorResponse`.** Most Spring MVC exceptions implement it and already carry the right status and a populated `ProblemDetail`; returning `errorResponse.getBody()` preserves both. This is what fixes 405, 415, 406, missing-path-variable and the rest in one place.
-- **Two families sit outside `ErrorResponse` and need explicit handlers.** `HttpMessageNotReadableException` descends from `NestedRuntimeException` and `MethodArgumentTypeMismatchException` from `BeansException`, so neither is caught by that check — malformed JSON and a malformed UUID in a path both returned 500 until each got its own handler. **Check the hierarchy before assuming a Spring exception is covered by the `ErrorResponse` branch**; the first attempt at this fix assumed it covered everything and left both of those still broken.
-- **`handleTypeMismatch` is registered on `MethodArgumentTypeMismatchException`, not its parent `TypeMismatchException`.** `ConversionNotSupportedException` is also a `TypeMismatchException` but means the server has no converter configured, which genuinely is a 500; catching the parent would report a server misconfiguration as the caller's fault.
-
-Genuine 500s now return a fixed generic detail rather than `ex.getMessage()`, which was leaking JDBC and Ollama internals to callers; the real message and stack trace still go to the log. Domain exceptions are unaffected — `DocumentProcessingException` still returns 422 carrying its actual message, which is the thing a caller can act on.
-
-**Unsupported file types are refused before any row is written, by `SupportedDocumentTypes` in `service/parse`.** `uploadAndProcess` calls it as its first statement, ahead of `documentMetadataRepo.save`, so a file that was never a candidate leaves no `document_metadata` row and no history trail — previously a `.exe` was accepted, wrote both, and only failed deep inside Tika. Points that matter:
-
-- **The list is a constant, not an `app.rag.*` property.** It states what the parser has been verified to carry through chunking and the table paths, so adding a format should require checking that it works rather than editing config. It includes DOCX, XLSX, PPTX and HTML because the table-recovery path exists specifically for them — the endpoint's old Swagger text claimed a narrower set and was simply wrong.
-- **It matches the filename extension, with the declared content-type only as a fallback** when the filename has no extension. An extension that is present but disallowed is a rejection whatever the content-type says, otherwise a client sending `application/octet-stream` would bypass the list entirely. Verified: an extensionless file with `text/plain` is accepted, the same file with `application/octet-stream` is refused.
-- **It is a type filter, not a content scanner**, and the distinction is load-bearing. A corrupt `.pdf` still returns **422** and still leaves a FAILED record with history, because its type was fine and its content was not; only the type check produces **415**. Renaming `payload.exe` to `payload.pdf` gets past this and fails in PDFBox instead, by design.
-- **`UnsupportedDocumentTypeException` extends `DocumentProcessingException` deliberately.** `DocAiExceptionHandler` maps the subclass to 415 while the parent keeps 422 — Spring resolves to the closest match, so they coexist — and `uploadMultipleDocuments` catches the parent, so one bad file in a batch becomes a FAILED entry instead of aborting it. That entry has a **null id and no history**, unlike every other failure, precisely because nothing was written.
-
-**Bulk upload reports one result per input file, and a failure is a result rather than an omission.** `uploadMultipleDocuments` used to catch `DocumentProcessingException`, log a warning and drop the file from the response, so a caller who sent ten files and got seven back could not tell which three were missing or why — the only record was a server log line they could not see. It now appends a `FAILED` `DocumentResponseDto` instead. Two things this depends on:
-
-- **`DocumentProcessingException` carries an optional `documentId`.** Only `DocumentMetadataService.uploadAndProcess` sets it — it is the one throw site that has already written the FAILED row — and the other six leave it null, correctly, because they throw before or below the layer that owns the record. That id is what makes a failure actionable: it is the handle to `/{id}/history`, where the trail and error already lived but were unreachable without knowing the id.
-- **The controller derives the status from the results**: 201 all indexed, 207 Multi-Status mixed, 422 none indexed, plus an explicit empty-list guard returning 400 — without it, "every file failed" is vacuously true for an empty batch and would answer 422 to a malformed request. Note that guard is defensive rather than routinely exercised: a multipart request with no `files` part fails earlier as `MissingServletRequestPartException` and renders as a 400 through the `ErrorResponse` delegation.
-
-**The loop is serial and must stay that way.** Ollama pins embedding runners to a single slot regardless of concurrency, so parallel uploads would not embed any faster and would only contend for the Hikari pool that `app.rag.ingestion-concurrency` already sizes against that single slot. The old Swagger summary said "simultaneously", which was never true; the wording was the bug, not the loop.
-
-**Document history is an immutable audit log, and its lack of a foreign key is deliberate.** `document_metadata_history` has no FK to `document_metadata`, so `deleteDocument` — which removes the metadata row and the vector chunks — leaves the trail behind on purpose. Do not add the constraint, and do not "clean up" the resulting rows; a history row with no surviving parent is the intended state, not corruption. `GET /api/v1/documents/{id}/history` consequently still answers for a deleted document and reports `documentExists: false`, which is the only way to tell that case from a document still present; it 404s only when no history exists for the id at all.
-
-- **`DocumentMetadataHistory` needed a public no-arg constructor before it could be read.** Its only constructor was the private builder one, which is enough to *write* a row but makes Spring Data JDBC fail any read with `No property builder found on entity class ... to bind constructor parameter to`. The table had been written to since it was created and never read, so this surfaced only when the history endpoint was added. `DocumentMetadata` already had the same no-arg constructor with no setters — fields are populated reflectively — and the history entity now matches it.
-- `DocumentStatus.PROCESSING` *is* used, but only in history: `DocumentIngestionService.ingest()` records it while the metadata row's own `status` column goes `UPLOADING` → `INDEXED`/`FAILED` without ever holding it. So the history is strictly richer than the status column, and a failed parse shows `UPLOADING` → `FAILED` with no `PROCESSING` entry, because parsing precedes ingestion.
-
-**Retrieval diagnostics**: `AdminDiagnosticsController` (base `/api/v1/admin`) → `RetrievalDiagnosticsService` → the same `VectorStore` similarity search the chat path runs, reported with scores and metadata and no generation step. It exists to separate a retrieval failure from a generation failure, which nothing else in the app can do. Things to keep in mind:
-
-- **Its search parameters must keep defaulting from `RagProperties`** — the same record `SpringAiConfig.chatClient` reads for the `QuestionAnswerAdvisor`'s `SearchRequest`. That shared source is the whole basis of the diagnostic being faithful; hardcoding `topK` or `similarityThreshold` here would let it drift from the thing it reports on. The response echoes the values actually in force so a caller can tell a default from an override.
-- **It does not reproduce chat memory.** `QuestionAnswerAdvisor` searches with the user's message as written, so a single-turn query matches exactly; a follow-up that only makes sense in context retrieves just as poorly here as it does there.
-- **`hasCitationHeader` is the only way to spot pre-header chunks.** Chunks written before `citationHeader()` existed cannot be cited and are otherwise indistinguishable, so the DTO splits the stored text into `citation` + `text` by matching the first line against `^\[...\]$` rather than splitting on the first `"\n\n"` — an unconditional split would eat a real first line from those older chunks.
-- The controller is `@Profile("dev")`, so outside the dev profile the bean is not registered and the paths 404. That is weaker than authentication; there is no Spring Security on the classpath, and when there is, this gate should be replaced rather than supplemented. Verified: under `--spring.profiles.active=prod` the admin path 404s while `/api/v1/documents` still answers.
-- It is also the first endpoint using `@Valid`, which is what finally makes `DocAiExceptionHandler.handleValidation` reachable — that handler had been dead code.
-
-## Evaluation
-
-**Answer quality is measured continuously on real traffic, and on demand against a curated dataset. The split between the two is the whole design, and it follows from one question: does the metric need to know what the right answer was?**
-
-Most do not. Citation validity and fabrication, zero-hit rate, score spread, refusals and the LLM judges are all **reference-free** — they compare the answer against the context it was given, which is available on every real chat turn. Only recall metrics (hit-rate@k, MRR) and expected-phrase coverage need ground truth, and those are the only things the golden suite adds. Getting this backwards and building only a batch harness would leave the dashboard showing a picture of the last time someone ran a script.
-
-**Online evaluation hangs off the live chat path and must never delay a response.** `ChatService` takes the `ChatResponse` rather than `content()`, reads the retrieved chunks from `QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS` (`"qa_retrieved_documents"`, which the advisor's `after()` copies into the response metadata), and hands them to `OnlineEvalService`. Points that are load-bearing:
-
-- **Deterministic scoring runs inline; LLM judging is fired and forgotten.** The deterministic half is regex over data already in hand — microseconds, no network — so it runs on 100% of turns with no sampling and no drops. Judging goes to a virtual thread after the answer has already been returned.
-- **Async does not make judging free, it relocates the cost.** Ollama serialises on one runner slot, so a judge call occupies the chat model and the *next* user's generation queues behind it. Hence `app.eval.online.judge-sample-rate` (0.1) and `max-concurrent-judgements` (1).
-- **Admission is non-blocking and drops rather than queues.** The permit is taken with `tryAcquire` *before* a thread is started. Submitting first and blocking on the permit inside would accumulate parked virtual threads without limit — the bound has to be enforced at the door. A rising `rag_eval_online_judgements_dropped_total` means the sample rate is too high for the traffic, not that anything is broken.
-- **Judges are built from a fresh prototype `ChatClient.Builder`** (`ChatClientAutoConfiguration` declares it `@Scope("prototype")`). A judge inheriting the app's builder would carry the `QuestionAnswerAdvisor` and chat memory — it would retrieve its own context into the grading prompt and accumulate history across verdicts. Neither failure throws or logs; the scores just quietly stop meaning anything.
-- **Ungrounded turns are never judged.** Both judges score an answer *against its context*; with nothing retrieved, `FactCheckingEvaluator` is asked whether a claim is supported by a blank document and says no. Feeding those in would drag groundedness down in proportion to how much general conversation the assistant handles — a capability its system prompt promises.
-- **The streaming path accumulates.** `BaseAdvisor.adviseStream` calls `after()` only on the chunk carrying a finish reason, so the retrieved documents arrive on the *final* response and the answer text exists only as the concatenation of the chunks. Evaluation hangs off `doOnComplete`, so a cancelled or failed stream is not scored — judging a half-delivered answer would report a truncation as a quality problem.
-
-**The judge is `gemma4:e2b` — the chat model itself — and that is a memory decision, not a quality one.** Measured on the dev host: gemma4:e2b resident at **1.59 GiB**, nomic-embed-text at **0.30 GiB**, leaving **0.74 GB** free of 15.63 GB (2.81 GB with nothing loaded). `bespoke-minicheck`, the smallest purpose-built grounded-factuality judge, ships only at 7B with a **4.39 GiB** weights layer — it does not fit even after evicting *both* resident models, so every judgement would page. Verify with `/api/ps` and `\Memory\Available MBytes` before revisiting; file size predicts nothing here, since gemma4:e2b is a 7.16 GB file resident at 1.59 GiB.
-
-- **Self-judging bias is real and these numbers are optimistic.** A model grading its own output is more generous than an independent one. The bias is roughly a constant offset, so a *drop* after a prompt or model change is meaningful — read the judged rates as a trend, never quote the absolute number.
-
-**The golden suite is triggered by a tagged test, not an endpoint.** A run takes minutes (375s for 9 cases, unjudged), which would need async submission, polling and single-flight machinery to expose over HTTP safely. Note the command, because the obvious one does not work:
-
-```bash
-./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
-```
-
-`-Dgroups=eval` alone does **not** work: in JUnit 5 tag filtering an exclusion beats an inclusion, so the tag stays excluded however it is included. The exclusion itself has to be cleared, which is why `<excludedGroups>` is bound to the `surefire.excludedGroups` property rather than hardcoded.
-
-- **Each case gets a fresh conversation id, cleared in a `finally`.** `MessageWindowChatMemory` would otherwise feed case N's answer into case N+1's prompt, so the dataset's order would change its scores. Clearing also keeps eval conversations out of the chat API's conversation list.
-- **Cases run serially, and generation is a separate phase from judging.** Serial for the same reason bulk upload is. Two-phase because interleaving would swap models twice per case rather than once per run — worth nothing today with a self-judge, and the difference between 1 and 2N model loads the day someone points `app.eval.judge-model` elsewhere.
-- **Golden gauges are fed from Postgres, not from the run that produced them.** The suite runs in the *test* JVM, with its own meter registry that Prometheus never scrapes — so a run published its gauges into a registry that was thrown away, and the dashboard sat at zero while the results were in the database all along. `EvalMetricsService` now refreshes the golden gauges from the latest `eval_run` row, driven by the scrape itself (a Micrometer gauge's value function is evaluated when Prometheus scrapes), so no `@EnableScheduling` is needed. **Golden gauges therefore require `app.eval.golden.persist=true`.**
-- **`relevancy`/`groundedness` are NULL for "not judged", never FALSE.** Judging is off by default, so the common case is no verdicts; any aggregate must exclude nulls rather than coalesce them, and the gauges report `NaN` until some run has actually judged, because 0.0 renders as a scarlet "zero percent passed" for something nobody measured.
-- **Expected pages in the dataset were verified by reading retrieved chunk text**, not inferred from a good similarity score. Re-verify after any chunking change, since page attribution comes from the citation header.
-
-**Every fixed-tag online meter is pre-registered at zero in `EvalMetricsService`'s constructor, and removing that would blank three panels.** A Micrometer counter is created lazily on first use, so a counter for an event that has not happened yet has **no series at all** — Prometheus returns nothing and Grafana renders "No data" rather than `0`. That is precisely backwards for the health signals, whose good state *is* zero: "no refusals have occurred" and "the refusal metric is broken" looked identical, and the judge-throughput and answer-health panels read as empty on a perfectly working system. `register()` is idempotent, so pre-registration only forces creation and never resets a count. Two consequences:
-
-- **Tagged counters must be enumerated over their whole tag cross-product**, since a series exists per tag combination, not per name — `judgements.total` is `{relevancy, groundedness} × {pass, fail}`, so four series. `DistributionSummary` is lazy in the same way, hence the four `registry.summary(...)` calls.
-- **The golden `cases.total{suite,case}` and `runs.total{suite}` counters are deliberately *not* pre-registered.** Their tag values come from whichever dataset runs, so they cannot be enumerated in advance; no panel reads them (the golden row reads gauges), and they appear on the first suite run.
-
-**A ratio must not be guarded with `clamp_min(denominator, 1)` when the denominator being zero means "not measured".** The guard avoids a divide-by-zero but substitutes a confident `0` for "nothing to report" — with counters now existing at zero, the judge pass-rate panel rendered a scarlet **0%** when nothing had been judged, and citation validity did the same before any answer had cited anything. Plain division yields NaN, which Prometheus omits and Grafana shows as no-data, which is the honest reading. Same principle as the `NaN` on the judged golden gauges.
-
-**Rate panels are the wrong instrument for this deployment.** `rate(...[5m])` over a handful of manual chat turns an hour is blank except for the few minutes after a request, and a per-second rate of a rare event (a refusal, a dropped judgement) rounds to a flat zero indistinguishable from a broken metric. The cumulative counter is shown instead on the citation-outcome, judge-throughput and answer-health panels — it always renders, and a flat line reads correctly as "nothing has happened". Retrieval-quality means use a rolling `[1h]` rather than `[5m]` for the same reason. Revisit if this ever sees continuous traffic.
-
-**A bracketed filename is not necessarily a citation, and treating it as one makes the fabrication rate useless.** Answers about this corpus are full of parentheses holding filenames — `(application.properties)`, `(pom.xml)` — which are prose. `EvalScoringService` therefore counts a candidate only when it carries a page number *or* its filename is one of the documents actually retrieved. A page number on an unretrieved file (`(application.properties, p. 12)`) still counts and is still fabricated, which is the case worth catching. Two parsing traps, both found by real output rather than reasoning:
-
-- **Several citations share one pair of brackets**: `(manual.pdf, p. 283; manual.pdf, p. 299)`. A pattern anchored on a closing bracket right after the page number matches *neither*. `CitationParser` finds bracketed spans first, then parses citations within each span.
-- **The extension must start with a letter**, or `(version 3.14)` parses as a file named `3.14`; and it must allow ten characters, because `properties` is one.
-
-**Every fabricated citation this suite has ever measured came from the corpus offering the model a second, wrong number — never from the model inventing one.** That has held across three distinct causes, two now fixed at parse time and one that is not fixable there. The sequence is worth keeping because the instinct each time was to blame the model or the prompt, and each time the corpus was at fault:
-
-| | cause | fix | fabrication |
-|---|---|---|---|
-| v1 | printed page number in the **page footer** | `PageFooterStripper` | 0.250 → 0.176 |
-| v2 | printed page number at the end of a **contents entry** | `TocEntryStripper` | 0.176 → 0.105 |
-| v3 | **section number** written where a page belongs | none — see below | 0.250 / 0.222 / 0.333 / 0.222 |
-
-- **The footer.** The manual's front matter makes the printed page number differ from the PDF page by exactly **19** (PDF 299 = printed 280, PDF 404 = printed 385), and the printed number sits *inside the chunk body* because the reader extracts it with the content. Offered `[spring-boot-reference.pdf, p. 299]` in the header and a bare `280` at the end of the passage, the model prefers the one that looks like part of the document. It also left **192 of 1,275 chunks holding nothing but a page number**, two of which took top-5 slots on a real query.
-- **The contents entries.** The same defect in a second place, only visible once the footers were gone: the model cited page 263 having read `5.2.4. Configuring Endpoints . . . 263` off a contents page it had retrieved. Pages 2–19 of the manual are contents and were **137 chunks of pure navigation**, duplicating headings that appear verbatim in the body and competing with them for the same queries.
-- **The section numbers, which remain.** Residual fabrications are all of the form `(spring-boot-reference.pdf, p. 5.3)`, where `5.3` is the heading "5.3. Endpoints" inside a passage that came from page 277. Two cases reproduce it on every run (`actuator-http-exposure` emits 5.3, 5.2.5 and 5.3.1; `logging-level-property` emits 5.5.1), and the same answers cite real pages correctly alongside them. **Adding an explicit instruction to both prompts — a page is a whole number, a dotted heading number is a section, "do not write (filename, p. 5.3)" — changed nothing across two runs.** Keep the instruction, but treat prompt wording as exhausted; a fix is more likely to come from a different chat model or from validating citations against the retrieved headers after generation.
-
-**The suite therefore gates on `inventedPageCount`, not on the fabrication rate, and that split is the point.** Four runs on an unchanged pipeline measured 0.250, 0.222, 0.333 and 0.222 — `profiles-activation` emitted two section numbers on one run and none on the other three — so any threshold tight enough to catch a real regression fails on variance alone. `MAX_INVENTED_PAGES` is **0** and has held across four runs and 75 emitted citations: a citation naming a plain page the context never offered is the failure everything here exists to prevent, and it is stable precisely because it excludes the section-number noise. `MAX_CITATION_FABRICATION` survives at **0.40** as a loose backstop that only catches the rate running away entirely. Do not tighten it back — a red build that is red on an unchanged pipeline teaches people to ignore it.
-
-Three things to know before reading those numbers:
-
-- **0.105 and 0.222 are not comparable.** `CitationParser` used to truncate `p. 5.3` to page 5, which both mis-named the failure in the report and collapsed three distinct section citations into one. `Citation.pageLabel` now keeps the reference verbatim, `Citation.matches` never matches one, and `EvalScoringService.isSupported` counts it fabricated rather than granting it the leniency a bare filename gets. The rate went *up* when the scorer stopped under-counting; nothing about the model changed.
-- **Retrieval is unaffected by any of it — hit rate 1.000 and MRR 1.000 on every run**, before and after. The correct page is not merely retrieved but ranked first, every time.
-- **Both parser fixes require re-ingestion**, which is what `PipelineProvenance.CURRENT_VERSION` (now 3) exists to flag. The manual went 1,275 → 1,083 → **946 chunks**, and ingestion 221s → 157s, because cost scales with total tokens and both fixes remove tokens.
-
-## Docker environment (`compose.yaml`)
-
-Services: pgvector, pgadmin, redis, redis-exporter, postgres-exporter, otel-collector, prometheus, grafana, tempo, loki. The postgres-exporter collector flags are asymmetrically named — `--collector.stat_user_tables` but `--collector.statio_user_indexes` — and an unknown flag makes the container exit(1) rather than warn. Ports and credentials are documented in `README.md`'s Infrastructure section — don't duplicate them here, keep that as the canonical copy.
-
-Config file locations (dev-context, not in README): `docker/otel/otel-collector-config.yaml`, `docker/prometheus/prometheus.yml`, `docker/grafana/grafana.ini`, `docker/grafana/provisioning/datasources/`, `docker/grafana/provisioning/dashboards/`, `docker/tempo/tempo.yaml`, `docker/loki/local-config.yaml`.
-
-## Observability
-
-The app exports metrics (Prometheus scrape on management port `9095`), traces (OTLP → otel-collector → Tempo) and logs (loki4j appender → Loki), and all four correlation directions work in Grafana. The wiring is non-obvious in several places, so before changing any of it:
-
-- **Two independent Spring AI observation levels.** `spring.ai.chat.client.observations.*` logs the prompt as the caller wrote it, *before* advisors run. `spring.ai.chat.observations.*` logs the final prompt sent to Ollama, *after* `QuestionAnswerAdvisor` injects the retrieved context. Only the second shows the RAG context. Both are enabled; the handlers log at INFO.
-- **`logback-spring.xml` must emit an empty traceId/spanId default, never a placeholder.** Loki drops structured metadata whose value is empty, so untraced lines carry no `traceId` label. A literal default such as `NONE` makes Grafana render a TraceID link on every line that then queries Tempo for a trace by that name and returns nothing.
-- **Prometheus needs two CLI flags** (`compose.yaml`): `--enable-feature=exemplar-storage` or scraped exemplars are silently dropped, and `--web.enable-remote-write-receiver` or Tempo's metrics generator cannot write. Overriding `command:` also discards the image's default args, so `--storage.tsdb.path` must be restated.
-- **Tempo's metrics generator is enabled per tenant** via `overrides.defaults.metrics_generator.processors`. Configuring the `metrics_generator` block alone does not switch it on.
-- **Grafana datasource links**: Loki `derivedFields` needs an explicit `url` even when `datasourceUid` is set. Metrics → logs has no built-in link and uses a **correlation**, which is provisioned *inside* the datasource file — Grafana silently ignores a `provisioning/correlations/` directory.
-- **Dashboard exemplars** require `"exemplar": true` per target. It is set on the `http_server_requests_seconds_*` targets only; gauges (JVM, Hikari) and redis-exporter series cannot carry exemplars.
-- **There is a fourth datasource, Postgres**, provisioned in `docker/grafana/provisioning/datasources/4_postgres.yml` solely for the evaluation dashboard's per-case tables. It reaches the database as `pgvector:5432` — the compose service name and *internal* port, since Grafana resolves it on the compose network where the host port mapping does not apply. Prometheus holds every eval score; this exists for the detail that must not go into a metrics store, namely the per-case answer text and failure reasons.
-- **That datasource needs `database` set under `jsonData`, not only at the top level, and the plugin id is `grafana-postgresql-datasource`.** Both were wrong at first and both failed *only in the browser*, which is what makes them worth recording. The backend reads the top-level `database` and resolves the datasource by `uid`, so `/api/ds/query` answered every panel's SQL perfectly while all four table panels rendered completely blank — no table, no "No data", no error on the panel, the sole trace being a console message reading "You do not currently have a default database configured". Grafana 13.2.1 registers no `postgres` alias for the renamed plugin, so a dashboard declaring `"type": "postgres"` cannot load the plugin client-side either. **Testing a Grafana panel through the API proves nothing about whether it renders** — read the browser console, and check `/api/datasources/uid/postgres` for how the datasource was actually stored rather than trusting the YAML.
-- **Grafana stops rendering panels while `document.hidden` is true**, and a table panel has been measured taking 17 seconds to paint. Both matter when checking a dashboard from an automated browser: a blank panel there is far more likely to be a hidden or still-painting document than a broken query. Poll for the rendered content rather than waiting a fixed interval.
-- **Three dashboards, split by the question they answer, and every one grouped into rows.** `spring-ai-ragr-overview` answers "is the *application* healthy" — rows for JVM runtime, HTTP/Spring MVC, HikariCP and backing services (Redis and Postgres, from their exporters). `spring-ai-rag-metrics` answers "is the *AI pipeline* healthy" — rows for Ollama model calls, tokens and throughput, the RAG advisor chain and the vector store. `spring-ai-rag-evals` answers "are the *answers* any good" (see Evaluation). Keep new panels on the dashboard matching that question rather than adding AI panels back to the overview, which is what the split undid.
-- **Five overview panels were duplicates of AI/RAG panels and were merged, not moved.** Model call rate, call latency, token throughput, advisor latency and pgvector latency existed on both dashboards in slightly different forms. The surviving versions keep the better query in each case — the advisor panel now carries the mean *and* the p95 together, and the vector-store latency panel splits `add` from `query` rather than aggregating them.
-- **`spring.ai.chat.client` needs `percentiles-histogram` enabled or its latency panel is permanently empty.** The "ChatClient end-to-end latency" panel ran `histogram_quantile` against a timer that published no buckets, so it had never once shown data. Enabling it also requires `"[spring.ai.chat.client.active]": false` alongside, because these keys are prefix matches — exactly the trap already documented for `spring.ai.advisor`. Verified after the change: 69 `spring_ai_chat_client_seconds_bucket` lines, and 0 for the `.active` variant.
-- **Three AI/RAG panels are empty by design and say so in their descriptions.** The embedding-throughput gauge ends in `> 50` so it reports genuine ingestion peaks rather than idle noise; the chat-throughput gauge ends in `> 0`; and the LLM error-rate panel filters `error!="none"`, which Spring AI creates no series for until a call actually fails. Do not "fix" these by removing the guards — check whether ingestion or a failure has actually happened first.
+## Architecture in brief
+
+**Upload**: `DocumentController` → `DocumentMetadataService` (creates the metadata record) →
+`DocumentParserService` (file → `List<ContentBlock>` → chunks, on `documentProcessingPool`) →
+`DocumentIngestionService` (enrich + write to pgvector, one virtual thread per batch) → status
+`INDEXED`/`FAILED`, with every transition recorded by `DocumentHistoryService`.
+
+**Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor`
+retrieves from pgvector → Ollama generates → history to Redis → `OnlineEvalService` scores the turn
+after the response has already been returned.
+
+Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake
+it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through
+the router in time, and repeating it here is pure always-loaded cost.
+
+- **Every chunk's stored text begins with a `[filename, p. N]` citation line.** It is embedded and
+  persisted, not metadata. Anything that reads chunks back — export, re-ranking, re-chunking — must
+  strip it. This is the only reason the model can cite page numbers at all. The document that owns
+  this (`chat-and-citations.md`) is keyed to the chat path, so it will not fire for the export or
+  migration code where the mistake actually gets made.
+- **Do not use a bare `parallelStream()` for parse work.** It runs on the common pool and defeats the
+  `documentProcessingPool` bulkhead. That pool is for parsing only; ingestion is I/O-bound and uses
+  virtual threads bounded by a `Semaphore`.
+
+## Context documents
+
+Deep context is split into `.claude/context/`, which is **local and gitignored** — in a fresh clone
+these files will not exist, and the pointers below are the map to rebuild rather than a promise.
+
+A `PreToolUse` hook (`.claude/hooks/context-router.ps1`, mapped by `.claude/hooks/routes.json`)
+injects the matching document the first time a session reads or edits a file in that area, once per
+area per session. **If the hook has not fired, read the relevant file directly** — nothing else loads
+these.
+
+| document | covers | triggered by |
+|---|---|---|
+| `parsing.md` | `ContentBlock`, Tika/jsoup, PDF table geometry, strippers, the chunk-size budget | `service/parse/**`, `DocumentParserService` |
+| `ingestion.md` | batching, virtual threads, Hikari, retry/compensation, throughput measurements, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `ThreadPoolConfig` |
+| `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics | `ChatService`, `ChatController`, `SpringAiConfig` |
+| `provenance.md` | `CURRENT_VERSION`, `PipelineSettings`, the two Jackson/ModelMapper traps | `PipelineProvenanceService`, `JdbcConversionsConfig` |
+| `evaluation.md` | online vs golden split, judge selection, metric registration, citation fabrication | `service/eval/**`, `Eval*`, `EvalSuiteIT` |
+| `observability.md` | compose stack, tracing/logging wiring, the three dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
+| `api-and-errors.md` | `DocAiExceptionHandler`, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
+| `configuration.md` | the property map, Hikari, Ollama settings, Flyway migrations | `application*.yaml`, `db/migration/**` |
+
+Keeping this current is part of the work: when a package moves, update `routes.json`; when a fact
+changes, edit the document rather than appending a correction to it.
 
 ## See also
 
-`README.md` is the user-facing quick-start doc — canonical source for API endpoint tables/curl examples and docker service ports/credentials, kept in sync with this file. `GEMINI.md` is the longer-form architecture doc.
+`README.md` — user-facing quick-start, and the canonical source for API endpoint tables, curl
+examples, and docker service ports and credentials. Do not duplicate those here.
