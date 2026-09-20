@@ -58,6 +58,13 @@ public class RetrievalDiagnosticsService {
 
     public RetrievalResponseDto search(RetrievalRequestDto request) {
 
+        // Both defaults MUST keep coming from RagProperties - the same record SpringAiConfig.chatClient
+        // reads when it builds the QuestionAnswerAdvisor's SearchRequest. That shared source is the
+        // whole basis of this endpoint being faithful: it is here to tell a retrieval failure from a
+        // generation failure, which it can only do while it searches exactly as the chat path searches.
+        // Hardcoding either value would leave the endpoint working and quietly reporting on different
+        // retrieval than the application performs - a diagnostic that lies is worse than none. The
+        // response echoes the values actually in force so a caller can tell a default from an override.
         int topK = request.topK() != null ? request.topK() : ragProperties.topK();
         double threshold = request.similarityThreshold() != null
                 ? request.similarityThreshold()
