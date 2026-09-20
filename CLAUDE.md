@@ -133,7 +133,16 @@ these.
 | `evaluation.md` | online vs golden split, judge selection, metric registration, citation fabrication | `service/eval/**`, `Eval*`, `EvalSuiteIT` |
 | `observability.md` | compose stack, tracing/logging wiring, the three dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
 | `api-and-errors.md` | `DocAiExceptionHandler`, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
-| `configuration.md` | the property map, Hikari, Ollama settings, Flyway migrations | `application*.yaml`, `db/migration/**` |
+
+These documents are deliberately thin. The reasoning behind this codebase lives in its comments —
+roughly a third of `src/main/java` is comment text, and classes like `EvalConfig`,
+`DocumentIngestionService` and `CitationParser` carry the measurements behind each decision in their
+javadoc, as `application-dev.yaml` and the files under `docker/` do for configuration. **The code is
+the source; these documents are a thin index over it**, holding only the cross-file narrative and the
+measurement history that no single class owns. When the two disagree, the code is right.
+
+There is deliberately no document for configuration. `application-dev.yaml` comments itself at
+length — read it directly.
 
 Keeping this current is part of the work: when a package moves, update `routes.json`; when a fact
 changes, edit the document rather than appending a correction to it.
