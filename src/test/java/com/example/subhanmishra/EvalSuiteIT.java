@@ -44,12 +44,12 @@ class EvalSuiteIT {
     private static final Logger log = LoggerFactory.getLogger(EvalSuiteIT.class);
 
     /**
-     * A ratchet documenting a known model behaviour, not a target. Read the whole of this before
-     * changing it, because the number has meant three different things.
+     * A ratchet, and one that has moved a long way. Read the whole of this before changing it, because
+     * the number has meant four different things and its history is the history of this pipeline.
      *
-     * <p><strong>What has been fixed.</strong> The suite's first run measured 0.25, and every one of
-     * those was the corpus offering the model a second, wrong number rather than the model inventing
-     * anything. Twice over:
+     * <p><strong>Every fabrication ever measured here came from the corpus offering the model a second,
+     * wrong number - never from the model inventing one.</strong> That held across three distinct
+     * causes, each found only once the one before it was fixed:
      * <ul>
      *   <li>The <em>printed</em> page number in the page footer, which differs from the PDF page by 19
      *       in this manual - PDF 299 is printed 280. It sat at the end of the passage because the
@@ -59,53 +59,53 @@ class EvalSuiteIT {
      *   <li>The page number at the end of a table-of-contents line. With the footers gone the model
      *       cited page 263, having read {@code "5.2.4. Configuring Endpoints . . . 263"} off a contents
      *       page it had retrieved. {@code TocEntryStripper} removed those: 0.176 to 0.105.</li>
+     *   <li>The <em>section heading</em> inside a passage - "(spring-boot-reference.pdf, p. 5.3)",
+     *       where 5.3 is the heading "5.3. Monitoring and Management over HTTP". Unlike the first two
+     *       this one could not be stripped at parse time, because a heading is real content. It is
+     *       fixed after generation instead, by {@code CitationResolver}: 0.222 to <strong>0.000</strong>.</li>
      * </ul>
-     * Both are gone and should stay gone. <strong>No run since has produced an invented page number.</strong>
      *
-     * <p><strong>What remains, and why this is not zero.</strong> Every residual fabrication is the
-     * model writing a <em>section</em> number where a page belongs - "(spring-boot-reference.pdf, p.
-     * 5.3)", where 5.3 is the heading "5.3. Endpoints" inside a passage that came from page 277. Two
-     * cases reproduce it reliably: {@code actuator-http-exposure} emits 5.3, 5.2.5 and 5.3.1 on every
-     * run, and {@code logging-level-property} emits 5.5.1. The same answers cite real pages correctly
-     * alongside them, so the model is mixing two conventions rather than guessing.
+     * <p><strong>Why the third fix is a rewrite rather than a looser rule.</strong> The model was never
+     * guessing - measured across the corpus, no section number heads more than one page, and every
+     * label the suite ever saw it emit resolved to exactly one <em>retrieved</em> chunk. It was naming
+     * the right passage with the wrong kind of identifier, so the answer is rewritten to the page that
+     * heading sits on, before the reader sees it and before it is scored. A label that resolves to
+     * nothing, or to two pages, is left alone and still counts here - which is what stops this class of
+     * fix from quietly absorbing a model that really has started guessing.
      *
-     * <p>Measured after both parser fixes: <strong>0.250, 0.222, 0.333, 0.222</strong>, at 6 to 7 of 9
-     * cases passing, with hit rate and MRR at 1.000 throughout. Note those numbers are <em>not</em>
-     * comparable with the 0.105 above: {@code CitationParser} used to truncate "p. 5.3" to page 5, which
-     * both mis-named the failure and collapsed three distinct section citations into one. The rate went
-     * up when the scorer stopped under-counting; nothing about the model changed.
+     * <p><strong>Prompt wording was tried first and did not work.</strong> Both
+     * {@code SpringAiConfig.QA_PROMPT_TEMPLATE} and the system prompt say a page is a whole number and a
+     * dotted heading number is a section, with "do not write (filename, p. 5.3)" spelled out. Two runs
+     * afterwards were entirely unchanged, and the model still emits section numbers today - 37 of them
+     * across the four runs below, every one now resolved rather than prevented. Keep the instruction,
+     * it costs nothing; do not expect a better wording to succeed where that one did not.
      *
-     * <p><strong>Adding an instruction to the prompt was tried and did not work.</strong> Both
-     * {@code SpringAiConfig.QA_PROMPT_TEMPLATE} and the system prompt now say a page is a whole number
-     * and a dotted heading number is a section, with "do not write (filename, p. 5.3)" spelled out. The
-     * two cases above were unchanged across both runs afterwards. Keep the instruction - it costs
-     * nothing and the failure is at least described - but do not expect the next wording to succeed
-     * where this one did not. Consistent with the rest of this pipeline, the chat model is the
-     * load-bearing half of citation fidelity; a fix is more likely to come from a different model, or
-     * from validating citations against the retrieved headers after generation, than from prompt
-     * wording.
-     *
-     * <p><strong>This is the loose backstop, not the real guard.</strong> Four runs on an unchanged
-     * pipeline measured 0.250, 0.222, 0.333 and 0.222, because how many section numbers the model emits
-     * varies from run to run - {@code profiles-activation} contributed two on one run and none on the
-     * other three. A threshold
-     * tight enough to be meaningful would fail on that variance alone, so the assertion that actually
-     * catches a regression is {@link #MAX_INVENTED_PAGES} below. This one is set above the worst
-     * observed run and only catches the rate running away entirely.
+     * <p><strong>Where the number stands.</strong> Four runs with the resolver in place measured 0.000
+     * every time, across 65 emitted citations, at 9 of 9 cases passing, with hit rate and MRR at 1.000
+     * - so this threshold has gone from 0.40 to 0.10. It is not set to zero deliberately: generation is
+     * not deterministic even at temperature 0.2, and a single stray citation should not break a build.
+     * At 0.10 a typical 16-citation run tolerates one and fails on two, which catches a rate running
+     * away without failing on noise. If it does fail, the first thing to check is
+     * {@code rag.eval.online.citations.resolved.total{outcome="abstained"}}: section numbers the
+     * resolver could not place are the model genuinely guessing, and no amount of resolving will fix
+     * that.
      */
-    private static final double MAX_CITATION_FABRICATION = 0.40;
+    private static final double MAX_CITATION_FABRICATION = 0.10;
 
     /**
-     * Zero, and unlike the rate above it has <em>been</em> zero on every run since the parser strippers
-     * landed - four runs and 75 emitted citations, every fabrication among them a dotted section
-     * number.
+     * Zero, and it has <em>been</em> zero on every run since the parser strippers landed - eight runs
+     * and 140 emitted citations.
      *
-     * <p>This is the assertion with teeth. An invented page number is a citation naming a plain page the
-     * retrieved context never offered, which is the failure the citation header, both prompts and both
-     * strippers exist to prevent, and a reader following one lands somewhere unrelated. It is also
-     * stable in a way the overall fabrication rate is not, because it excludes the section-number
-     * behaviour described above - which is a real defect, but a known one that no longer tells you
-     * anything when it moves.
+     * <p>This is the assertion with teeth, and it kept its teeth through the period when the rate above
+     * could not. An invented page number is a citation naming a plain page the retrieved context never
+     * offered, which is the failure the citation header, both prompts, both strippers and the resolver
+     * all exist to prevent, and a reader following one lands somewhere unrelated.
+     *
+     * <p>It is kept separate from the fabrication rate even though the two now agree, because they are
+     * different assertions about different failures and only happen to coincide while the pipeline is
+     * healthy. This one says no reader was sent to a page that does not exist; the one above says
+     * citations in general are sound. Collapsing them would lose the distinction exactly when it
+     * matters.
      *
      * <p>If this fails, something is genuinely broken. Check in this order: is the corpus stale (a
      * document ingested by an older pipeline version still carries page footers, so its citations are 19
@@ -155,8 +155,9 @@ class EvalSuiteIT {
                 .isLessThanOrEqualTo(MAX_INVENTED_PAGES);
 
         assertThat(result.citationFabrication())
-                .as("citation fabrication has run away beyond the known section-number behaviour: %s",
-                    result.failures())
+                .as("citations are no longer sound - check whether CitationResolver is abstaining, "
+                    + "which means the model is emitting section numbers matching nothing it was "
+                    + "shown: %s", result.failures())
                 .isLessThanOrEqualTo(MAX_CITATION_FABRICATION);
 
         assertThat(result.hitRate())

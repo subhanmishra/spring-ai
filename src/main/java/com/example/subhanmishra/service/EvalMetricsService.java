@@ -161,6 +161,9 @@ public class EvalMetricsService {
         for (String outcome : List.of("valid", "fabricated")) {
             counter(ONLINE + "citations.total", Tags.of("outcome", outcome));
         }
+        for (String outcome : List.of("repaired", "abstained")) {
+            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", outcome));
+        }
         for (String metric : JUDGE_METRICS) {
             counter(ONLINE + "judgements.errors.total", Tags.of("metric", metric));
             for (String outcome : List.of("pass", "fail")) {
@@ -272,6 +275,26 @@ public class EvalMetricsService {
             counter(ONLINE + "instruction.echoes.total", Tags.empty()).increment();
         }
         registry.summary(ONLINE + "answer.chars").record(scores.answer().answerChars());
+    }
+
+    /**
+     * Records what {@code CitationResolver} did to one answer's section-number citations.
+     *
+     * <p>This pair is why the resolver cannot quietly mask a degrading model. A repair is a section
+     * number that resolved to a page the model was actually shown; an abstention is one that did not,
+     * and which therefore went on being counted as fabricated. <strong>Watch the ratio, not either
+     * count alone.</strong> Repairs rising on their own is the known {@code gemma4:e2b} behaviour
+     * being corrected as designed; abstentions rising is the model emitting section numbers that
+     * correspond to nothing it was given, which is the genuine hallucination this pipeline exists to
+     * prevent and which no amount of resolving will fix.
+     */
+    public void recordCitationResolution(int repaired, int abstained) {
+        if (repaired > 0) {
+            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", "repaired")).increment(repaired);
+        }
+        if (abstained > 0) {
+            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", "abstained")).increment(abstained);
+        }
     }
 
     /** Records an LLM judge verdict from the online path. */

@@ -4,6 +4,8 @@ import com.example.subhanmishra.config.SpringAiProperties;
 import com.example.subhanmishra.dto.ChatMessageDto;
 import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
+import com.example.subhanmishra.service.eval.CitationResolver;
+import com.example.subhanmishra.service.eval.CitationResolver.Resolution;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
@@ -49,6 +51,12 @@ public class ChatService {
      * the context an answer was actually built on without re-running the search - and a second search
      * would be a different search, since it would not share this one's filters or timing.
      *
+     * <p>The answer is passed through {@link CitationResolver} before it is either returned or scored.
+     * That rewrites a section number the model wrote where a page belongs - "(…, p. 5.3)" - into the
+     * page of the retrieved chunk whose heading it names, which is the difference between a citation a
+     * reader can follow and one they cannot. Scoring the resolved text rather than the raw text is
+     * deliberate: it is what the caller received.
+     *
      * <p>The evaluation call returns immediately: deterministic scoring is a few regex passes, and any
      * LLM judging is handed to a virtual thread. Nothing about it is on this method's critical path.
      */
@@ -59,9 +67,10 @@ public class ChatService {
                 .call()
                 .chatResponse();
 
-        String answer = answerOf(chatResponse);
-        onlineEvalService.evaluate(prompt, answer, retrievedDocuments(chatResponse));
-        return answer;
+        List<Document> retrieved = retrievedDocuments(chatResponse);
+        Resolution resolution = CitationResolver.resolve(answerOf(chatResponse), retrieved);
+        onlineEvalService.evaluate(prompt, resolution, retrieved);
+        return resolution.answer();
     }
 
     /**
@@ -76,6 +85,15 @@ public class ChatService {
      * <p>The evaluation hangs off {@code doOnComplete}, so it runs after the subscriber has seen the
      * last element. A cancelled or failed stream is not scored at all: a half-delivered answer is not
      * an answer, and judging one would report a truncation as a quality problem.
+     *
+     * <p><strong>The streamed text is not citation-resolved, unlike {@link #generate}'s.</strong> Only
+     * the accumulated answer is, and only for scoring, so the two paths report the same numbers while a
+     * streaming caller still sees whatever the model wrote - "(…, p. 5.3)" and all. Repairing the
+     * stream itself would mean withholding elements until a citation could not still be split across a
+     * chunk boundary ("p. 5." then "3)"), which is to say buffering the answer, which is to say not
+     * streaming it. Between an unrepaired citation and a streaming endpoint that does not stream, the
+     * former is the smaller defect - and the blocking endpoint, which every current caller uses, is
+     * unaffected.
      */
     public Flux<String> generateStream(String prompt, String conversationId) {
         StringBuilder answer = new StringBuilder();
@@ -95,7 +113,8 @@ public class ChatService {
                     answer.append(text);
                     return text;
                 })
-                .doOnComplete(() -> onlineEvalService.evaluate(prompt, answer.toString(), retrieved.get()));
+                .doOnComplete(() -> onlineEvalService.evaluate(
+                        prompt, CitationResolver.resolve(answer.toString(), retrieved.get()), retrieved.get()));
     }
 
     private static String answerOf(@Nullable ChatResponse chatResponse) {

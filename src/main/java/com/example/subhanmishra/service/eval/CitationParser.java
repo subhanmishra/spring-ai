@@ -66,7 +66,7 @@ public final class CitationParser {
      * second has no opening bracket of its own. This was not hypothetical; it was the very first real
      * answer this evaluator scored, and it silently under-counted four citations as two.
      */
-    private static final Pattern BRACKETED_SPAN = Pattern.compile("[\\[(]([^\\[\\]()\\n]{1,400})[\\])]");
+    static final Pattern BRACKETED_SPAN = Pattern.compile("[\\[(]([^\\[\\]()\\n]{1,400})[\\])]");
 
     /**
      * One citation inside a bracketed span, so several separated by {@code ;} or {@code ,} are each
@@ -78,7 +78,7 @@ public final class CitationParser {
      * <p>Ten characters of extension because {@code properties} is one, and this corpus is largely
      * about files named {@code application.properties}.
      */
-    private static final Pattern CITATION_IN_SPAN = Pattern.compile(
+    static final Pattern CITATION_IN_SPAN = Pattern.compile(
             "([^,;\\n]*?[^,;\\s.\\n]\\.[A-Za-z][A-Za-z0-9]{1,9})"
             + "(?:\\s*,)?"
             // An optional page marker and reference, then only what can continue a page reference - a

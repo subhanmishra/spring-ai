@@ -6,6 +6,8 @@ import com.example.subhanmishra.entity.EvalCaseResult;
 import com.example.subhanmishra.entity.EvalRun;
 import com.example.subhanmishra.repository.EvalCaseResultRepository;
 import com.example.subhanmishra.repository.EvalRunRepository;
+import com.example.subhanmishra.service.eval.CitationResolver;
+import com.example.subhanmishra.service.eval.CitationResolver.Resolution;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
 import com.example.subhanmishra.service.eval.GoldenDataset;
@@ -217,15 +219,23 @@ public class GoldenEvalService {
                     .chatResponse();
 
             long millis = (System.nanoTime() - startedAt) / 1_000_000;
-            String answer = answerOf(chatResponse);
             List<Document> retrieved = retrievedDocuments(chatResponse);
+
+            // Resolved exactly as ChatService resolves it, and for the same reason the run goes through
+            // the real ChatClient at all: the suite has to measure the answer a user would receive, not
+            // an intermediate one no caller ever sees. The stored answer is the resolved text too, so a
+            // failure investigated months later shows the citations as they were delivered.
+            Resolution resolution = CitationResolver.resolve(answerOf(chatResponse), retrieved);
+            String answer = resolution.answer();
 
             EvalScores scores = scoringService.score(answer, retrieved, goldenCase);
             int rank = scoringService.firstRelevantRank(retrieved, goldenCase);
 
-            log.info("Eval case [{}] answered in {}ms: {} chunk(s), {} citation(s), {} fabricated",
+            log.info("Eval case [{}] answered in {}ms: {} chunk(s), {} citation(s), {} fabricated, "
+                     + "{} section number(s) resolved, {} left unresolved",
                      goldenCase.id(), millis, scores.retrieval().retrievedCount(),
-                     scores.citations().emitted(), scores.citations().fabricated());
+                     scores.citations().emitted(), scores.citations().fabricated(),
+                     resolution.repaired(), resolution.abstained());
 
             return new CaseOutcome(goldenCase, answer, retrieved, scores, rank, millis);
 

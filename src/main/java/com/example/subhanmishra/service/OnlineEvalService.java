@@ -1,6 +1,8 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.EvalProperties;
+import com.example.subhanmishra.service.eval.CitationResolver;
+import com.example.subhanmishra.service.eval.CitationResolver.Resolution;
 import com.example.subhanmishra.service.eval.EvalScores;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -93,6 +95,27 @@ public class OnlineEvalService {
 
         ThreadFactory factory = Thread.ofVirtual().name("eval-judge-", 0).factory();
         this.judgeExecutor = Executors.newThreadPerTaskExecutor(factory);
+    }
+
+    /**
+     * Scores a turn whose citations have already been through {@link CitationResolver}, recording what
+     * the resolver did before scoring the text it produced.
+     *
+     * <p>Scoring the resolved answer rather than the raw one is the point: it is what the caller
+     * received, so it is what the citation metrics should describe. The abstention count published here
+     * is what keeps that honest - every section number the resolver could not place is still counted as
+     * a fabrication by {@code EvalScoringService} a moment later.
+     */
+    public void evaluate(String query, Resolution resolution, @Nullable List<Document> retrieved) {
+        if (!properties.enabled() || !properties.online().enabled()) {
+            return;
+        }
+        metricsService.recordCitationResolution(resolution.repaired(), resolution.abstained());
+        if (!resolution.unresolved().isEmpty()) {
+            log.debug("Left {} section-number citation(s) unresolved - they match no retrieved chunk: {}",
+                      resolution.abstained(), resolution.unresolved());
+        }
+        evaluate(query, resolution.answer(), retrieved);
     }
 
     /**

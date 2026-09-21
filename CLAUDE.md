@@ -63,9 +63,10 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 │   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
 │   │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
 │   │   │       │           # GoldenEvalService
-│   │   │       ├── eval    # CitationParser, Citation, EvalScores, RetrievalScores,
-│   │   │       │           # CitationScores, AnswerScores, ExpectationScores,
-│   │   │       │           # GoldenCase, GoldenDataset, GoldenDatasetLoader
+│   │   │       ├── eval    # CitationParser, CitationResolver, Citation, EvalScores,
+│   │   │       │           # RetrievalScores, CitationScores, AnswerScores,
+│   │   │       │           # ExpectationScores, GoldenCase, GoldenDataset,
+│   │   │       │           # GoldenDatasetLoader
 │   │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
 │   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
 │   │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
