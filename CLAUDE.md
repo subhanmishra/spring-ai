@@ -131,7 +131,7 @@ these.
 | `ingestion.md` | batching, virtual threads, Hikari, retry/compensation, throughput measurements, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `ThreadPoolConfig` |
 | `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics | `ChatService`, `ChatController`, `SpringAiConfig` |
 | `provenance.md` | `CURRENT_VERSION`, `PipelineSettings`, the two Jackson/ModelMapper traps | `PipelineProvenanceService`, `JdbcConversionsConfig` |
-| `evaluation.md` | online vs golden split, judge selection, metric registration, citation fabrication | `service/eval/**`, `Eval*`, `EvalSuiteIT` |
+| `evaluation.md` | online vs golden split, judge selection, metric registration, citation fabrication and resolution | `service/eval/**`, `Eval*`, `EvalSuiteIT` |
 | `observability.md` | compose stack, tracing/logging wiring, the three dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
 | `api-and-errors.md` | `DocAiExceptionHandler`, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
 
