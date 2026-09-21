@@ -49,15 +49,8 @@ public final class CitationParser {
     public static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
     /**
-     * A candidate inline citation. Accepts either bracket style, an optional comma, and any of
-     * {@code p.} / {@code pp.} / {@code page} / {@code pages} before the number, or no page at all.
-     *
-     * <p>A page <em>range</em> ("pp. 12-14") yields only its first number. Chunks are one page each, so
-     * a range is the model summarising rather than citing, and inventing the intermediate pages here
-     * would manufacture fabrications the model never actually claimed.
-     */
-    /**
-     * A bracketed span in the answer - the candidate container, not the citation itself.
+     * A bracketed span in the answer - the candidate container, not the citation itself. Either
+     * bracket style, because the prompt asks for parentheses and a model produces both.
      *
      * <p>Parsing happens in two steps rather than one, because a model routinely puts several
      * citations inside a single pair of brackets: {@code (manual.pdf, p. 283; manual.pdf, p. 299)}.
@@ -70,13 +63,18 @@ public final class CitationParser {
 
     /**
      * One citation inside a bracketed span, so several separated by {@code ;} or {@code ,} are each
-     * found in turn.
+     * found in turn. Accepts an optional comma after the filename and any of {@code p.} /
+     * {@code pp.} / {@code page} / {@code pages} before the number, or no page at all.
      *
      * <p>The extension must begin with a letter. Without that, "(version 3.14)" parses as a file named
      * {@code 3.14}, and requiring at least two extension characters alone does not exclude it.
      *
      * <p>Ten characters of extension because {@code properties} is one, and this corpus is largely
      * about files named {@code application.properties}.
+     *
+     * <p>A page <em>range</em> ("pp. 12-14") yields only its first number. Chunks are one page each, so
+     * a range is the model summarising rather than citing, and inventing the intermediate pages here
+     * would manufacture fabrications the model never actually claimed.
      */
     static final Pattern CITATION_IN_SPAN = Pattern.compile(
             "([^,;\\n]*?[^,;\\s.\\n]\\.[A-Za-z][A-Za-z0-9]{1,9})"
