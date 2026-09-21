@@ -76,16 +76,24 @@ class EvalSuiteIT {
      * <p><strong>Prompt wording was tried first and did not work.</strong> Both
      * {@code SpringAiConfig.QA_PROMPT_TEMPLATE} and the system prompt say a page is a whole number and a
      * dotted heading number is a section, with "do not write (filename, p. 5.3)" spelled out. Two runs
-     * afterwards were entirely unchanged, and the model still emits section numbers today - 37 of them
-     * across the four runs below, every one now resolved rather than prevented. Keep the instruction,
+     * afterwards were entirely unchanged, and the model still emits section numbers today - 47 of them
+     * across the five runs below, every one now resolved rather than prevented. Keep the instruction,
      * it costs nothing; do not expect a better wording to succeed where that one did not.
      *
-     * <p><strong>Where the number stands.</strong> Four runs with the resolver in place measured 0.000
-     * every time, across 65 emitted citations, at 9 of 9 cases passing, with hit rate and MRR at 1.000
+     * <p><strong>Where the number stands.</strong> Five runs with the resolver in place measured 0.000
+     * every time, across 82 emitted citations, at 9 of 9 cases passing, with hit rate and MRR at 1.000
      * - so this threshold has gone from 0.40 to 0.10. It is not set to zero deliberately: generation is
      * not deterministic even at temperature 0.2, and a single stray citation should not break a build.
      * At 0.10 a typical 16-citation run tolerates one and fails on two, which catches a rate running
-     * away without failing on noise. If it does fail, the first thing to check is
+     * away without failing on noise.
+     *
+     * <p>The fifth run is worth separating from the other four, because it is the only one whose corpus
+     * was not identical: it followed re-ingesting a second document, so retrieval was searching 957
+     * chunks rather than 946. Every retrieved page was still from the manual and every page set matched
+     * the earlier runs exactly, which is the evidence that an unrelated document does not perturb these
+     * cases - not merely that the scores happened to repeat.
+     *
+     * <p>If this does fail, the first thing to check is
      * {@code rag.eval.online.citations.resolved.total{outcome="abstained"}}: section numbers the
      * resolver could not place are the model genuinely guessing, and no amount of resolving will fix
      * that.
@@ -93,8 +101,8 @@ class EvalSuiteIT {
     private static final double MAX_CITATION_FABRICATION = 0.10;
 
     /**
-     * Zero, and it has <em>been</em> zero on every run since the parser strippers landed - eight runs
-     * and 140 emitted citations.
+     * Zero, and it has <em>been</em> zero on every run since the parser strippers landed - nine runs
+     * and 157 emitted citations.
      *
      * <p>This is the assertion with teeth, and it kept its teeth through the period when the rate above
      * could not. An invented page number is a citation naming a plain page the retrieved context never
