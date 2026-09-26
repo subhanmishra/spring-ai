@@ -63,15 +63,19 @@ public class EvalMetricsService {
      *
      * <p>Refresh is driven by scrapes rather than by a scheduler: a Micrometer gauge's value function
      * is evaluated when Prometheus scrapes it, so consulting the database from there needs no
-     * {@code @EnableScheduling} and costs nothing while nobody is looking. Prometheus scrapes every
-     * 15s, so this bounds the work at roughly one indexed single-row query per 30s.
+     * {@code @EnableScheduling} and costs nothing while nobody is looking.
+     *
+     * <p>Fifteen minutes because a golden run is a batch job that takes minutes and happens a few times
+     * a day, so a panel lagging a finished run by up to this long loses nothing - whereas re-reading
+     * on every 15s scrape put the query in the log four times a minute to report a number that almost
+     * never changes. The first scrape after startup always reads, so a restart is never stale.
      *
      * <p>That the query really is a single row is load-bearing rather than incidental. The filter and
      * the limit belong in SQL, served by {@code eval_run_status_started_idx} - reading the history back
      * and picking the newest COMPLETED row in Java costs a sequential scan and a sort of the whole
      * table on every refresh, and that cost grows with run history rather than staying flat.
      */
-    private static final Duration GOLDEN_REFRESH_INTERVAL = Duration.ofSeconds(30);
+    private static final Duration GOLDEN_REFRESH_INTERVAL = Duration.ofMinutes(15);
 
     private final MeterRegistry registry;
 

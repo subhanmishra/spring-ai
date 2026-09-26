@@ -87,7 +87,7 @@ the only way to measure retrieval recall. It needs the corpus indexed and takes 
 
 Note that `-Dgroups=eval` on its own will **not** run it: a JUnit tag exclusion beats an inclusion, so
 the exclusion itself has to be cleared. Results are written to the `eval_run` and `eval_case_result`
-tables and picked up by the dashboard within 30 seconds.
+tables and picked up by the dashboard within 15 minutes (or on the next app restart).
 
 ## Running the Application
 
