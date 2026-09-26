@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.context.annotation.Profile;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,7 +45,7 @@ public class AdminDiagnosticsController {
                        + "similarityThreshold default to the configured app.rag values the chat path "
                        + "uses; override them to see what the threshold is excluding. The request is a "
                        + "POST so the query stays out of access logs and URL length limits.")
-    public ResponseEntity<RetrievalResponseDto> searchRetrieval(@Valid @RequestBody RetrievalRequestDto request) {
-        return ResponseEntity.ok(retrievalDiagnosticsService.search(request));
+    public RetrievalResponseDto searchRetrieval(@Valid @RequestBody RetrievalRequestDto request) {
+        return retrievalDiagnosticsService.search(request);
     }
 }

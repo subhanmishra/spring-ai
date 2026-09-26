@@ -27,14 +27,7 @@ public class DocAiExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
         logger.warn("Resource not found : {}", ex.getMessage());
-        //return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.builder().success(false).message(ex.getMessage()).data(null).timestamp(LocalDateTime.now()).build());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
-        problemDetail.setTitle("Resource Not Found");
-        problemDetail.setDetail(ex.getMessage());
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
-
-
+        return problem(HttpStatus.NOT_FOUND, "Resource Not Found", ex.getMessage());
     }
 
 
@@ -49,33 +42,22 @@ public class DocAiExceptionHandler {
     @ExceptionHandler(UnsupportedDocumentTypeException.class)
     public ProblemDetail handleUnsupportedType(UnsupportedDocumentTypeException ex) {
         logger.warn("Unsupported document type: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
-        problemDetail.setTitle("Unsupported File Type");
-        problemDetail.setDetail(ex.getMessage());
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported File Type", ex.getMessage());
     }
 
 
     @ExceptionHandler(DocumentProcessingException.class)
     public ProblemDetail handleProcessingError(DocumentProcessingException ex) {
         logger.error("Document processing error: {}", ex.getMessage(), ex);
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_CONTENT);
-        problemDetail.setTitle("Document Processing Error");
-        problemDetail.setDetail(ex.getMessage());
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Document Processing Error", ex.getMessage());
     }
 
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxSize(MaxUploadSizeExceededException ex) {
         logger.warn("File size limit exceeded: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.CONTENT_TOO_LARGE);
-        problemDetail.setTitle("File Too Large");
-        problemDetail.setDetail("The uploaded file exceeds the maximum allowed size of 25MB.");
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.CONTENT_TOO_LARGE, "File Too Large",
+                "The uploaded file exceeds the maximum allowed size of 25MB.");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -89,34 +71,23 @@ public class DocAiExceptionHandler {
         }
         logger.warn("Validation failed for request: {}", errors);
 
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problemDetail.setTitle("Validation Failed");
-        problemDetail.setDetail("One or more fields in the request are invalid.");
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now(), "errors", errors));
-
+        ProblemDetail problemDetail = problem(HttpStatus.BAD_REQUEST, "Validation Failed",
+                "One or more fields in the request are invalid.");
+        problemDetail.setProperty("errors", errors);
         return problemDetail;
-
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
         logger.warn("Illegal argument: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problemDetail.setTitle("Illegal argument");
-        problemDetail.setDetail(ex.getMessage());
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.BAD_REQUEST, "Illegal argument", ex.getMessage());
     }
 
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
         logger.debug("No static resource found: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);
-        problemDetail.setTitle("Not Found");
-        problemDetail.setDetail(ex.getMessage());
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage());
     }
 
 
@@ -136,12 +107,8 @@ public class DocAiExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         logger.warn("Type mismatch for parameter '{}': {}", ex.getName(), ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problemDetail.setTitle("Invalid Parameter");
-        problemDetail.setDetail("The value supplied for '%s' is not valid for its expected type."
-                .formatted(ex.getName()));
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.BAD_REQUEST, "Invalid Parameter",
+                "The value supplied for '%s' is not valid for its expected type.".formatted(ex.getName()));
     }
 
 
@@ -160,12 +127,8 @@ public class DocAiExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleUnreadableBody(HttpMessageNotReadableException ex) {
         logger.warn("Unreadable request body: {}", ex.getMessage());
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
-        problemDetail.setTitle("Malformed Request Body");
-        problemDetail.setDetail("The request body could not be read. It must be valid JSON matching the "
-                + "documented schema.");
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
-        return problemDetail;
+        return problem(HttpStatus.BAD_REQUEST, "Malformed Request Body",
+                "The request body could not be read. It must be valid JSON matching the documented schema.");
     }
 
 
@@ -200,11 +163,16 @@ public class DocAiExceptionHandler {
 
         logger.error("Unexpected error occurred: ", ex);
 
-        ProblemDetail problemDetail = ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
-        problemDetail.setTitle("Unexpected error");
-        problemDetail.setDetail("An unexpected error occurred. Please try again, or contact support "
-                + "with the timestamp below if it persists.");
-        problemDetail.setProperties(Map.of("Timestamp", LocalDateTime.now()));
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error",
+                "An unexpected error occurred. Please try again, or contact support "
+                        + "with the timestamp below if it persists.");
+    }
+
+
+    private static ProblemDetail problem(HttpStatus status, String title, String detail) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(status, detail);
+        problemDetail.setTitle(title);
+        problemDetail.setProperty("Timestamp", LocalDateTime.now());
         return problemDetail;
     }
 }

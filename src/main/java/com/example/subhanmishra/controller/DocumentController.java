@@ -3,14 +3,13 @@ package com.example.subhanmishra.controller;
 import com.example.subhanmishra.dto.DocumentHistoryDto;
 import com.example.subhanmishra.dto.DocumentMetadataDto;
 import com.example.subhanmishra.dto.DocumentResponseDto;
-import com.example.subhanmishra.entity.DocumentStatus;
 import com.example.subhanmishra.service.DocumentHistoryService;
 import com.example.subhanmishra.service.DocumentMetadataService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.NotEmpty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -41,9 +40,9 @@ public class DocumentController {
                     + "without leaving a document record behind. A supported type whose contents cannot "
                     + "be parsed returns 422 instead, and does leave a FAILED record with its history."
     )
-    public ResponseEntity<DocumentResponseDto> uploadDocument(@RequestParam("file") MultipartFile file) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(this.documentService.uploadAndProcess(file));
+    @ResponseStatus(HttpStatus.CREATED)
+    public DocumentResponseDto uploadDocument(@RequestParam("file") MultipartFile file) {
+        return documentService.uploadAndProcess(file);
     }
 
 
@@ -59,39 +58,26 @@ public class DocumentController {
                     + "serialises embedding regardless, so concurrency here would add contention "
                     + "without adding throughput."
     )
-    public ResponseEntity<List<DocumentResponseDto>> uploadMultipole(@RequestParam("files") List<MultipartFile> files) {
-        if (files.isEmpty()) {
+    @ResponseStatus(HttpStatus.CREATED) // BatchUploadStatusAdvice lowers this to 207 or 422 on failures
+    public List<DocumentResponseDto> uploadMultipole(
             // Guarded explicitly: with no files, "every file failed" is vacuously true, and an empty
             // batch would otherwise report 422 - a confusing answer to a malformed request.
-            throw new IllegalArgumentException("At least one file must be supplied.");
-        }
-
-        List<DocumentResponseDto> results = documentService.uploadMultipleDocuments(files);
-        long failed = results.stream().filter(r -> r.status() == DocumentStatus.FAILED).count();
-
-        HttpStatus status;
-        if (failed == 0) {
-            status = HttpStatus.CREATED;
-        } else if (failed == results.size()) {
-            status = HttpStatus.UNPROCESSABLE_CONTENT;
-        } else {
-            status = HttpStatus.MULTI_STATUS;
-        }
-        return ResponseEntity.status(status).body(results);
+            @RequestParam("files") @NotEmpty List<MultipartFile> files) {
+        return documentService.uploadMultipleDocuments(files);
     }
 
     //    list all uploaded documents
     @GetMapping
     @Operation(summary = "List all uploaded documents and their indexing status")
-    public ResponseEntity<List<DocumentMetadataDto>> getAllDocuments() {
-        return ResponseEntity.ok(documentService.getAllDocuments());
+    public List<DocumentMetadataDto> getAllDocuments() {
+        return documentService.getAllDocuments();
     }
 
 
     @GetMapping("/{id}")
     @Operation(summary = "Get metadata of a specific document by ID")
-    public ResponseEntity<DocumentMetadataDto> getDocumentById(@PathVariable UUID id) {
-        return ResponseEntity.ok(documentService.getDocumentById(id));
+    public DocumentMetadataDto getDocumentById(@PathVariable UUID id) {
+        return documentService.getDocumentById(id);
     }
 
     @GetMapping("/{id}/history")
@@ -101,16 +87,15 @@ public class DocumentController {
                     + "History outlives the document it describes: deleting a document removes its "
                     + "metadata and vector chunks but keeps the trail, so this still answers for a deleted "
                     + "document and reports documentExists: false. 404 only when no history exists at all.")
-    public ResponseEntity<DocumentHistoryDto> getDocumentHistory(@PathVariable UUID id) {
-        return ResponseEntity.ok(historyService.getHistory(id));
+    public DocumentHistoryDto getDocumentHistory(@PathVariable UUID id) {
+        return historyService.getHistory(id);
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete a document and purge its vector embeddings from vector store")
-    public ResponseEntity<Void> deleteDocument(@PathVariable UUID id) {
-
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteDocument(@PathVariable UUID id) {
         documentService.deleteDocument(id);
-        return ResponseEntity.noContent().build();
     }
 
 }

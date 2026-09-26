@@ -6,13 +6,12 @@ import com.example.subhanmishra.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/ai")
@@ -32,12 +31,8 @@ public class ChatController {
                     "passed back in on subsequent calls to continue the same conversation. The prompt travels in the " +
                     "request body rather than a query parameter so it stays out of access logs, browser history and " +
                     "proxy logs, and is not bounded by URL length limits.")
-    public ResponseEntity<String> generate(@Valid @RequestBody ChatRequestDto request) {
-        String resolvedConversationId = resolveConversationId(request.conversationId());
-        String response = chatService.generate(request.prompt(), resolvedConversationId);
-        return ResponseEntity.ok()
-                .header("X-Conversation-Id", resolvedConversationId)
-                .body(response);
+    public String generate(@Valid @RequestBody ChatRequestDto request) {
+        return chatService.generate(request.prompt(), request.conversationId());
     }
 
     @PostMapping(value = "/generateStream",
@@ -49,12 +44,8 @@ public class ChatController {
                     "header so it can be passed back in on subsequent calls to continue the same conversation. Note " +
                     "that because this is a POST, a browser client cannot consume it with the native EventSource API, " +
                     "which only issues GET requests - use fetch with a ReadableStream instead.")
-    public ResponseEntity<Flux<String>> generateStream(@Valid @RequestBody ChatRequestDto request) {
-        String resolvedConversationId = resolveConversationId(request.conversationId());
-        Flux<String> stream = chatService.generateStream(request.prompt(), resolvedConversationId);
-        return ResponseEntity.ok()
-                .header("X-Conversation-Id", resolvedConversationId)
-                .body(stream);
+    public Flux<String> generateStream(@Valid @RequestBody ChatRequestDto request) {
+        return chatService.generateStream(request.prompt(), request.conversationId());
     }
 
     @GetMapping("/conversations")
@@ -72,8 +63,8 @@ public class ChatController {
                     + "Redis and cannot be recovered. The response reports that limit alongside the count, so "
                     + "a short conversation can be told apart from a truncated one. 404 if nothing is stored "
                     + "under the id - which is also how an already-cleared conversation reads.")
-    public ResponseEntity<ConversationDto> getConversation(@PathVariable String conversationId) {
-        return ResponseEntity.ok(chatService.getConversation(conversationId));
+    public ConversationDto getConversation(@PathVariable String conversationId) {
+        return chatService.getConversation(conversationId);
     }
 
     @DeleteMapping("/conversations/{conversationId}")
@@ -81,9 +72,9 @@ public class ChatController {
             description = "Drops a single conversation from chat memory, leaving every other conversation "
                     + "intact. Idempotent: deleting an unknown or already-deleted conversation also returns "
                     + "204 rather than 404.")
-    public ResponseEntity<Void> clearConversation(@PathVariable String conversationId) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void clearConversation(@PathVariable String conversationId) {
         chatService.clearConversation(conversationId);
-        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/conversations")
@@ -92,17 +83,5 @@ public class ChatController {
                     + "id instead.")
     public String clearMemory() {
         return chatService.clearMemory();
-    }
-
-    /**
-     * The conversation id to use for this turn, generating one when the caller supplied none.
-     *
-     * <p>This lives in the controller on purpose: {@code ChatService} does not generate ids, so that
-     * every id a caller sees is one the controller also returned in {@code X-Conversation-Id}.
-     */
-    private String resolveConversationId(String suppliedConversationId) {
-        return suppliedConversationId == null || suppliedConversationId.isBlank()
-                ? UUID.randomUUID().toString()
-                : suppliedConversationId;
     }
 }
