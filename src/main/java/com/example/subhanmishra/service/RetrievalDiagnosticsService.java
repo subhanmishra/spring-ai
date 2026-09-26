@@ -139,7 +139,7 @@ public class RetrievalDiagnosticsService {
         return new String[]{firstLine, text.substring(firstBreak).stripLeading()};
     }
 
-    private static String asString(Object value) {
+    static String asString(Object value) {
         return value != null ? value.toString() : null;
     }
 
@@ -147,7 +147,7 @@ public class RetrievalDiagnosticsService {
      * Metadata makes a round trip through a JSONB column, so a value written as an {@code int} can come
      * back as any {@link Number} subtype - or, for a page number a reader supplied as text, as a String.
      */
-    private static Integer asInteger(Object value) {
+    static Integer asInteger(Object value) {
         return switch (value) {
             case Number number -> number.intValue();
             case String string -> {

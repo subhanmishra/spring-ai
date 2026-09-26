@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.service.eval.AnswerCitations;
 import com.example.subhanmishra.service.eval.AnswerScores;
 import com.example.subhanmishra.service.eval.Citation;
 import com.example.subhanmishra.service.eval.CitationParser;
@@ -145,25 +146,16 @@ public class EvalScoringService {
     /**
      * Scores the answer's citations against the ones its context actually offered.
      *
-     * <p>The filtering step is what keeps this metric meaningful rather than noisy. A bracketed
-     * filename is only treated as a citation when it carries a page number, or when its filename is one
-     * of the documents actually retrieved. Answers about this corpus are full of parentheses holding
-     * filenames - "(application.properties)", "(pom.xml)" - which are the model naming a file in prose,
-     * not claiming a source. Counting those as fabricated would swamp the fabrication rate with false
-     * positives and make the one metric that matters most here unreadable.
-     *
-     * <p>Note what the rule still catches: a page number attached to a filename that was never
-     * retrieved ("(application.properties, p. 12)") is counted and marked fabricated, because
-     * inventing a page for a file the model was not given is exactly the failure being measured.
+     * <p>Which candidates count as citations, and which of those the context supports, are decided by
+     * {@link AnswerCitations} - the same rules the chat endpoints use to strip citations from the answer
+     * and report them to the caller, so the two cannot disagree about what a citation is.
      */
     private CitationScores scoreCitations(String answer, List<Document> hits) {
         List<Citation> available = CitationParser.availableCitations(hits);
         Set<String> availableNames = CitationParser.availableFileNames(hits);
 
         List<Citation> emitted = CitationParser.parseAnswerCandidates(answer).stream()
-                .filter(candidate -> candidate.pageNumber() != null
-                        || candidate.hasMalformedPage()
-                        || availableNames.contains(candidate.fileName().toLowerCase(Locale.ROOT)))
+                .filter(candidate -> AnswerCitations.isCitation(candidate, availableNames))
                 .toList();
 
         if (emitted.isEmpty()) {
@@ -173,7 +165,7 @@ public class EvalScoringService {
         List<Citation> fabricated = new ArrayList<>();
         int valid = 0;
         for (Citation citation : emitted) {
-            if (isSupported(citation, available, availableNames)) {
+            if (AnswerCitations.isSupported(citation, available, availableNames)) {
                 valid++;
             } else {
                 fabricated.add(citation);
@@ -181,35 +173,6 @@ public class EvalScoringService {
         }
         return new CitationScores(emitted.size(), valid, fabricated.size(), available.size(),
                                   List.copyOf(fabricated));
-    }
-
-    /**
-     * Whether the retrieved context actually supports this citation.
-     *
-     * <p>A citation carrying a page number has to match a retrieved chunk exactly - that is the
-     * fabrication check, and the whole point of the metric.
-     *
-     * <p>A citation with <em>no</em> page is judged on its filename alone, and that distinction is
-     * deliberate rather than lax. "(spring-boot-reference.pdf)" names a document that really was
-     * retrieved; it is less precise than it could be, but nothing about it is invented, and lumping it
-     * in with a page number the model made up conflates imprecision with dishonesty. It is also the
-     * only correct form for a Tika source - DOCX, XLSX, PPTX and HTML have no page attribution, so
-     * {@code citationHeader} omits the page half and a pageless citation is exactly right there.
-     *
-     * <p>Found by the evaluation suite itself: a run flagged a bare "[spring-boot-reference.pdf]" as
-     * fabricated, which was the scorer being wrong rather than the model.
-     *
-     * <p>A <em>malformed</em> page reference is the case in between, and it is never supported. "(…, p.
-     * 5.3)" is a section number written where a page belongs: the model did claim a location, so the
-     * leniency above does not apply, and the location it claimed is not one the context offered.
-     */
-    private static boolean isSupported(Citation citation, List<Citation> available, Set<String> availableNames) {
-        if (citation.hasMalformedPage()) {
-            return false;
-        }
-        return citation.pageNumber() == null
-                ? availableNames.contains(citation.fileName().toLowerCase(Locale.ROOT))
-                : available.stream().anyMatch(citation::matches);
     }
 
     private AnswerScores scoreAnswer(String answer, @Nullable GoldenCase goldenCase) {

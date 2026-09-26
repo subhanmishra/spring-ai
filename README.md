@@ -105,14 +105,36 @@ This automatically starts the containers defined in `compose.yaml` (pgvector, Re
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/ai/generate` | Single-shot chat response. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional) |
-| POST | `/ai/generateStream` | Streaming chat response (SSE). Same JSON body as above |
+| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional) |
+| POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body as above |
 | GET | `/ai/conversations` | List all active conversation IDs |
 | GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
 | DELETE | `/ai/conversations/{id}` | Delete a single conversation |
 | DELETE | `/ai/conversations` | Clear all stored chat memory |
 
 Both generate endpoints return the conversation ID in an **`X-Conversation-Id`** response header — a freshly generated UUID when `conversationId` was not supplied. Pass it back on the next call to continue the same conversation.
+
+**Citations come back as data, not as text.** The answer carries no inline `(file, p. N)` references; the evidence is reported beside it:
+
+```json
+{
+  "answer": "Starters bundle a curated set of dependencies ...",
+  "grounded": true,
+  "sources": [
+    { "ref": 1, "documentId": "8c1f…", "fileName": "spring-boot-reference.pdf", "page": 42,
+      "blockType": "prose", "score": 0.83, "excerpt": "<the chunk's full text>", "cited": true }
+  ],
+  "citations": [
+    { "fileName": "spring-boot-reference.pdf", "page": 42, "status": "VERIFIED", "sourceRef": 1, "writtenPage": null }
+  ],
+  "usage": { "model": "gemma4:e2b", "promptTokens": 2018, "completionTokens": 495, "latencyMillis": 56381 }
+}
+```
+
+- `sources` — every chunk retrieved for the answer, in rank order, with its full text. `grounded: false` and an empty list mean the answer came from general knowledge.
+- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model wrote a section number where the page belongs (`writtenPage: "5.3"`) and it was resolved to that heading's page; `UNVERIFIED` points at nothing the answer was given.
+
+`/ai/generateStream` streams the answer text as unnamed `data:` events, citations removed, then sends `event:sources` (`{grounded, sources}`) and `event:done` (`{citations, usage}`). A cancelled stream gets neither.
 
 Because `/ai/generateStream` is a `POST`, a browser client **cannot** consume it with the native `EventSource` API, which only issues `GET` requests. Use `fetch` with a `ReadableStream` instead.
 

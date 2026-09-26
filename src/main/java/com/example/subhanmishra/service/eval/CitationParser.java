@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  * "(application.properties)", "(pom.xml)" - that are prose, not citations, and scoring them as
  * fabricated would make the fabrication rate mostly noise. Deciding which candidates are real
  * citations needs to know which documents were retrieved, so that policy lives in
- * {@code EvalScoringService} rather than here.
+ * {@link AnswerCitations} rather than here.
  */
 public final class CitationParser {
 
@@ -194,7 +194,7 @@ public final class CitationParser {
      * <p>A reference containing a dot is a section number, not a page - "5.3" is the heading
      * "5.3. Endpoints". It is kept verbatim as a label so the failure reads as what the model wrote.
      */
-    private static Citation citationOf(String fileName, @Nullable String pageRef) {
+    static Citation citationOf(String fileName, @Nullable String pageRef) {
         if (pageRef == null) {
             return new Citation(fileName, null);
         }

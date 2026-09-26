@@ -85,21 +85,41 @@ public final class CitationResolver {
      * @param abstained  how many occurrences carried a section number that did not resolve and were
      *                   left as written
      * @param unresolved the distinct citations behind {@code abstained}, so a log line can name them
+     * @param repairs    what each rewrite changed, one entry per distinct citation, so a caller can be
+     *                   told that the page it is shown is not the one the model wrote
      */
-    public record Resolution(String answer, int repaired, int abstained, List<Citation> unresolved) {
+    public record Resolution(String answer, int repaired, int abstained, List<Citation> unresolved,
+                             List<Repair> repairs) {
 
         public Resolution {
             unresolved = List.copyOf(unresolved);
+            repairs = List.copyOf(repairs);
         }
 
         /** An answer that needed nothing done to it. */
         static Resolution unchanged(String answer) {
-            return new Resolution(answer, 0, 0, List.of());
+            return new Resolution(answer, 0, 0, List.of(), List.of());
+        }
+
+        /** The repair that produced this citation, or null when the model wrote it as it now stands. */
+        public @Nullable Repair repairOf(Citation citation) {
+            if (citation.pageNumber() == null) {
+                return null;
+            }
+            return repairs.stream()
+                          .filter(repair -> repair.fileName().equalsIgnoreCase(citation.fileName())
+                                  && repair.page() == citation.pageNumber())
+                          .findFirst()
+                          .orElse(null);
         }
 
         public boolean changed() {
             return repaired > 0;
         }
+    }
+
+    /** One rewrite: the section number the model wrote for a file, and the page it was resolved to. */
+    public record Repair(String fileName, String section, int page) {
     }
 
     /**
@@ -118,6 +138,7 @@ public final class CitationResolver {
 
         StringBuilder rewritten = new StringBuilder(answer.length());
         Map<String, Citation> unresolved = new LinkedHashMap<>();
+        Map<String, Repair> repairs = new LinkedHashMap<>();
         int repaired = 0;
         int abstained = 0;
         int copiedTo = 0;
@@ -145,13 +166,16 @@ public final class CitationResolver {
                 rewritten.append(answer, copiedTo, start).append(page);
                 copiedTo = spans.start(1) + inner.end(2);
                 repaired++;
+                String fileName = inner.group(1).strip();
+                repairs.putIfAbsent(fileName + "#" + pageRef, new Repair(fileName, pageRef, page));
             }
         }
         if (repaired == 0) {
-            return new Resolution(answer, 0, abstained, List.copyOf(unresolved.values()));
+            return new Resolution(answer, 0, abstained, List.copyOf(unresolved.values()), List.of());
         }
         rewritten.append(answer, copiedTo, answer.length());
-        return new Resolution(rewritten.toString(), repaired, abstained, List.copyOf(unresolved.values()));
+        return new Resolution(rewritten.toString(), repaired, abstained, List.copyOf(unresolved.values()),
+                              List.copyOf(repairs.values()));
     }
 
     /**
