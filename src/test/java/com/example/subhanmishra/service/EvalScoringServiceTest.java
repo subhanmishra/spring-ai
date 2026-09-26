@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class EvalScoringServiceTest {
 
@@ -300,6 +302,85 @@ class EvalScoringServiceTest {
                             + "Beyond that the context does not contain further detail.";
 
             assertThat(service.score(answer, List.of()).answer().refused()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("context precision against the dataset's expected pages")
+    class ContextPrecision {
+
+        @Test
+        @DisplayName("the expected page at rank 1 with noise below scores a perfect average")
+        void expectedPageRankedFirst() {
+            List<Document> retrieved = List.of(chunk("manual.pdf", 277, "actuator endpoints", 0.81),
+                                               chunk("manual.pdf", 146, "unrelated", 0.64),
+                                               chunk("manual.pdf", 299, "unrelated", 0.62));
+            GoldenCase goldenCase = caseOf("actuator", "how are endpoints exposed", List.of(277), List.of());
+
+            ContextPrecisionScores scores = service.contextPrecision(retrieved, goldenCase);
+
+            assertThat(scores).isNotNull();
+            // Nothing is mis-ordered, so the ranking score is perfect - while precision@k reports that
+            // two thirds of what was retrieved was not on an expected page. Both readings are correct
+            // and they are why the pair is kept together.
+            assertThat(scores.averagePrecision()).isEqualTo(1.0);
+            assertThat(scores.precisionAtK()).isCloseTo(1.0 / 3, within(1e-9));
+            assertThat(scores.relevanceAsString()).isEqualTo("1,0,0");
+        }
+
+        @Test
+        @DisplayName("the same page found late scores lower, which hit rate and MRR cannot show")
+        void expectedPageRankedLast() {
+            List<Document> retrieved = List.of(chunk("manual.pdf", 146, "unrelated", 0.81),
+                                               chunk("manual.pdf", 299, "unrelated", 0.70),
+                                               chunk("manual.pdf", 277, "actuator endpoints", 0.64));
+            GoldenCase goldenCase = caseOf("actuator", "how are endpoints exposed", List.of(277), List.of());
+
+            ContextPrecisionScores scores = service.contextPrecision(retrieved, goldenCase);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.averagePrecision()).isCloseTo(1.0 / 3, within(1e-9));
+            assertThat(service.firstRelevantRank(retrieved, goldenCase)).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("a case declaring no expected pages is not scored at all")
+        void notScoredWithoutExpectedPages() {
+            List<Document> retrieved = List.of(chunk("manual.pdf", 277, "actuator endpoints", 0.81));
+            GoldenCase goldenCase = caseOf("conversational", "hello", List.of(), List.of());
+
+            // Null rather than 0.0. A capability case has not scored badly on retrieval; it has not
+            // asserted anything about retrieval, and averaging it in would drag the suite down.
+            assertThat(service.contextPrecision(retrieved, goldenCase)).isNull();
+        }
+
+        @Test
+        @DisplayName("a page from the wrong document is not relevant")
+        void wrongDocumentIsNotRelevant() {
+            List<Document> retrieved = List.of(chunk("other.pdf", 277, "coincidental page number", 0.81));
+            GoldenCase goldenCase = caseOf("actuator", "how are endpoints exposed", List.of(277), List.of());
+
+            ContextPrecisionScores scores = service.contextPrecision(retrieved, goldenCase);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.relevantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("rank and precision agree, because they read one definition of relevance")
+        void rankAndPrecisionAgree() {
+            List<Document> retrieved = List.of(chunk("manual.pdf", 111, "logging.level", 0.79),
+                                               chunk("manual.pdf", 112, "TRACE to OFF", 0.75));
+            GoldenCase goldenCase = caseOf("logging", "which property sets the log level",
+                                           List.of(111, 112), List.of());
+
+            ContextPrecisionScores scores = service.contextPrecision(retrieved, goldenCase);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.relevantCount()).isEqualTo(2);
+            assertThat(scores.averagePrecision()).isEqualTo(1.0);
+            assertThat(scores.precisionAtK()).isEqualTo(1.0);
+            assertThat(service.firstRelevantRank(retrieved, goldenCase)).isEqualTo(1);
         }
     }
 }

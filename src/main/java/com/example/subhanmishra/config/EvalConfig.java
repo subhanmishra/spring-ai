@@ -1,5 +1,6 @@
 package com.example.subhanmishra.config;
 
+import com.example.subhanmishra.service.eval.ContextPrecisionEvaluator;
 import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
@@ -110,6 +111,24 @@ public class EvalConfig {
     public FactCheckingEvaluator factCheckingEvaluator(ObjectProvider<ChatClient.Builder> builders,
                                                        EvalProperties properties) {
         return FactCheckingEvaluator.builder(judgeClientBuilder(builders, properties)).build();
+    }
+
+    /**
+     * Judges whether each retrieved chunk actually contributed to the answer, which is what context
+     * precision is computed from.
+     *
+     * <p>Built from the same bare builder as the other two judges and for the same reason - a judge
+     * inheriting the {@code QuestionAnswerAdvisor} would retrieve its own context and grade a chunk
+     * against passages the answer never saw.
+     *
+     * <p>Unlike them, this one is called {@code top-k} times per case rather than once. The bean always
+     * exists; {@code GoldenEvalService} only invokes it on a judged run, because on this host that
+     * multiplication is the dominant cost of the suite.
+     */
+    @Bean
+    public ContextPrecisionEvaluator contextPrecisionEvaluator(ObjectProvider<ChatClient.Builder> builders,
+                                                               EvalProperties properties) {
+        return new ContextPrecisionEvaluator(judgeClientBuilder(builders, properties));
     }
 
     @Bean

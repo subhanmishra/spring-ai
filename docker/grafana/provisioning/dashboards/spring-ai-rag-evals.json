@@ -827,6 +827,130 @@
       ]
     },
     {
+      "id": 20,
+      "title": "Context precision — ranking (golden)",
+      "description": "RAGAS context precision: was the useful context ranked at the top. Normalised by the relevant chunks FOUND, not by top-k, so [hit, miss, miss, miss, miss] scores 1.000 — this measures ORDERING, not how much junk came back. The panel beside it measures the junk. DELIBERATELY NOT COLOUR-CODED: 'expected' scores relevance from the dataset's expectedPages, which were curated as the pages containing the answer rather than as every page that could inform one, so a genuinely useful chunk from an unlisted page counts against it and the number is a floor. Compare it between runs; do not read its level as a grade. 'judged' asks the LLM judge per chunk instead and is free of that bias — it is absent unless the run judged, because it costs top-k judge calls per case.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_context_precision{application=\"spring-ai-ragr\"})",
+          "legendFormat": "expected pages",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_judged_context_precision{application=\"spring-ai-ragr\"})",
+          "legendFormat": "LLM judged",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Precision @ k — context noise (golden)",
+      "description": "Plain relevant/k, unweighted by rank: the fraction of what retrieval returned that was actually useful. This is the 'how much of the top-k was padding' question that context precision beside it is routinely but wrongly assumed to answer. Low here with a high average next door means a well-ordered context that is mostly filler — the signal to lower top-k or raise the similarity threshold, since every wasted slot is tokens the model pays attention over. Same caveat as the panel beside it: 'expected' is bounded by how complete the dataset's page lists are, so read the trend rather than the level.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_precision_at_k{application=\"spring-ai-ragr\"})",
+          "legendFormat": "expected pages",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_judged_precision_at_k{application=\"spring-ai-ragr\"})",
+          "legendFormat": "LLM judged",
+          "refId": "B"
+        }
+      ]
+    },
+    {
       "id": 14,
       "title": "Golden scores over time",
       "description": "The trend view of the gauges above. Note these only step when a suite is actually run, so the lines are flat between runs by construction — this is not a continuously sampled series, and a long flat stretch means no run happened rather than that nothing changed.",
@@ -835,7 +959,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 44
       },
       "datasource": {
         "type": "prometheus",
@@ -914,6 +1038,24 @@
           "expr": "max(rag_eval_golden_pass_rate{application=\"spring-ai-ragr\"})",
           "legendFormat": "pass rate",
           "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_context_precision{application=\"spring-ai-ragr\"})",
+          "legendFormat": "context precision",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rag_eval_golden_precision_at_k{application=\"spring-ai-ragr\"})",
+          "legendFormat": "precision @ k",
+          "refId": "G"
         }
       ]
     },
@@ -926,7 +1068,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 52
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -962,7 +1104,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 61
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -1024,7 +1166,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.retrieved_count AS \"chunks\", ROUND(r.top_score::numeric, 3) AS \"top score\", r.first_relevant_rank AS \"rank\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"phrase %\", r.relevancy_pass AS \"relevant\", r.groundedness_pass AS \"grounded\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.case_id",
+          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.retrieved_count AS \"chunks\", ROUND(r.top_score::numeric, 3) AS \"top score\", r.first_relevant_rank AS \"rank\", ROUND(r.context_precision::numeric, 3) AS \"ctx prec\", ROUND(r.precision_at_k::numeric, 3) AS \"prec@k\", r.judged_relevance AS \"judge verdicts\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"phrase %\", r.relevancy_pass AS \"relevant\", r.groundedness_pass AS \"grounded\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.case_id",
           "refId": "A"
         }
       ]
@@ -1038,7 +1180,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 71
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -1060,7 +1202,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval_run e ORDER BY e.started_at DESC LIMIT 50",
+          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.context_precision::numeric, 3) AS \"ctx prec\", ROUND(e.precision_at_k::numeric, 3) AS \"prec@k\", ROUND(e.judged_context_precision::numeric, 3) AS \"judged ctx prec\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval_run e ORDER BY e.started_at DESC LIMIT 50",
           "refId": "A"
         }
       ]
@@ -1074,7 +1216,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 80
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",

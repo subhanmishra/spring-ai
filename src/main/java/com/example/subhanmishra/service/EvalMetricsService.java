@@ -65,6 +65,11 @@ public class EvalMetricsService {
      * is evaluated when Prometheus scrapes it, so consulting the database from there needs no
      * {@code @EnableScheduling} and costs nothing while nobody is looking. Prometheus scrapes every
      * 15s, so this bounds the work at roughly one indexed single-row query per 30s.
+     *
+     * <p>That the query really is a single row is load-bearing rather than incidental. The filter and
+     * the limit belong in SQL, served by {@code eval_run_status_started_idx} - reading the history back
+     * and picking the newest COMPLETED row in Java costs a sequential scan and a sort of the whole
+     * table on every refresh, and that cost grows with run history rather than staying flat.
      */
     private static final Duration GOLDEN_REFRESH_INTERVAL = Duration.ofSeconds(30);
 
@@ -104,12 +109,24 @@ public class EvalMetricsService {
     private final AtomicBoolean groundednessEverJudged = new AtomicBoolean();
 
     /**
+     * The same treatment for the judged context precision pair, and it matters more here than for the
+     * other two. Judged precision costs top-k judge calls per case rather than one, so runs that
+     * measure it will be rarer still - and a 0.0 sitting beside the reference-based precision would
+     * read as the judge disagreeing completely, which is the opposite of "nobody asked the judge".
+     */
+    private final AtomicBoolean contextPrecisionEverJudged = new AtomicBoolean();
+
+    /**
      * Gauge backing state for the golden path. Micrometer holds only a weak reference to whatever a
      * gauge reads, so these have to be strong fields on a singleton - a locally created holder is
      * collected and the gauge silently starts reporting NaN.
      */
     private final DoubleAdder goldenHitRate = new DoubleAdder();
     private final DoubleAdder goldenMrr = new DoubleAdder();
+    private final DoubleAdder goldenContextPrecision = new DoubleAdder();
+    private final DoubleAdder goldenPrecisionAtK = new DoubleAdder();
+    private final DoubleAdder goldenJudgedContextPrecision = new DoubleAdder();
+    private final DoubleAdder goldenJudgedPrecisionAtK = new DoubleAdder();
     private final DoubleAdder goldenCitationValidity = new DoubleAdder();
     private final DoubleAdder goldenCitationFabrication = new DoubleAdder();
     private final DoubleAdder goldenRelevancy = new DoubleAdder();
@@ -194,9 +211,7 @@ public class EvalMetricsService {
             return;
         }
         try {
-            runRepository.findAllByOrderByStartedAtDesc().stream()
-                         .filter(run -> run.status() == EvalRunStatus.COMPLETED)
-                         .findFirst()
+            runRepository.findFirstByStatusOrderByStartedAtDesc(EvalRunStatus.COMPLETED)
                          .ifPresent(this::applyIfNewer);
         } catch (RuntimeException e) {
             log.debug("Could not refresh golden eval gauges from the database; keeping previous values", e);
@@ -212,6 +227,13 @@ public class EvalMetricsService {
 
         setIfPresent(goldenHitRate, run.hitRate());
         setIfPresent(goldenMrr, run.meanReciprocalRank());
+        setIfPresent(goldenContextPrecision, run.contextPrecision());
+        setIfPresent(goldenPrecisionAtK, run.precisionAtK());
+        if (run.judgedContextPrecision() != null) {
+            set(goldenJudgedContextPrecision, run.judgedContextPrecision());
+            setIfPresent(goldenJudgedPrecisionAtK, run.judgedPrecisionAtK());
+            contextPrecisionEverJudged.set(true);
+        }
         setIfPresent(goldenCitationValidity, run.citationValidity());
         setIfPresent(goldenCitationFabrication, run.citationFabrication());
         if (run.relevancyRate() != null) {
@@ -328,6 +350,10 @@ public class EvalMetricsService {
                                 double passRate,
                                 double hitRate,
                                 double mrr,
+                                @Nullable Double contextPrecision,
+                                @Nullable Double precisionAtK,
+                                @Nullable Double judgedContextPrecision,
+                                @Nullable Double judgedPrecisionAtK,
                                 double citationValidity,
                                 double citationFabrication,
                                 @Nullable Double relevancyRate,
@@ -335,6 +361,13 @@ public class EvalMetricsService {
                                 long durationMillis) {
         set(goldenHitRate, hitRate);
         set(goldenMrr, mrr);
+        setIfPresent(goldenContextPrecision, contextPrecision);
+        setIfPresent(goldenPrecisionAtK, precisionAtK);
+        if (judgedContextPrecision != null) {
+            set(goldenJudgedContextPrecision, judgedContextPrecision);
+            setIfPresent(goldenJudgedPrecisionAtK, judgedPrecisionAtK);
+            contextPrecisionEverJudged.set(true);
+        }
         set(goldenCitationValidity, citationValidity);
         set(goldenCitationFabrication, citationFabrication);
         set(goldenPassRate, passRate);
@@ -377,6 +410,16 @@ public class EvalMetricsService {
               "Fraction of recall-scoring cases where an expected page was retrieved");
         gauge("mrr", goldenMrr,
               "Mean reciprocal rank of the first expected page");
+        gauge("context.precision", goldenContextPrecision,
+              "Rank-weighted context precision against the dataset's expected pages. A floor: pages the "
+              + "dataset omits count as noise, so compare runs rather than reading the level.");
+        gauge("precision.at.k", goldenPrecisionAtK,
+              "Fraction of the retrieved context on an expected page - the noise measure, unweighted by rank");
+        judgedGauge("judged.context.precision", goldenJudgedContextPrecision, contextPrecisionEverJudged,
+                    "Rank-weighted context precision with per-chunk relevance decided by the LLM judge. "
+                    + "NaN until some run has judged.");
+        judgedGauge("judged.precision.at.k", goldenJudgedPrecisionAtK, contextPrecisionEverJudged,
+                    "Fraction of the retrieved context the judge called useful. NaN until some run has judged.");
         gauge("citation.validity.rate", goldenCitationValidity,
               "Fraction of emitted citations that matched a retrieved chunk");
         gauge("citation.fabrication.rate", goldenCitationFabrication,

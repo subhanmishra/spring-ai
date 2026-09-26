@@ -1,5 +1,6 @@
 package com.example.subhanmishra.entity;
 
+import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.annotation.Id;
@@ -32,6 +33,11 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              @Nullable Double scoreSpread,
                              @Nullable String pagesRetrieved,
                              int firstRelevantRank,
+                             @Nullable Double contextPrecision,
+                             @Nullable Double precisionAtK,
+                             @Nullable Double judgedContextPrecision,
+                             @Nullable Double judgedPrecisionAtK,
+                             @Nullable String judgedRelevance,
                              int citationsEmitted,
                              int citationsValid,
                              int citationsFabricated,
@@ -44,12 +50,24 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              @Nullable Long latencyMillis,
                              Instant createdAt) {
 
+    /**
+     * @param contextPrecision       scored against the case's expected pages, or null when it declares
+     *                               none
+     * @param judgedContextPrecision scored by the per-chunk LLM judge, or null on an unjudged run.
+     *                               Its verdict vector is stored alongside it: comparing that vector
+     *                               against {@code pagesRetrieved} is what shows whether the dataset's
+     *                               expected-page list is too narrow, and it is the one thing here that
+     *                               cannot be reconstructed later from the dataset and the other
+     *                               columns.
+     */
     public static EvalCaseResult from(UUID runId,
                                       String caseId,
                                       String query,
                                       String answer,
                                       EvalScores scores,
                                       int firstRelevantRank,
+                                      @Nullable ContextPrecisionScores contextPrecision,
+                                      @Nullable ContextPrecisionScores judgedContextPrecision,
                                       long latencyMillis) {
         List<String> reasons = scores.failureReasons();
         return new EvalCaseResult(null,
@@ -62,6 +80,14 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                   scores.retrieval().scoreSpread(),
                                   formatPages(scores.retrieval().pagesRetrieved()),
                                   firstRelevantRank,
+                                  contextPrecision != null ? contextPrecision.averagePrecision() : null,
+                                  contextPrecision != null ? contextPrecision.precisionAtK() : null,
+                                  judgedContextPrecision != null
+                                          ? judgedContextPrecision.averagePrecision() : null,
+                                  judgedContextPrecision != null
+                                          ? judgedContextPrecision.precisionAtK() : null,
+                                  judgedContextPrecision != null
+                                          ? judgedContextPrecision.relevanceAsString() : null,
                                   scores.citations().emitted(),
                                   scores.citations().valid(),
                                   scores.citations().fabricated(),

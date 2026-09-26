@@ -23,7 +23,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * manual already indexed, and it takes minutes - a single grounded answer on the dev host is 53-70
  * seconds. Run it deliberately:
  *
- * <pre>{@code ./mvnw test -Dgroups=eval}</pre>
+ * <pre>{@code ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT}</pre>
+ *
+ * <p>Note that {@code -Dgroups=eval} alone does <em>not</em> work. In JUnit 5 tag filtering an
+ * exclusion beats an inclusion, so the tag stays excluded however it is included; the exclusion itself
+ * has to be cleared, which is why {@code excludedGroups} is bound to a property in {@code pom.xml}.
  *
  * <p>The thresholds below are intentionally loose. This is a <em>regression</em> guard, not a quality
  * bar: generation is not deterministic even at a low temperature, so an assertion tuned to the current
@@ -125,6 +129,18 @@ class EvalSuiteIT {
     /** Retrieval must find the expected page for most recall cases. Well below the observed level. */
     private static final double MIN_HIT_RATE = 0.6;
 
+    // Context precision is logged and not asserted, deliberately, and it should stay that way until
+    // several runs have established what it does on an unchanged pipeline. This suite already learned
+    // that lesson the expensive way: MAX_CITATION_FABRICATION was set from a single run's score and
+    // then failed on variance alone, because the underlying rate moved between 0.222 and 0.333 with
+    // nothing changed. MAX_INVENTED_PAGES was the assertion that held, and it was chosen only after
+    // four runs showed which of the two numbers was stable.
+    //
+    // There is a second reason to wait here specifically. The reference-based precision is bounded
+    // above by how complete the dataset's expectedPages lists are, not by how well retrieval ranks, so
+    // its ceiling is unknown until the judged run says what the judge considers useful. A threshold
+    // set before that comparison would be a threshold on the dataset's curation.
+
     @Autowired
     private GoldenEvalService goldenEvalService;
 
@@ -145,6 +161,8 @@ class EvalSuiteIT {
                         passed             : {} ({}%)
                         hit rate           : {}
                         MRR                : {}
+                        context precision  : {}  (precision@k {})
+                        judged precision   : {}  (precision@k {})
                         citations emitted  : {}
                         citation validity  : {}
                         fabrication rate   : {}
@@ -154,6 +172,8 @@ class EvalSuiteIT {
                         ========================================================""",
                  result.suite(), result.caseCount(), result.passedCount(),
                  Math.round(result.passRate() * 100), fmt(result.hitRate()), fmt(result.meanReciprocalRank()),
+                 fmt(result.contextPrecision()), fmt(result.precisionAtK()),
+                 fmt(result.judgedContextPrecision()), fmt(result.judgedPrecisionAtK()),
                  result.citationsEmitted(), fmt(result.citationValidity()), fmt(result.citationFabrication()),
                  result.inventedPageCount(), result.durationMillis(), result.failures());
 
@@ -176,5 +196,10 @@ class EvalSuiteIT {
 
     private static String fmt(double value) {
         return "%.3f".formatted(value);
+    }
+
+    /** "n/a" for a metric this run did not measure, which is not the same as one that scored zero. */
+    private static String fmt(Double value) {
+        return value != null ? fmt(value.doubleValue()) : "n/a";
     }
 }

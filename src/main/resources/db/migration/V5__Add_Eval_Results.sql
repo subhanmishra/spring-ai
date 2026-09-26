@@ -39,6 +39,22 @@ CREATE TABLE IF NOT EXISTS eval_run
     -- every case on every dashboard refresh.
     hit_rate             DOUBLE PRECISION,
     mean_reciprocal_rank DOUBLE PRECISION,
+
+    -- Context precision, in both of its forms. The pair is deliberate and they are not redundant:
+    -- *_precision is RAGAS's rank-weighted average, normalised by the relevant chunks FOUND, which
+    -- measures ordering; precision_at_k is the plain relevant/k, which measures how much of the
+    -- retrieved context was noise. A high average with a low precision@k is a well-ordered context
+    -- that is mostly padding, and one number alone cannot say that.
+    --
+    -- The judged_* pair is the same two metrics with relevance decided by an LLM judge per chunk
+    -- rather than by the dataset's expected pages. Nullable and normally null: judging is off by
+    -- default because precision costs top-k judge calls per case rather than one. Null here means
+    -- "not measured" and must never be averaged as a zero.
+    context_precision        DOUBLE PRECISION,
+    precision_at_k           DOUBLE PRECISION,
+    judged_context_precision DOUBLE PRECISION,
+    judged_precision_at_k    DOUBLE PRECISION,
+
     citation_validity    DOUBLE PRECISION,
     citation_fabrication DOUBLE PRECISION,
     relevancy_rate       DOUBLE PRECISION,
@@ -62,6 +78,19 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     pages_retrieved       TEXT,
     first_relevant_rank   INT                      NOT NULL DEFAULT 0,
 
+    -- judged_relevance is the judge's per-chunk verdict vector in rank order, "1,0,1,1,0", read
+    -- against pages_retrieved which is stored the same way. It is here because it is the only column
+    -- in this table that cannot be reconstructed afterwards from the dataset and the other columns,
+    -- and because the comparison it enables is the point of running both precisions: a chunk the judge
+    -- called useful from a page expectedPages omits means the DATASET is too narrow, not that
+    -- retrieval erred.
+    context_precision        DOUBLE PRECISION,
+    precision_at_k           DOUBLE PRECISION,
+    judged_context_precision DOUBLE PRECISION,
+    judged_precision_at_k    DOUBLE PRECISION,
+    judged_relevance         TEXT,
+
+
     -- Citations
     citations_emitted     INT                      NOT NULL DEFAULT 0,
     citations_valid       INT                      NOT NULL DEFAULT 0,
@@ -83,9 +112,15 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     created_at            TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- The dashboard's two access patterns: the most recent run of a suite, and every case belonging to a
--- run. Without the second, the per-case table panel sequentially scans the whole history.
+-- The dashboard's access patterns: the most recent run of a suite, the most recent COMPLETED run of
+-- any suite, and every case belonging to a run. Without the last, the per-case table panel
+-- sequentially scans the whole history.
+--
+-- The status index is not a micro-optimisation. EvalMetricsService reads the newest COMPLETED run
+-- from the Prometheus scrape thread roughly every 30s for as long as the application is up, and that
+-- query carries no suite predicate, so the suite index cannot serve it.
 CREATE INDEX IF NOT EXISTS eval_run_suite_started_idx ON eval_run (suite, started_at DESC);
+CREATE INDEX IF NOT EXISTS eval_run_status_started_idx ON eval_run (status, started_at DESC);
 CREATE INDEX IF NOT EXISTS eval_case_result_run_idx ON eval_case_result (run_id);
 
 -- Finding which cases regress across runs means filtering by case_id over time, which neither index

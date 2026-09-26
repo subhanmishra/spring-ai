@@ -4,6 +4,7 @@ import com.example.subhanmishra.service.eval.AnswerScores;
 import com.example.subhanmishra.service.eval.Citation;
 import com.example.subhanmishra.service.eval.CitationParser;
 import com.example.subhanmishra.service.eval.CitationScores;
+import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.ExpectationScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
@@ -248,21 +249,63 @@ public class EvalScoringService {
      *         exact 0 rather than a division no one can invert.
      */
     public int firstRelevantRank(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
-        if (retrieved == null || !goldenCase.scoresRecall()) {
-            return 0;
-        }
-        for (int rank = 1; rank <= retrieved.size(); rank++) {
-            Citation header = CitationParser.parseHeader(retrieved.get(rank - 1).getText());
-            if (header == null) {
-                continue;
-            }
-            boolean fileMatches = goldenCase.expectedFile() == null
-                    || goldenCase.expectedFile().equalsIgnoreCase(header.fileName());
-            if (fileMatches && header.pageNumber() != null
-                    && goldenCase.expectedPages().contains(header.pageNumber())) {
+        List<Boolean> relevance = relevance(retrieved, goldenCase);
+        for (int rank = 1; rank <= relevance.size(); rank++) {
+            if (relevance.get(rank - 1)) {
                 return rank;
             }
         }
         return 0;
+    }
+
+    /**
+     * How well retrieval ordered the chunks, judged against the pages the case declared.
+     *
+     * <p>This is RAGAS's {@code NonLLMContextPrecisionWithReference} in all but the relevance test:
+     * RAGAS compares retrieved context strings against reference context strings, whereas here the
+     * comparison is page attribution, which this corpus carries on every chunk and which is what the
+     * dataset was curated in terms of. It costs nothing - no LLM call, no embedding, just the citation
+     * headers that {@link #firstRelevantRank} already parses.
+     *
+     * <p><strong>Read it as a floor, not as a value.</strong> {@code expectedPages} was verified as
+     * "pages that genuinely contain the answer", not as a complete labelling of every page that could
+     * usefully inform an answer, so a chunk that helped from a page the list omits is scored as noise.
+     * The number is therefore systematically pessimistic and its absolute level means little; what
+     * means something is the same number moving between two runs of the same dataset.
+     * {@code ContextPrecisionEvaluator} is the cross-check on exactly this.
+     *
+     * @return null when the case declares no {@code expectedPages}. That is "not scored", which is not
+     *         the same as 0.0 meaning "nothing relevant was retrieved", and folding the two together
+     *         would drag the suite average down with every grounding and capability case in the set.
+     */
+    public @Nullable ContextPrecisionScores contextPrecision(@Nullable List<Document> retrieved,
+                                                             GoldenCase goldenCase) {
+        if (!goldenCase.scoresRecall()) {
+            return null;
+        }
+        return ContextPrecisionScores.of(relevance(retrieved, goldenCase));
+    }
+
+    /**
+     * Per-rank relevance against the case's expected pages, in rank order.
+     *
+     * <p>The single definition of "relevant" on the reference-based path. Rank and precision both read
+     * it, and having had two copies of the page-matching rule is how they would drift apart.
+     */
+    private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
+        if (retrieved == null || !goldenCase.scoresRecall()) {
+            return List.of();
+        }
+        List<Boolean> relevance = new ArrayList<>(retrieved.size());
+        for (Document document : retrieved) {
+            Citation header = CitationParser.parseHeader(document.getText());
+            boolean fileMatches = header != null
+                    && (goldenCase.expectedFile() == null
+                        || goldenCase.expectedFile().equalsIgnoreCase(header.fileName()));
+            relevance.add(fileMatches
+                                  && header.pageNumber() != null
+                                  && goldenCase.expectedPages().contains(header.pageNumber()));
+        }
+        return relevance;
     }
 }

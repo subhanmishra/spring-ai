@@ -1,26 +1,24 @@
 package com.example.subhanmishra.repository;
 
 import com.example.subhanmishra.entity.EvalRun;
+import com.example.subhanmishra.entity.EvalRunStatus;
 import org.springframework.data.repository.ListCrudRepository;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface EvalRunRepository extends ListCrudRepository<EvalRun, UUID> {
 
-    /** Runs newest first, for the run-history panel and for listing over the API. */
-    List<EvalRun> findAllByOrderByStartedAtDesc();
-
-    List<EvalRun> findBySuiteOrderByStartedAtDesc(String suite);
-
     /**
-     * The most recent run of a suite, whatever its outcome.
+     * The most recent run in a given state, newest first - in practice the latest COMPLETED one, which
+     * is what the golden gauges report.
      *
-     * <p>Deliberately not filtered to COMPLETED. A run left RUNNING is one that was killed partway
-     * through, and hiding it would make a suite that has been failing to finish look simply idle.
+     * <p>Filtered and limited in SQL rather than in the caller, because this runs on the Prometheus
+     * scrape thread roughly every 30s. {@code eval_run_status_started_idx} serves it as a single-row
+     * lookup; selecting the history and picking the newest COMPLETED row in Java scans and sorts the
+     * whole table instead, at a cost that grows with every run ever recorded.
      */
-    Optional<EvalRun> findFirstBySuiteOrderByStartedAtDesc(String suite);
+    Optional<EvalRun> findFirstByStatusOrderByStartedAtDesc(EvalRunStatus status);
 }

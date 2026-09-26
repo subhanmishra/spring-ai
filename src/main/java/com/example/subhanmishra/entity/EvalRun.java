@@ -36,6 +36,10 @@ public record EvalRun(@Id @Nullable UUID id,
                       @Nullable Integer pipelineVersion,
                       @Nullable Double hitRate,
                       @Nullable Double meanReciprocalRank,
+                      @Nullable Double contextPrecision,
+                      @Nullable Double precisionAtK,
+                      @Nullable Double judgedContextPrecision,
+                      @Nullable Double judgedPrecisionAtK,
                       @Nullable Double citationValidity,
                       @Nullable Double citationFabrication,
                       @Nullable Double relevancyRate,
@@ -54,12 +58,23 @@ public record EvalRun(@Id @Nullable UUID id,
                                    @Nullable Integer pipelineVersion) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
                            chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
-                           null, null, null, null, null, null, null, null);
+                           null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
+    /**
+     * @param contextPrecision       reference-based, from the dataset's expected pages. Null when no
+     *                               case in the run scored recall.
+     * @param judgedContextPrecision reference-free, from the per-chunk LLM judge. Null on an unjudged
+     *                               run, which is the default - and null rather than zero, for the same
+     *                               reason {@code relevancyRate} is.
+     */
     public EvalRun completed(int passedCount,
                              double hitRate,
                              double meanReciprocalRank,
+                             @Nullable Double contextPrecision,
+                             @Nullable Double precisionAtK,
+                             @Nullable Double judgedContextPrecision,
+                             @Nullable Double judgedPrecisionAtK,
                              double citationValidity,
                              double citationFabrication,
                              @Nullable Double relevancyRate,
@@ -67,7 +82,8 @@ public record EvalRun(@Id @Nullable UUID id,
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.COMPLETED, startedAt, finished, caseCount,
                            passedCount, chatModel, judgeModel, judged, topK, similarityThreshold,
-                           pipelineVersion, hitRate, meanReciprocalRank, citationValidity,
+                           pipelineVersion, hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
+                           judgedContextPrecision, judgedPrecisionAtK, citationValidity,
                            citationFabrication, relevancyRate, groundednessRate,
                            finished.toEpochMilli() - startedAt.toEpochMilli(), null);
     }
@@ -76,7 +92,9 @@ public record EvalRun(@Id @Nullable UUID id,
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.FAILED, startedAt, finished, caseCount, passedCount,
                            chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
-                           hitRate, meanReciprocalRank, citationValidity, citationFabrication,
+                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
+                           judgedContextPrecision, judgedPrecisionAtK,
+                           citationValidity, citationFabrication,
                            relevancyRate, groundednessRate,
                            finished.toEpochMilli() - startedAt.toEpochMilli(), message);
     }
