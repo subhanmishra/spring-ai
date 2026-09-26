@@ -132,7 +132,7 @@ Both generate endpoints return the conversation ID in an **`X-Conversation-Id`**
 ```
 
 - `sources` — every chunk retrieved for the answer, in rank order, with its full text. `grounded: false` and an empty list mean the answer came from general knowledge.
-- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model wrote a section number where the page belongs (`writtenPage: "5.3"`) and it was resolved to that heading's page; `UNVERIFIED` points at nothing the answer was given.
+- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model referred to a section number rather than a page — `(file.pdf, p. 5.3)`, or just `(5.3)` — and it was resolved to that heading's page (`writtenPage: "5.3"`); `UNVERIFIED` points at nothing the answer was given.
 
 `/ai/generateStream` streams the answer text as unnamed `data:` events, citations removed, then sends `event:sources` (`{grounded, sources}`) and `event:done` (`{citations, usage}`). A cancelled stream gets neither.
 

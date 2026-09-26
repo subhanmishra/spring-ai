@@ -69,7 +69,7 @@ public final class CitationResolver {
             "(?m)^[ \\t]*(\\d{1,2}(?:\\.\\d{1,2}){1,2})\\.[ \\t]+\\p{Lu}");
 
     /** Marks a section number that resolved to more than one retrieved page, so it must be left alone. */
-    private static final int AMBIGUOUS = -1;
+    private static final Citation AMBIGUOUS = new Citation("", null);
 
     private CitationResolver() {
     }
@@ -134,7 +134,7 @@ public final class CitationResolver {
         if (answer == null || answer.isBlank()) {
             return Resolution.unchanged(answer == null ? "" : answer);
         }
-        Map<String, Integer> sectionPages = sectionPages(retrieved);
+        Map<String, Citation> sectionSources = sectionSources(retrieved);
 
         StringBuilder rewritten = new StringBuilder(answer.length());
         Map<String, Citation> unresolved = new LinkedHashMap<>();
@@ -153,8 +153,8 @@ public final class CitationResolver {
                 if (pageRef == null || pageRef.indexOf('.') < 0) {
                     continue;
                 }
-                Integer page = sectionPages.get(pageRef);
-                if (page == null || page == AMBIGUOUS) {
+                Citation source = sectionSources.get(pageRef);
+                if (source == null || source == AMBIGUOUS) {
                     abstained++;
                     String fileName = inner.group(1).strip();
                     unresolved.putIfAbsent(fileName + "#" + pageRef, new Citation(fileName, null, pageRef));
@@ -162,6 +162,7 @@ public final class CitationResolver {
                 }
                 // group(1) is matched as one contiguous run inside the answer, so an offset within it
                 // is an offset within the answer once shifted by where the span's content begins.
+                int page = source.pageNumber();
                 int start = spans.start(1) + inner.start(2);
                 rewritten.append(answer, copiedTo, start).append(page);
                 copiedTo = spans.start(1) + inner.end(2);
@@ -179,18 +180,32 @@ public final class CitationResolver {
     }
 
     /**
-     * Maps each section number heading the retrieved chunks contain to the page it sits on, with
-     * {@link #AMBIGUOUS} for any that appears on more than one.
+     * The section numbers the retrieved chunks head, each with the file and page its heading sits on.
+     * Ambiguous ones are left out - the same rule {@link #resolve} applies, so anything this names is
+     * something {@code resolve} would also rewrite.
+     *
+     * <p>This is what makes a bare "(5.3)" in an answer recognisable as a reference rather than a
+     * version number or a decimal: it is one only if 5.3 heads a page the model was actually given.
+     */
+    public static Map<String, Citation> resolvableSections(@Nullable List<Document> retrieved) {
+        Map<String, Citation> sections = new HashMap<>(sectionSources(retrieved));
+        sections.values().removeIf(source -> source == AMBIGUOUS);
+        return Map.copyOf(sections);
+    }
+
+    /**
+     * Maps each section number heading the retrieved chunks contain to the file and page it sits on,
+     * with {@link #AMBIGUOUS} for any that appears on more than one.
      *
      * <p>Ambiguity has never been observed - no section number heads two pages anywhere in the corpus -
      * but it is cheap to detect and the alternative is picking one at random, which would turn a
      * visible failure into an invisible one.
      */
-    private static Map<String, Integer> sectionPages(@Nullable List<Document> retrieved) {
+    private static Map<String, Citation> sectionSources(@Nullable List<Document> retrieved) {
         if (retrieved == null || retrieved.isEmpty()) {
             return Map.of();
         }
-        Map<String, Integer> pages = new HashMap<>();
+        Map<String, Citation> pages = new HashMap<>();
         for (Document document : retrieved) {
             String text = document.getText();
             Citation header = CitationParser.parseHeader(text);
@@ -202,7 +217,7 @@ public final class CitationResolver {
             if (body == null) {
                 continue;
             }
-            int page = header.pageNumber();
+            Citation source = new Citation(header.fileName(), header.pageNumber());
             Set<String> inThisChunk = new HashSet<>();
             Matcher headings = SECTION_HEADING.matcher(body);
             while (headings.find()) {
@@ -211,7 +226,7 @@ public final class CitationResolver {
                 if (!inThisChunk.add(section)) {
                     continue;
                 }
-                pages.merge(section, page, (existing, found) -> existing.equals(found) ? existing : AMBIGUOUS);
+                pages.merge(section, source, (existing, found) -> existing.equals(found) ? existing : AMBIGUOUS);
             }
         }
         return pages;
@@ -219,6 +234,6 @@ public final class CitationResolver {
 
     /** The distinct section numbers a set of chunks offers. Exposed for diagnostics and tests. */
     static List<String> sectionsOffered(@Nullable List<Document> retrieved) {
-        return new ArrayList<>(sectionPages(retrieved).keySet());
+        return new ArrayList<>(sectionSources(retrieved).keySet());
     }
 }

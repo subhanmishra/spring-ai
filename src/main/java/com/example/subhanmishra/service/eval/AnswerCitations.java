@@ -1,9 +1,13 @@
 package com.example.subhanmishra.service.eval;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.ai.document.Document;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,7 +37,37 @@ public final class AnswerCitations {
      */
     private static final int MAX_SPAN_LENGTH = 402;
 
+    /**
+     * One bare section reference - "5.3", "Section 5.3", "see 5.3.1" - in the heading form
+     * {@code CitationResolver} matches: two or three components. The lookahead stops "5.3.1.2" matching
+     * as "5.3.1", which would turn a longer number into a reference to a different section.
+     */
+    private static final Pattern SECTION_REFERENCE = Pattern.compile(
+            "(?i)(?:see\\s+)?(?:(?:sections?|sec\\.|§)\\s*)?(\\d{1,2}(?:\\.\\d{1,2}){1,2})(?!\\.?\\d)");
+
+    /** What may separate bare section references in one span: "(5.3, 5.5.1)", "(5.3 and 5.4)". */
+    private static final Pattern SECTION_FILLER = Pattern.compile("(?i)(?:[\\s,;]|\\band\\b)*");
+
     private AnswerCitations() {
+    }
+
+    /**
+     * What one turn's retrieved context offers to cite: the files, lower-cased, and the section numbers
+     * its chunks head, each with the file and page the heading sits on.
+     */
+    public record Context(Set<String> fileNames, Map<String, Citation> sections) {
+
+        public static final Context EMPTY = new Context(Set.of(), Map.of());
+
+        public Context {
+            fileNames = Set.copyOf(fileNames);
+            sections = Map.copyOf(sections);
+        }
+
+        public static Context of(@Nullable List<Document> retrieved) {
+            return new Context(CitationParser.availableFileNames(retrieved),
+                               CitationResolver.resolvableSections(retrieved));
+        }
     }
 
     /**
@@ -90,11 +124,16 @@ public final class AnswerCitations {
      * into it - "dependencies (manual.pdf, p. 42)." becomes "dependencies.". A span at the start of a
      * line takes the whitespace after it instead, so the line does not start with a space.
      *
+     * <p>Two kinds of span go: file citations, and bare section references like "(5.3)" - the model
+     * naming a heading it read, without the filename. A bare number is only a reference when it heads a
+     * retrieved page; "(3.14)" is left alone unless 3.14 is one of those headings, because otherwise it
+     * is a version number or a decimal, and deleting it would delete content.
+     *
      * <p>A span holding anything other than citations is left whole. "(see the table on manual.pdf,
      * p. 42, for defaults)" reads as prose around a citation, and cutting the citation out of it would
      * leave a sentence fragment; leaving one citation in the text is the smaller defect.
      */
-    public static String strip(@Nullable String answer, Set<String> availableFileNames) {
+    public static String strip(@Nullable String answer, Context context) {
         if (answer == null || answer.isEmpty()) {
             return "";
         }
@@ -102,7 +141,8 @@ public final class AnswerCitations {
         int copiedTo = 0;
         Matcher spans = CitationParser.BRACKETED_SPAN.matcher(answer);
         while (spans.find()) {
-            if (!isCitationOnly(spans.group(1), availableFileNames)) {
+            if (!isCitationOnly(spans.group(1), context.fileNames())
+                    && sectionReferencesIn(spans.group(1), context).isEmpty()) {
                 continue;
             }
             int cutFrom = spans.start();
@@ -140,6 +180,42 @@ public final class AnswerCitations {
         return found && FILLER.matcher(spanContent.substring(consumedTo)).matches();
     }
 
+    /**
+     * The distinct bare section references in the answer - each one {@link #strip} removes - in the
+     * order written. They are not counted by the citation metrics, which score file citations only;
+     * they are reported to the caller so that stripping them does not lose where they pointed.
+     */
+    public static List<String> bareSectionReferences(@Nullable String answer, Context context) {
+        if (answer == null || answer.isEmpty()) {
+            return List.of();
+        }
+        Set<String> sections = new LinkedHashSet<>();
+        Matcher spans = CitationParser.BRACKETED_SPAN.matcher(answer);
+        while (spans.find()) {
+            sections.addAll(sectionReferencesIn(spans.group(1), context));
+        }
+        return List.copyOf(sections);
+    }
+
+    /**
+     * The section numbers a span holds when it holds nothing else, every one of them heading a retrieved
+     * page - or an empty list when the span is anything more than that.
+     */
+    private static List<String> sectionReferencesIn(String spanContent, Context context) {
+        Matcher references = SECTION_REFERENCE.matcher(spanContent);
+        List<String> sections = new ArrayList<>();
+        int consumedTo = 0;
+        while (references.find()) {
+            if (!SECTION_FILLER.matcher(spanContent.substring(consumedTo, references.start())).matches()
+                    || !context.sections().containsKey(references.group(1))) {
+                return List.of();
+            }
+            sections.add(references.group(1));
+            consumedTo = references.end();
+        }
+        return SECTION_FILLER.matcher(spanContent.substring(consumedTo)).matches() ? sections : List.of();
+    }
+
     private static boolean isHorizontalSpace(char c) {
         return c == ' ' || c == '\t';
     }
@@ -162,18 +238,18 @@ public final class AnswerCitations {
         private int released;
 
         /** Takes the next token and returns whatever can now be released, possibly nothing. */
-        public String accept(String token, Set<String> availableFileNames) {
+        public String accept(String token, Context context) {
             received.append(token);
-            return release(settledLength(), availableFileNames);
+            return release(settledLength(), context);
         }
 
         /** Returns everything still held once the stream has ended. */
-        public String finish(Set<String> availableFileNames) {
-            return release(received.length(), availableFileNames);
+        public String finish(Context context) {
+            return release(received.length(), context);
         }
 
-        private String release(int upTo, Set<String> availableFileNames) {
-            String settled = strip(received.substring(0, upTo), availableFileNames);
+        private String release(int upTo, Context context) {
+            String settled = strip(received.substring(0, upTo), context);
             if (settled.length() <= released) {
                 return "";
             }

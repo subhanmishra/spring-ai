@@ -10,13 +10,17 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.document.Document;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AnswerCitationsTest {
 
-    private static final Set<String> RETRIEVED = Set.of("spring-boot-reference.pdf", "notes.docx");
+    private static final AnswerCitations.Context RETRIEVED = new AnswerCitations.Context(
+            Set.of("spring-boot-reference.pdf", "notes.docx"),
+            Map.of("5.3", new Citation("spring-boot-reference.pdf", 299),
+                   "5.5.1", new Citation("spring-boot-reference.pdf", 306)));
 
     @Nested
     @DisplayName("strip")
@@ -69,6 +73,36 @@ class AnswerCitationsTest {
         }
 
         @Test
+        @DisplayName("removes bare section references that head a retrieved page, in every written form")
+        void removesBareSectionReferences() {
+            assertThat(AnswerCitations.strip("Exposed over HTTP (5.3). Loggers (Section 5.5.1) and "
+                                             + "paths (see 5.3, 5.5.1) too.", RETRIEVED))
+                    .isEqualTo("Exposed over HTTP. Loggers and paths too.");
+        }
+
+        @Test
+        @DisplayName("leaves a dotted number that heads no retrieved page - a version, a decimal")
+        void leavesUnknownNumbers() {
+            String answer = "Needs Java (17.0) and Spring Framework (6.1), with a ratio (0.75); see (5.3.1.2).";
+            assertThat(AnswerCitations.strip(answer, RETRIEVED)).isEqualTo(answer);
+        }
+
+        @Test
+        @DisplayName("leaves a span mixing a known section with anything unknown")
+        void leavesPartlyKnownSectionSpan() {
+            String answer = "Compare (5.3, 6.1) and (5.3 onwards).";
+            assertThat(AnswerCitations.strip(answer, RETRIEVED)).isEqualTo(answer);
+        }
+
+        @Test
+        @DisplayName("reports the bare references it strips, once each, in order")
+        void reportsBareReferences() {
+            assertThat(AnswerCitations.bareSectionReferences(
+                    "A (5.5.1). B (5.3). C (see 5.5.1). D (3.14).", RETRIEVED))
+                    .containsExactly("5.5.1", "5.3");
+        }
+
+        @Test
         @DisplayName("still strips a fabricated citation - it is reported, not shown")
         void stripsFabricatedCitation() {
             assertThat(AnswerCitations.strip("Invented (other-manual.pdf, p. 12).", RETRIEVED))
@@ -84,7 +118,8 @@ class AnswerCitationsTest {
                 Starters bundle dependencies (spring-boot-reference.pdf, p. 42). Set them in
                 your configuration (application.properties) [spring-boot-reference.pdf, page 7].
                 (notes.docx) Exposure is over HTTP (spring-boot-reference.pdf, p. 283; spring-boot-reference.pdf, p. 5.3).
-                A version (3.14) is not a citation, and (see spring-boot-reference.pdf, p. 1, for more) stays.""";
+                A version (3.14) is not a citation, and (see spring-boot-reference.pdf, p. 1, for more) stays.
+                Paths are configurable (5.3), as are loggers (Section 5.5.1).""";
 
         @ParameterizedTest(name = "tokens of {0} characters")
         @ValueSource(ints = {1, 2, 3, 5, 7, 11, 40, 1000})
@@ -145,6 +180,13 @@ class AnswerCitationsTest {
             assertThat(resolution.repairOf(new Citation("spring-boot-reference.pdf", 299)))
                     .isEqualTo(new Repair("spring-boot-reference.pdf", "5.3", 299));
             assertThat(resolution.repairOf(new Citation("spring-boot-reference.pdf", 42))).isNull();
+        }
+
+        @Test
+        @DisplayName("names each resolvable section with the file and page its heading sits on")
+        void resolvableSections() {
+            assertThat(CitationResolver.resolvableSections(List.of(PAGE_299)))
+                    .containsExactlyEntriesOf(Map.of("5.3", new Citation("spring-boot-reference.pdf", 299)));
         }
     }
 }

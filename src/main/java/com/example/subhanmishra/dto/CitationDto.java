@@ -6,7 +6,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * A citation the model wrote into the answer, checked against the sources it was given.
  *
  * <p>The model cites inline and the service removes those citations from the answer text, so this is
- * where they are reported. One entry per distinct source cited, in the order the answer first cites it.
+ * where they are reported. One entry per distinct source cited, in the order the answer first cites it -
+ * followed by any bare section references the model wrote without a filename, "(5.3)", each REPAIRED to
+ * the page that heading sits on unless an earlier entry already cites that page.
  */
 public record CitationDto(
 

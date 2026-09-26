@@ -90,8 +90,9 @@ public class ChatService {
         Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
         onlineEvalService.evaluate(prompt, resolution, retrieved);
 
-        List<CitationDto> citations = citations(resolution, retrieved);
-        return new ChatAnswerDto(AnswerCitations.strip(resolution.answer(), CitationParser.availableFileNames(retrieved)),
+        AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
+        List<CitationDto> citations = citations(resolution, retrieved, context);
+        return new ChatAnswerDto(AnswerCitations.strip(resolution.answer(), context),
                                  !retrieved.isEmpty(),
                                  sources(retrieved, citations),
                                  citations,
@@ -121,6 +122,7 @@ public class ChatService {
         long started = System.nanoTime();
         StringBuilder answer = new StringBuilder();
         AtomicReference<List<Document>> retrieved = new AtomicReference<>(List.of());
+        AtomicReference<AnswerCitations.Context> context = new AtomicReference<>(AnswerCitations.Context.EMPTY);
         AtomicReference<@Nullable ChatResponse> last = new AtomicReference<>();
         AnswerCitations.StreamingStripper stripper = new AnswerCitations.StreamingStripper();
 
@@ -131,15 +133,17 @@ public class ChatService {
                 .chatClientResponse()
                 .concatMap(response -> {
                     List<Document> documents = retrievedDocuments(response);
-                    if (!documents.isEmpty()) {
+                    // The same list arrives on every chunk; the context is built from it once.
+                    if (!documents.isEmpty() && documents != retrieved.get()) {
                         retrieved.set(documents);
+                        context.set(AnswerCitations.Context.of(documents));
                     }
                     if (response.chatResponse() != null) {
                         last.set(response.chatResponse());
                     }
                     String text = answerOf(response.chatResponse());
                     answer.append(text);
-                    return token(stripper.accept(text, CitationParser.availableFileNames(retrieved.get())));
+                    return token(stripper.accept(text, context.get()));
                 });
 
         Flux<ServerSentEvent<?>> closing = Flux.defer(() -> {
@@ -147,8 +151,8 @@ public class ChatService {
             Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
             onlineEvalService.evaluate(prompt, resolution, documents);
 
-            List<CitationDto> citations = citations(resolution, documents);
-            return token(stripper.finish(CitationParser.availableFileNames(documents))).concatWith(Flux.just(
+            List<CitationDto> citations = citations(resolution, documents, context.get());
+            return token(stripper.finish(context.get())).concatWith(Flux.just(
                     ServerSentEvent.builder(new ChatSourcesDto(!documents.isEmpty(), sources(documents, citations)))
                                    .event("sources").build(),
                     ServerSentEvent.builder(new ChatDoneDto(citations, usage(last.get(), started)))
@@ -183,11 +187,14 @@ public class ChatService {
 
     /**
      * The citations in the answer, one per distinct source cited, checked against the retrieved chunks
-     * by the same rules the evaluation scores them with.
+     * by the same rules the evaluation scores them with - followed by any bare section references,
+     * "(5.3)", reported as REPAIRED against the page that heading sits on. Those come last and are not
+     * counted by the evaluation, which scores file citations only.
      */
-    private static List<CitationDto> citations(Resolution resolution, List<Document> retrieved) {
+    private static List<CitationDto> citations(Resolution resolution, List<Document> retrieved,
+                                               AnswerCitations.Context context) {
         List<Citation> available = CitationParser.availableCitations(retrieved);
-        Set<String> availableNames = CitationParser.availableFileNames(retrieved);
+        Set<String> availableNames = context.fileNames();
         List<SourceKey> sourceKeys = retrieved.stream().map(SourceKey::of).toList();
 
         List<CitationDto> citations = new ArrayList<>();
@@ -205,6 +212,16 @@ public class ChatService {
                                           repair != null ? CitationDto.Status.REPAIRED : CitationDto.Status.VERIFIED,
                                           firstSourceRef(citation, sourceKeys),
                                           repair != null ? repair.section() : null));
+        }
+        for (String section : AnswerCitations.bareSectionReferences(resolution.answer(), context)) {
+            Citation source = context.sections().get(section);
+            boolean alreadyCited = citations.stream().anyMatch(citation -> citation.status() != CitationDto.Status.UNVERIFIED
+                    && source.fileName().equalsIgnoreCase(citation.fileName())
+                    && source.pageNumber().equals(citation.page()));
+            if (!alreadyCited) {
+                citations.add(new CitationDto(source.fileName(), source.pageNumber(), CitationDto.Status.REPAIRED,
+                                              firstSourceRef(source, sourceKeys), section));
+            }
         }
         return List.copyOf(citations);
     }
