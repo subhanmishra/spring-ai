@@ -174,11 +174,9 @@ services:
       - ./docker/loki/local-config.yaml:/etc/loki/local-config.yaml
     ports:
       - "3100:3100" # Loki API
-    healthcheck:
-      test: [ "CMD-SHELL", "wget --quiet --tries=1 --output-document=- http://localhost:3100/ready | grep -q -w ready || exit 1" ]
-      interval: 5s
-      timeout: 1s
-      retries: 10
+    # No healthcheck: current grafana/loki:latest images ship without /bin/sh, so a CMD-SHELL check can
+    # never run, the container reports unhealthy, and Spring Boot's compose integration aborts startup.
+    # Nothing waits on Loki being healthy - grafana's depends_on is plain ordering.
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
