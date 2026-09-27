@@ -1,138 +1,205 @@
 # Spring AI RAG Service
 
-A Spring Boot Retrieval-Augmented Generation (RAG) service. Upload documents, they get parsed, chunked, and stored as embeddings in a Postgres/pgvector store; a chat interface answers questions grounded in that content, with chat history kept in Redis.
+A Spring Boot Retrieval-Augmented Generation (RAG) system. Upload documents and they are parsed,
+chunked and stored as embeddings in Postgres/pgvector; a chat interface answers questions grounded in
+that content, citing the pages it used; and answer quality is measured continuously, off the chat
+path, on live traffic and against a curated regression set.
 
-## Overview
+Everything runs locally: the models are served by **Ollama**, so no API key is needed.
 
-This project uses Spring AI with a locally-running **Ollama** model (no external API key required), a **PGVector** store for document embeddings, and **Redis** for chat memory. It runs as three applications: **ragr-ingest** (port 8081) uploads, parses and indexes documents; **ragr-app** (port 8080) answers questions over them, single-shot and streaming; and **ragr-eval** measures answer quality from the side.
+## Modules
+
+The repository is a Maven multi-module build. Three of the modules are separate Spring Boot
+applications, each running in its own process; the fourth is a library they share.
+
+| Module | Role | Ports | Owns | Details |
+|---|---|---|---|---|
+| `ragr-ingest` | Upload, parse, chunk, embed and index documents | `8081`, actuator `9097` | the `public` schema, `vector_store` included | [ragr-ingest/README.md](ragr-ingest/README.md) |
+| `ragr-app` | Chat: retrieve, generate, cite, remember | `8080`, actuator `9095` | `compose.yaml` - it starts the containers | [ragr-app/README.md](ragr-app/README.md) |
+| `ragr-eval` | Score every chat turn; run the golden suite | actuator `9096` only | the `eval` schema | [ragr-eval/README.md](ragr-eval/README.md) |
+| `ragr-shared` | The contracts between the applications | - | - | [ragr-shared/README.md](ragr-shared/README.md) |
+
+## Architecture
+
+```mermaid
+flowchart TB
+    user([Client])
+
+    subgraph apps [Applications]
+        direction LR
+        ingest[ragr-ingest<br/>:8081]
+        chat[ragr-app<br/>:8080]
+        eval[ragr-eval<br/>:9096]
+    end
+
+    subgraph data [Data]
+        direction LR
+        pg[(Postgres + pgvector<br/>public: documents, vector_store<br/>eval: runs, case results)]
+        redis[(Redis<br/>chat memory)]
+        kafka{{Kafka<br/>rag.chat.turn.completed}}
+    end
+
+    ollama[Ollama<br/>nomic-embed-text, gemma4:e2b]
+    obs[Prometheus, Loki, Tempo<br/>Grafana]
+
+    user -- upload --> ingest
+    user -- ask --> chat
+    ingest -- write chunks --> pg
+    chat -- similarity search --> pg
+    chat -- conversation --> redis
+    chat -- publish turn --> kafka
+    kafka -- consume turn --> eval
+    eval -- golden runs --> pg
+    eval -. golden suite asks .-> chat
+    apps -- embed, generate, judge --> ollama
+    apps -. metrics, logs, traces .-> obs
+```
+
+### The applications never call each other
+
+With one exception - the golden suite driving chat's real endpoint - the three applications share no
+HTTP calls. Each is coupled to the others only through data, by exactly two contracts:
+
+- **`vector_store`, from ingest to chat.** ragr-ingest writes chunks, ragr-app searches them. Every
+  chunk's stored text begins with a `[filename, p. N]` citation line, which is what lets the model
+  cite pages at all, and carries the metadata keys in `ragr-shared`'s `ChunkMetadata`. **The embedding
+  model and its dimensions must be identical in both applications** (`nomic-embed-text`, 768), because
+  chat embeds each query with the same model to search what ingest wrote. A different dimension fails
+  loudly at query time; a different model with the same dimension fails silently, returning poor
+  matches with no error.
+- **`ChatTurnCompleted` on Kafka, from chat to eval.** Each completed turn is published carrying the
+  question, the resolved answer and the full text, metadata and scores of every chunk retrieved. So
+  evaluation never queries the vector store and always scores what the model actually saw.
+
+Two consequences follow. Each application can be stopped without breaking the others: with ragr-eval
+down, chat is unaffected and turns are simply not scored; with ragr-ingest down, chat still answers
+from what is already indexed. And a change on one side of a contract is a change to both.
+
+### Flows across the applications
+
+**A document, from upload to answer.** Ingestion is synchronous; chat can retrieve a chunk as soon as
+the upload returns.
+
+```mermaid
+sequenceDiagram
+    actor U as Client
+    participant I as ragr-ingest
+    participant O as Ollama
+    participant P as Postgres
+    participant C as ragr-app
+    participant R as Redis
+    participant K as Kafka
+
+    U->>I: POST /api/v1/documents/upload
+    I->>P: document_metadata UPLOADING, history row
+    I->>I: parse into prose and table blocks
+    I->>P: status PROCESSING, history row
+    loop batches of 35 chunks, chunked as they are drawn
+        I->>I: add citation line and metadata
+        I->>O: embed
+        I->>P: insert into vector_store
+    end
+    I->>P: status INDEXED, history row
+    I-->>U: 201, chunk count
+
+    U->>C: POST /ai/generate
+    C->>R: load conversation window
+    C->>O: embed the question
+    C->>P: similarity search, top 5 above 0.6
+    C->>O: generate with the retrieved chunks
+    C->>C: resolve section numbers to pages, strip inline citations
+    C->>R: save the turn
+    C-)K: ChatTurnCompleted, without waiting
+    C-->>U: answer, sources, citations
+```
+
+**A turn, from chat to dashboard.** Scoring happens seconds after the answer, in another process.
+
+```mermaid
+sequenceDiagram
+    participant C as ragr-app
+    participant K as Kafka
+    participant E as ragr-eval
+    participant O as Ollama
+    participant M as Prometheus
+
+    C-)K: ChatTurnCompleted
+    K->>E: consume
+    E->>E: deterministic scores, every turn
+    opt 1 turn in 10, if the judge is free
+        E->>O: relevancy and groundedness judges
+    end
+    M->>E: scrape /actuator/prometheus
+```
+
+**The golden suite** is the one flow that crosses back: a test in ragr-eval sends each curated
+question to the running ragr-app, marked `X-Eval-Origin: GOLDEN`, then reads that turn back off Kafka,
+scores it against the pages known to hold the answer, and records the run in the `eval` schema. Live
+metrics leave golden turns out. See [ragr-eval/README.md](ragr-eval/README.md#the-golden-suite).
+
+### Changing the pipeline means re-ingesting everything
+
+Chunks are not versioned. After any change to parsing, chunking, the chunk-size settings, the citation
+line or the embedding model, delete every document and upload them all again. A corpus is always the
+product of one pipeline; mixing old and new chunks is not supported, and nothing detects it.
 
 ## Prerequisites
 
 * Java 26
 * Maven
-* Docker (for pgvector, Redis, and the observability stack via Docker Compose)
-* [Ollama](https://ollama.com) running locally with the `nomic-embed-text` (embedding) and `gemma4:e2b` (chat) models pulled:
+* Docker (for the containers in `compose.yaml`)
+* [Ollama](https://ollama.com) running locally with both models pulled:
 
 ```bash
 ollama pull nomic-embed-text
 ollama pull gemma4:e2b
 ```
 
-## Configuration
-
-No API key is needed — Ollama is called locally. The default connection is `http://localhost:11434` (`spring.ai.ollama.base-url` in `ragr-app/src/main/resources/application-dev.yaml` and `ragr-ingest/src/main/resources/application.yaml`); override it in both if Ollama runs elsewhere.
-
-**The embedding model and vector dimensions must match in both of those files** (`nomic-embed-text`, 768): ingestion embeds the chunks and chat embeds each query with the same model to search them. A different dimension fails loudly at query time; a different model with the same dimension fails silently, returning poor matches with no error. Changing either means re-ingesting every document.
+No API key is needed. All three applications call Ollama at `http://localhost:11434`
+(`spring.ai.ollama.base-url`); override it in each if Ollama runs elsewhere.
 
 ### Ollama: enable the integrated GPU
 
-Ollama **ignores an integrated GPU unless you tell it not to**, and embedding then runs on the CPU. This is the single biggest lever on indexing speed — on a test machine it roughly doubled embedding throughput (~830 → ~1,750 tokens/sec), taking a 645-page PDF from 415s to 221s:
+Ollama **ignores an integrated GPU unless you tell it not to**, and then everything runs on the CPU.
+This is the single biggest lever on this project's speed. On a test machine it roughly doubled
+embedding throughput (~830 → ~1,750 tokens/sec), taking a 645-page PDF from 415s to 221s, and made a
+grounded chat turn ~2.5× faster (106s → 42s):
 
 ```bash
 setx OLLAMA_IGPU_ENABLE 1      # Windows; export it on Linux/macOS
 ```
 
-Fully quit and relaunch Ollama afterwards — it only reads its environment at startup. To confirm it took effect, look for `Vulkan0 model buffer size` (rather than `CPU model buffer size`) in Ollama's `server.log`.
+Fully quit and relaunch Ollama afterwards; it only reads its environment at startup. To confirm it
+took effect, look for `Vulkan0 model buffer size` (rather than `CPU model buffer size`) in Ollama's
+`server.log`.
 
-Note that `OLLAMA_NUM_PARALLEL` does **not** help here: Ollama pins embedding models to a single slot regardless, so indexing throughput is bounded by how fast one runner embeds.
+`OLLAMA_NUM_PARALLEL` does **not** help: Ollama pins embedding models to a single slot regardless, and
+the chat model and the evaluation judges share one runner too.
 
-### Document processing
+## Running
 
-Indexing behaviour is tuned under `app.ingestion.*` in `ragr-ingest/src/main/resources/application.yaml`; the two retrieval settings are `app.rag.*` in ragr-app's `application-dev.yaml`:
-
-| Property | Default | Purpose |
-|---|---|---|
-| `chunk-size` | `400` | Target chunk size in **tokens**. Consecutive paragraphs are joined until adding the next would exceed it, so chunks actually reach this budget. Tables are chunked separately, by rows |
-| `min-chunk-length-to-embed` | `100` | Chunks shorter than this many **characters** are merged into the chunk before them, never discarded. Raise it if single-line noise is polluting retrieval |
-| `min-chunk-size-chars` | `150` | Where the splitter looks for a sentence boundary when cutting an over-budget chunk. Not a minimum chunk length |
-| `max-embed-tokens` | `2048` | The embedding model's context. Only a single table row wider than this can exceed it, and the parser warns when one does |
-| `table-detection` | `auto` | Recover tables from PDFs (`off`/`auto`/`lattice`/`stream`). `auto` picks per page: ruled pages take columns from the rules, unruled ones from text alignment. Set `off` to fall back to the plain page-text reader |
-| `batch-size` | `35` | Chunks written to pgvector per batch. The cost it controls is *tokens* (~10k per batch at the current mean), so revisit it if you change `chunk-size` |
-| `concurrency` | `4` | Batches written in parallel. Must stay well below ragr-ingest's `spring.datasource.hikari.maximum-pool-size` |
-| `app.rag.top-k` / `app.rag.similarity-threshold` | `5` / `0.6` | Retrieval settings used by the chat endpoints (ragr-app) |
-
-### Evaluation
-
-Answer quality is measured by a **separate application, `ragr-eval`**, configured under `app.eval.*` in
-`ragr-eval/src/main/resources/application.yaml`. The chat service publishes every completed turn to
-Kafka (`rag.chat.turn.completed`) and `ragr-eval` consumes it, so no scoring or judging runs in the
-chat service at all. If `ragr-eval` is not running, chat is unaffected and turns are simply not scored;
-a new `ragr-eval` consumer starts from the newest turn rather than replaying the three days the topic
-retains.
-
-**Live traffic is scored automatically.** Every real chat turn is checked against the context it was
-actually given — how many citations it emitted, how many of those pointed at a page that was really
-retrieved, whether anything was retrieved at all, whether the assistant refused. This is pure string
-comparison over data carried in the event, so it runs on 100% of turns, seconds after they happen. The
-results appear on the **"ragr-eval — evaluation"** Grafana dashboard.
-
-A fraction of turns is additionally sent to two LLM judges (relevancy and groundedness). **Judging
-never touches the response** — it runs in another process after the answer has been returned. It is
-still sampled, because Ollama serialises on one runner slot, so a judge call occupies the chat model
-and the next user's generation queues behind it.
-
-| Property | Default | Purpose |
-|---|---|---|
-| `enabled` | `true` | Master switch for all evaluation |
-| `judge-model` | `gemma4:e2b` | Model used by the LLM judges — the chat model itself, see below |
-| `online.judge-sample-rate` | `0.1` | Fraction of live answers sent to the judges. `0.0` keeps the free deterministic metrics and switches off the model calls |
-| `online.max-concurrent-judgements` | `1` | Judgements in flight. Over this bound a judgement is **dropped and counted**, never queued |
-| `golden.judged` | `false` | Whether a suite run also asks the judges. Roughly triples the run time |
-| `golden.persist` | `true` | Write run and per-case rows to Postgres. Required for the dashboard's per-case tables **and** for its golden score panels |
-| `golden.chat-url` | `http://localhost:8080` | The running chat service a suite run drives |
-
-**The judge is the chat model grading its own answers**, which makes these rates optimistic. A
-dedicated judge would be better, but the smallest purpose-built one (`bespoke-minicheck`) needs
-4.39 GiB and does not fit on a machine already holding the chat and embedding models. Read the judged
-rates as a trend — a drop after a change is meaningful — rather than as an absolute quality score.
-
-**The curated regression suite** replays a fixed set of questions with known-correct pages, which is
-the only way to measure retrieval recall. It sends each question to the **running** chat service's
-`/ai/generate`, marked with `X-Eval-Origin: GOLDEN` so the live metrics leave it out, and reads the turn
-back from Kafka. So the chat service must be up, with the corpus indexed; a run takes several minutes:
-
-```bash
-./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
-```
-
-Note that `-Dgroups=eval` on its own will **not** run it: a JUnit tag exclusion beats an inclusion, so
-the exclusion itself has to be cleared. `-pl ragr-eval -am` builds only what the suite needs, and leaves
-the running chat service's compiled classes alone. Results are written to the `eval.eval_run` and
-`eval.eval_case_result` tables and picked up by the dashboard within 15 minutes (or on the next
-`ragr-eval` restart).
-
-## Running the Application
-
-The repository is a Maven multi-module build: `ragr-app` is the chat service, `ragr-ingest` the
-ingestion service, `ragr-eval` the evaluation application, and `ragr-shared` the library all three
-depend on. They run as separate processes, started in this order.
-
-This project uses Spring Boot's Docker Compose support. Ensure Docker (and Ollama) are running, then start
-the chat service first:
+Ensure Docker and Ollama are running, then start the applications **in this order**, each in its own
+terminal:
 
 ```bash
 ./mvnw spring-boot:run -pl ragr-app -am
 ```
 
-This automatically starts the containers defined in `compose.yaml` (pgvector, Redis, Kafka and the
-observability stack). Then, in a second terminal, start ingestion:
-
 ```bash
 ./mvnw spring-boot:run -pl ragr-ingest -am
 ```
-
-and in a third, evaluation:
 
 ```bash
 ./mvnw spring-boot:run -pl ragr-eval -am
 ```
 
-Neither `ragr-ingest` nor `ragr-eval` starts or stops the containers; they expect the stack the chat
-service brought up. `ragr-ingest` owns the `public` schema's Flyway migration, `vector_store` included, so on
-an empty database the chat service cannot answer anything until ingestion has started once.
+The chat service goes first because it brings up the containers, through Spring Boot's Docker Compose
+support; the other two expect the stack it started and never start or stop containers. ragr-ingest
+runs the `public` schema's Flyway migration, so on an empty database chat has no `vector_store` to
+search until ingestion has started once.
 
 Every JVM runs with a capped heap on this memory-constrained host, set in each module's `pom.xml` for
-`spring-boot:run` and for its tests; an IntelliJ run configuration needs the same VM option:
+`spring-boot:run` and for its tests. An IntelliJ run configuration needs the same VM options:
 
 | Application | Cap | Measured |
 |---|---|---|
@@ -140,165 +207,64 @@ Every JVM runs with a capped heap on this memory-constrained host, set in each m
 | `ragr-ingest` | `-Xmx512m` | 354 MB heap, 651 MB private indexing the 645-page reference manual |
 | `ragr-eval` | `-Xmx256m -XX:+UseSerialGC` | 63 MB heap, 265 MB private |
 
-## API Endpoints
-
-### Chat (`/ai`, ragr-app on port 8080)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional). Optional header `X-Eval-Origin: GOLDEN` (upper case; anything else but `LIVE` is a 400) marks the turn as the golden evaluation suite's, which online evaluation leaves out of the live metrics |
-| POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body as above |
-| GET | `/ai/conversations` | List all active conversation IDs |
-| GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
-| DELETE | `/ai/conversations/{id}` | Delete a single conversation |
-| DELETE | `/ai/conversations` | Clear all stored chat memory |
-
-Both generate endpoints return the conversation ID in an **`X-Conversation-Id`** response header — a freshly generated UUID when `conversationId` was not supplied. Pass it back on the next call to continue the same conversation.
-
-**Citations come back as data, not as text.** The answer carries no inline `(file, p. N)` references; the evidence is reported beside it:
-
-```json
-{
-  "answer": "Starters bundle a curated set of dependencies ...",
-  "grounded": true,
-  "sources": [
-    { "ref": 1, "documentId": "8c1f…", "fileName": "spring-boot-reference.pdf", "page": 42,
-      "blockType": "prose", "score": 0.83, "excerpt": "<the chunk's full text>", "cited": true }
-  ],
-  "citations": [
-    { "fileName": "spring-boot-reference.pdf", "page": 42, "status": "VERIFIED", "sourceRef": 1, "writtenPage": null }
-  ],
-  "usage": { "model": "gemma4:e2b", "promptTokens": 2018, "completionTokens": 495, "latencyMillis": 56381 }
-}
-```
-
-- `sources` — every chunk retrieved for the answer, in rank order, with its full text. `grounded: false` and an empty list mean the answer came from general knowledge.
-- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model referred to a section number rather than a page — `(file.pdf, p. 5.3)`, or just `(5.3)` — and it was resolved to that heading's page (`writtenPage: "5.3"`); `UNVERIFIED` points at nothing the answer was given.
-
-`/ai/generateStream` streams the answer text as unnamed `data:` events, citations removed, then sends `event:sources` (`{grounded, sources}`) and `event:done` (`{citations, usage}`). A cancelled stream gets neither.
-
-Because `/ai/generateStream` is a `POST`, a browser client **cannot** consume it with the native `EventSource` API, which only issues `GET` requests. Use `fetch` with a `ReadableStream` instead.
-
-The prompt travels in a **JSON request body, not a query parameter** — a `GET` with `?prompt=` would put every question anyone asks into access logs, browser history and proxy logs, and would cap the prompt at whatever URL length the infrastructure allows. A blank or missing prompt, or one over 4000 characters, returns a 400 `ProblemDetail`.
-
 ```bash
-curl -X POST http://localhost:8080/ai/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Hello"}'
-
-# Capture the conversation ID, then continue that conversation
-curl -i -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' -d '{"prompt":"Hello"}' | grep -i x-conversation-id
-curl -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' \
-  -d '{"prompt":"And what did I just ask?","conversationId":"<id>"}'
-
-curl -N -X POST http://localhost:8080/ai/generateStream \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Tell me a story"}'
-
-# Reload a conversation, then drop just that one
-curl "http://localhost:8080/ai/conversations/<id>"
-curl -X DELETE "http://localhost:8080/ai/conversations/<id>"
+./mvnw test            # every module's tests; the golden suite is excluded, see ragr-eval
+./mvnw clean package
 ```
 
-**Reading a conversation back does not give you the whole transcript.** Chat memory keeps a rolling window of the last `app.ai.max-chat-messages` messages (10 by default) and trims on *write*, so older turns are already gone from Redis and cannot be recovered — by anything. The response reports `maxRetainedMessages` next to `messageCount` so a client can tell a short conversation apart from a truncated one; a `messageCount` equal to the limit means earlier turns were discarded. Measured: after 7 turns (14 messages) on one conversation, 10 remain and the first two turns are unrecoverable. Raise `app.ai.max-chat-messages` if longer history matters — at the cost of a larger prompt on every request, since the window is also what gets replayed to the model.
-
-`GET` returns 404 when nothing is stored under the id, which is also how an already-cleared conversation reads — Redis keeps no tombstone to tell the two apart. `DELETE` of one conversation is idempotent and returns 204 whether or not the id existed.
-
-### Documents (`/api/v1/documents`, ragr-ingest on port 8081)
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/documents/upload` | Upload and index a single document (PDF, DOCX, XLSX, PPTX, HTML, TXT, MD, CSV) |
-| POST | `/api/v1/documents/upload-multiple` | Upload and index multiple documents at once. 201 all indexed, 207 some failed, 422 none indexed |
-| GET | `/api/v1/documents` | List all uploaded documents and their indexing status |
-| GET | `/api/v1/documents/{id}` | Get metadata for a specific document |
-| GET | `/api/v1/documents/{id}/history` | Get the document's processing history, oldest entry first |
-| DELETE | `/api/v1/documents/{id}` | Delete a document and purge its vector embeddings |
-
-```bash
-curl -F "file=@document.pdf" http://localhost:8081/api/v1/documents/upload
-
-# Several at once — one result per file, in the order sent
-curl -F "files=@a.pdf" -F "files=@b.docx" http://localhost:8081/api/v1/documents/upload-multiple
-```
-
-**Bulk upload reports every file, including the ones that failed.** A file that cannot be processed gets a `FAILED` entry carrying its document id and the error, rather than being dropped from the response — so a batch of ten that returns seven successes also returns three failures, each identifying itself. Follow a failed entry's `id` to `/{id}/history` for the full trail. The status code summarises the batch: **201** when every file indexed, **207 Multi-Status** when some failed, **422** when none did.
-
-Files are processed one at a time. Ollama serialises embedding regardless of how many requests arrive, so uploading concurrently would add contention without adding throughput.
-
-**Supported types are checked before anything is stored.** `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.html`/`.htm`, `.txt`, `.md` and `.csv` are accepted; anything else returns **415** and leaves no document record behind. The check reads the filename extension, falling back to the declared `Content-Type` only when the filename has no extension — clients frequently send `application/octet-stream`, so a declared type is treated as a fallback rather than as evidence.
-
-This is a type filter, not a content scanner. A supported extension whose contents cannot actually be parsed — a corrupt PDF, say — still returns **422** and *does* leave a `FAILED` record with its history, because that is a processing failure rather than a rejected type. In a bulk upload a rejected file appears as a `FAILED` entry with a **null id**, since no document was ever created for it.
-
-Uploads are **synchronous** — the request does not return until the document is fully indexed, and a large one takes minutes (a 645-page, 13.6MB PDF indexes in roughly 4 minutes with the GPU enabled). Set a generous client timeout. The response reports the number of chunks created.
-
-Indexing is all-or-nothing: if any batch fails, every chunk already written for that document is removed and the document is marked `FAILED`, so a failed upload never leaves partial content to be retrieved. Re-uploading is the way to retry. Maximum upload size is 25MB per file (`spring.servlet.multipart` in ragr-ingest's `application.yaml`).
-
-```bash
-curl "http://localhost:8081/api/v1/documents/<id>/history"
-```
-
-The history endpoint returns each status transition with the details recorded at the time — `UPLOADING` → `PROCESSING` → `INDEXED` on success, or `UPLOADING` → `FAILED` carrying the error message when parsing or indexing broke. It is the only place a failure reason is kept once a document has been removed.
-
-**History outlives the document it describes.** `document_metadata_history` is an immutable audit log with deliberately no foreign key to `document_metadata`, so deleting a document removes its metadata and vector chunks while leaving the trail intact. The endpoint therefore still answers for a deleted document, reporting `documentExists: false`; it 404s only when no history exists for that id at all.
-
-**Changing the pipeline means re-ingesting everything.** Chunks are not versioned, so after any change to parsing, chunking, the chunk-size settings or the embedding model, delete every document and upload them all again. A corpus is always the product of one pipeline; mixing old and new chunks is not supported, and nothing detects it.
-
-### Admin diagnostics (`/api/v1/admin`, ragr-app on port 8080)
-
-Operator-facing checks against the live corpus. **Registered only under the `dev` profile** — outside it these paths do not exist. There is no authentication in front of them, so if the `dev` profile is ever run somewhere reachable, block the `/api/v1/admin` prefix at the proxy.
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/admin/retrieval/search` | Show what the vector store returns for a query, without generating an answer |
-
-Retrieval search runs the same similarity search the chat path runs, so it tells a *retrieval* failure apart from a *generation* failure — whether the passage an answer needed was never retrieved, or was retrieved and ignored.
-
-```bash
-curl -s -X POST http://localhost:8080/api/v1/admin/retrieval/search \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"what is a spring boot starter"}'
-```
-
-`topK` and `similarityThreshold` default to the configured `app.rag` values the chat path uses, and the response echoes back whichever were in force. Override them to see what the threshold is excluding — `{"query":"...","topK":20,"similarityThreshold":0.0}` returns the near misses. Pass `documentId` to restrict the search to one document.
-
-Each hit reports its `score` and the metadata written at ingestion time (`pageNumber`, `chunkIndex`, `blockType`, and for tables `tableIndex` / `tableRows`), plus `citation` and `text` — the two halves of the stored content. `hasCitationHeader: false` marks a chunk ingested before citation headers existed; the model cannot cite those, and re-ingesting the document is the fix.
-
-Full OpenAPI docs are served by each application with an API, once it is running: the chat and retrieval-diagnostics API at `http://localhost:8080/swagger-ui.html`, and the document API at `http://localhost:8081/swagger-ui.html`. `ragr-eval` has no API.
+OpenAPI docs are served by each application with an API once it is running:
+`http://localhost:8080/swagger-ui.html` for chat and diagnostics, `http://localhost:8081/swagger-ui.html`
+for documents. ragr-eval has no API.
 
 ## Infrastructure (`compose.yaml`)
 
-* **pgvector** — PostgreSQL 16 + pgvector extension. Port `5432`, db `ragdatabase`, user `myuser` / `secret`.
+* **pgvector** — PostgreSQL 16 + pgvector extension. Port `5432`, db `ragdatabase`, user `myuser` / `secret`. Two schemas: `public` (ragr-ingest's) and `eval` (ragr-eval's), each with its own Flyway history.
 * **pgadmin** — Postgres admin UI. Port `5050`, `admin@localhost.com` / `admin`.
 * **redis** — Redis Stack, used as the chat memory store. Ports `6379` (Redis), `8001` (UI).
-* **kafka** — Apache Kafka 4.3.1 (the GraalVM native image), single-node KRaft. Port `9092`, no authentication. Carries each completed chat turn on the `rag.chat.turn.completed` topic (one partition, 3-day retention) for evaluation to consume off the chat path. Data persists under `docker-volume/kafka`. Containers reach it on an internal listener, `kafka:29092`, which is not published.
+* **kafka** — Apache Kafka 4.3.1 (the GraalVM native image), single-node KRaft. Port `9092`, no authentication. Carries each completed chat turn on the `rag.chat.turn.completed` topic (one partition, 3-day retention). Data persists under `docker-volume/kafka`. Containers reach it on an internal listener, `kafka:29092`, which is not published.
 * **kafka-console** — Redpanda Console, a browser UI for the broker. Port `8082`, no login. Browse topics, read the retained chat turns as decoded JSON, and see the `ragr-eval` consumer group's offsets and lag.
 * **redis-exporter** — Exposes Redis metrics to Prometheus. Port `9121`.
 * **postgres-exporter** — Exposes server-side Postgres metrics to Prometheus. Port `9187`. Runs with the `stat_user_tables` and `statio_user_indexes` collectors enabled so `vector_store` index-vs-sequential scan counts are visible.
 * **otel-collector** — OpenTelemetry Collector. Ports `4317` (gRPC), `4318` (HTTP).
 * **prometheus** — Metrics. Port `9090`.
-* **grafana** — Dashboards (Prometheus/Loki/Tempo/Postgres pre-provisioned). Port `3000`, anonymous access with Admin role (no login). Four dashboards, linked to each other from the "ragr dashboards" menu top right, each grouped into collapsible rows and each answering a different question:
-  * **ragr — overview** — *are the applications and the infrastructure healthy?* JVM runtime, HTTP / Spring MVC and HikariCP for all three applications, split by an `application` selector; Kafka from the client side (turns published vs dropped, evaluation consumer lag); Redis; and Postgres, including row counts per schema and table.
-  * **ragr-app — chat** — *is the chat pipeline healthy?* Ollama model calls, token throughput, the ChatClient and RAG advisor chain, and the similarity search behind each answer.
-  * **ragr-ingest — ingestion** — *is indexing healthy?* Upload duration and outcomes, embedding calls and throughput, and chunks written to pgvector.
-  * **ragr-eval — evaluation** — *are the answers any good?* Live citation fidelity and retrieval quality, plus the curated regression suite.
-
-  The Postgres datasource exists for the evaluation dashboard's per-case tables and reads `eval.eval_run` / `eval.eval_case_result`.
+* **grafana** — Dashboards, with Prometheus, Loki, Tempo and Postgres datasources provisioned. Port `3000`, anonymous access with the Admin role (no login).
 * **tempo** — Distributed tracing backend. Port `3200`.
 * **loki** — Log aggregation. Port `3100`.
 
-Each application serves `health`, `metrics` and `prometheus` actuator endpoints on its own port, and each is its own Prometheus job: the chat service on management port `9095` (job `spring-ai-ragr`), `ragr-ingest` on management port `9097` (job `ragr-ingest`), and `ragr-eval` on `9096` (job `ragr-eval`; it has no API, so actuator is all it serves). Their meters are tagged `application=spring-ai-ragr`, `ragr-ingest` and `ragr-eval`, which is what the dashboards select on — every `rag_eval_*` metric comes from `ragr-eval`, and embedding and vector-store writes from `ragr-ingest`.
+## Observability
 
-Grafana is wired so you can move between signals: logs ↔ traces, metrics → traces (via exemplars on the `http_server_requests_*` panels), and metrics → logs (via a correlation on the `job` field, shown in Table view).
+Each application serves `health`, `metrics` and `prometheus` actuator endpoints on its own port, and
+each is its own Prometheus job. Their meters are tagged `application=<name>`, which is what every
+dashboard panel selects on:
+
+| Application | Actuator | Prometheus job | `application` tag |
+|---|---|---|---|
+| `ragr-app` | `9095` | `spring-ai-ragr` | `spring-ai-ragr` |
+| `ragr-ingest` | `9097` | `ragr-ingest` | `ragr-ingest` |
+| `ragr-eval` | `9096` | `ragr-eval` | `ragr-eval` |
+
+Grafana has four dashboards, linked to each other from the "ragr dashboards" menu top right, each
+answering a different question:
+
+* **ragr — overview** — *are the applications and the infrastructure healthy?* JVM runtime, HTTP / Spring MVC and HikariCP for all three applications, split by an `application` selector; Kafka from the client side (turns published vs dropped, evaluation consumer lag), with links into the Kafka console; Redis; and Postgres, including row counts per schema and table.
+* **ragr-app — chat** — *is the chat pipeline healthy?* See [ragr-app](ragr-app/README.md#dashboard).
+* **ragr-ingest — ingestion** — *is indexing healthy?* See [ragr-ingest](ragr-ingest/README.md#dashboard).
+* **ragr-eval — evaluation** — *are the answers any good?* See [ragr-eval](ragr-eval/README.md#dashboard).
+
+The Postgres datasource reads what only the database knows: per-document upload timings from
+`document_metadata_history`, and the golden suite's per-case results from the `eval` schema.
+
+Grafana is wired so you can move between signals: logs ↔ traces, metrics → traces (via exemplars on
+the `http_server_requests_*` panels), and metrics → logs (via a correlation on the `job` field, shown
+in Table view).
 
 ## Technologies
 
-* Spring Boot 4.1.0
-* Spring AI 2.0.1
-* Ollama
-* PostgreSQL (pgvector)
+* Spring Boot 4.1.0, Spring AI 2.0.1, Java 26
+* Ollama (`gemma4:e2b` for chat and judging, `nomic-embed-text` for embeddings)
+* PostgreSQL with pgvector, Flyway
 * Redis
-* Flyway
+* Kafka (Spring for Apache Kafka), Redpanda Console
 * springdoc-openapi
 * Docker Compose
 * OpenTelemetry, Prometheus, Grafana, Tempo, Loki (observability)

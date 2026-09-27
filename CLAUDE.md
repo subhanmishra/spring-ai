@@ -126,7 +126,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 ├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
 ├── compose.yaml     # stays at the root; ragr-app runs from the root to find it, and owns it
 ├── CLAUDE.md        # this file
-└── README.md        # user-facing quick-start; canonical for endpoint tables + infra ports/creds
+└── README.md        # the system as a whole; each module has its own README (see below)
 ```
 
 ## Architecture in brief
@@ -191,5 +191,11 @@ changes, edit the document rather than appending a correction to it.
 
 ## See also
 
-`README.md` — user-facing quick-start, and the canonical source for API endpoint tables, curl
-examples, and docker service ports and credentials. Do not duplicate those here.
+The user-facing documentation, canonical for what it covers. Do not duplicate it here:
+
+- `README.md` — the system as a whole: architecture and the flows between applications, running,
+  docker service ports and credentials, dashboards and actuator ports.
+- `ragr-ingest/README.md`, `ragr-app/README.md`, `ragr-eval/README.md`, `ragr-shared/README.md` —
+  each module's own flow, configuration, API endpoint tables and curl examples.
+
+A fact belongs in the README of the module it describes. Only what spans modules goes in the root.
