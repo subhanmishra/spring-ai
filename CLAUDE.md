@@ -33,17 +33,20 @@ measured continuously on live traffic and on demand against a curated dataset.
 ## Build / run / test
 
 ```bash
-./mvnw spring-boot:run     # auto-starts compose.yaml (pgvector, redis, observability stack)
+./mvnw spring-boot:run -pl ragr-app -am    # chat service; auto-starts compose.yaml (pgvector, redis,
+                                          # kafka, observability stack)
+./mvnw spring-boot:run -pl ragr-eval -am   # evaluation, once ragr-app is up; heap capped in its pom
 ./mvnw test
 ./mvnw clean package
 ```
 
 ```bash
-./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
 
 The eval command is not the obvious one and `-Dgroups=eval` alone does not work — see
-`.claude/context/evaluation.md`. It needs the corpus indexed and Ollama up, and takes minutes.
+`.claude/context/evaluation.md`. It drives the running ragr-app over HTTP, so that must be up with the
+corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 
 ## Project structure
 
@@ -52,15 +55,14 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 ├── ragr-shared      # plain library, no Spring Boot; shared by the chat path and evaluation
 │   └── src/main/java/.../subhanmishra/
 │       ├── citation # Citation, CitationParser, CitationResolver, AnswerCitations
-│       └── event    # ChatTurnCompleted - the Kafka contract between chat and evaluation
-├── ragr-app         # the Spring Boot application
+│       └── event    # ChatTurnCompleted, TurnOrigin - the Kafka contract between chat and eval
+├── ragr-app         # the chat service (upload, parse, index, chat); publishes turns to Kafka
 │   └── src
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
 │       │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
-│       │   │   │               # SpringAiProperties, EvalConfig, EvalProperties,
-│       │   │   │               # KafkaConfig, EventsProperties
+│       │   │   │               # SpringAiProperties, KafkaConfig, EventsProperties
 │       │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │       │   │   ├── dto
 │       │   │   ├── entity
@@ -69,12 +71,7 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 │       │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
 │       │   │       │           # DocumentMetadataService, DocumentHistoryService,
 │       │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
-│       │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
-│       │   │       │           # GoldenEvalService, ChatTurnPublisher
-│       │   │       ├── eval    # EvalScores, RetrievalScores, CitationScores, AnswerScores,
-│       │   │       │           # ExpectationScores, ContextPrecisionScores,
-│       │   │       │           # ContextPrecisionEvaluator, GoldenCase, GoldenDataset,
-│       │   │       │           # GoldenDatasetLoader
+│       │   │       │           # ChatTurnPublisher
 │       │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
 │       │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
 │       │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
@@ -86,15 +83,32 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 │       │       ├── application.yaml          # active profile = dev, multipart limits
 │       │       ├── application-dev.yaml      # everything else
 │       │       ├── logback-spring.xml        # console + Loki appenders
+│       │       └── db/migration/             # Flyway V1..V4, public schema
+│       └── test                              # SpringAiApplicationTests, parser tests
+├── ragr-eval        # evaluation, its own app: consumes turns, scores, judges, runs the golden suite
+│   └── src
+│       ├── main
+│       │   ├── java/.../subhanmishra/
+│       │   │   ├── config      # EvalConfig, EvalProperties
+│       │   │   ├── entity      # EvalRun, EvalCaseResult, EvalRunStatus
+│       │   │   ├── repository
+│       │   │   └── service     # OnlineEvalService (the Kafka listener), EvalScoringService,
+│       │   │       │           # EvalMetricsService, GoldenEvalService
+│       │   │       └── eval    # EvalScores, RetrievalScores, CitationScores, AnswerScores,
+│       │   │                   # ExpectationScores, ContextPrecisionScores,
+│       │   │                   # ContextPrecisionEvaluator, GoldenCase, GoldenDataset,
+│       │   │                   # GoldenDatasetLoader
+│       │   └── resources
+│       │       ├── application.yaml          # all of it; no profiles. Port 9096, actuator only
 │       │       ├── eval/golden-dataset.yaml  # curated regression cases
-│       │       └── db/migration/             # Flyway V1..V5
-│       └── test                              # SpringAiApplicationTests, parser tests, eval tests,
+│       │       └── db/migration/             # Flyway V1, eval schema, own history table
+│       └── test                              # EvalApplicationTests, scoring tests,
 │                                             # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
 ├── docker/          # observability stack config (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime volume data, not source
 ├── .claude/         # gitignored; context documents + hooks (see below)
 ├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
-├── compose.yaml     # stays at the root; the app runs from the root to find it
+├── compose.yaml     # stays at the root; ragr-app runs from the root to find it
 ├── CLAUDE.md        # this file
 └── README.md        # user-facing quick-start; canonical for endpoint tables + infra ports/creds
 ```
@@ -107,9 +121,12 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 `INDEXED`/`FAILED`, with every transition recorded by `DocumentHistoryService`.
 
 **Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor`
-retrieves from pgvector → Ollama generates → history to Redis → `OnlineEvalService` scores the turn
-and `ChatTurnPublisher` sends it to Kafka (`rag.chat.turn.completed`); neither holds up the
-response. The two coexist until evaluation moves to its own application.
+retrieves from pgvector → Ollama generates → history to Redis → `ChatTurnPublisher` sends the turn to
+Kafka (`rag.chat.turn.completed`) without holding up the response.
+
+**Evaluation** (`ragr-eval`, a separate process): `OnlineEvalService` consumes each turn → deterministic
+scores on every turn, LLM judges on a sample → Micrometer, scraped by Prometheus from port 9096. The
+golden suite drives ragr-app's real `/ai/generate` and reads its own turns back off the same topic.
 
 Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake
 it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through
@@ -138,9 +155,9 @@ these.
 |---|---|---|
 | `parsing.md` | `ContentBlock`, Tika/jsoup, PDF table geometry, strippers, the chunk-size budget | `service/parse/**`, `DocumentParserService` |
 | `ingestion.md` | batching, virtual threads, Hikari, retry/compensation, throughput measurements, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `ThreadPoolConfig` |
-| `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics | `ChatService`, `ChatController`, `SpringAiConfig` |
+| `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics, the turn event | `ChatService`, `ChatController`, `SpringAiConfig`, `citation/**`, `event/**`, `ChatTurnPublisher` |
 | `provenance.md` | `CURRENT_VERSION`, `PipelineSettings`, the two Jackson/ModelMapper traps | `PipelineProvenanceService`, `JdbcConversionsConfig` |
-| `evaluation.md` | online vs golden split, judge selection, metric registration, citation fabrication and resolution | `service/eval/**`, `Eval*`, `EvalSuiteIT` |
+| `evaluation.md` | where eval runs (ragr-eval, Kafka) and why, online vs golden split, judge selection, metric registration, citation fabrication and resolution | `ragr-eval/**`, `service/eval/**`, `Eval*`, `EvalSuiteIT` |
 | `observability.md` | compose stack, tracing/logging wiring, the three dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
 | `api-and-errors.md` | `DocAiExceptionHandler`, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
 

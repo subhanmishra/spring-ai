@@ -51,18 +51,23 @@ Indexing behaviour is tuned under `app.rag.*` in `application-dev.yaml`:
 
 ### Evaluation
 
-Answer quality is measured in two places, configured under `app.eval.*`.
+Answer quality is measured by a **separate application, `ragr-eval`**, configured under `app.eval.*` in
+`ragr-eval/src/main/resources/application.yaml`. The chat service publishes every completed turn to
+Kafka (`rag.chat.turn.completed`) and `ragr-eval` consumes it, so no scoring or judging runs in the
+chat service at all. If `ragr-eval` is not running, chat is unaffected and turns are simply not scored;
+a new `ragr-eval` consumer starts from the newest turn rather than replaying the three days the topic
+retains.
 
 **Live traffic is scored automatically.** Every real chat turn is checked against the context it was
 actually given — how many citations it emitted, how many of those pointed at a page that was really
 retrieved, whether anything was retrieved at all, whether the assistant refused. This is pure string
-comparison over data already in the response, so it runs on 100% of turns and adds no measurable
-latency. The results appear on the **"spring-ai-ragr — RAG evaluation"** Grafana dashboard.
+comparison over data carried in the event, so it runs on 100% of turns, seconds after they happen. The
+results appear on the **"spring-ai-ragr — RAG evaluation"** Grafana dashboard.
 
 A fraction of turns is additionally sent to two LLM judges (relevancy and groundedness). **Judging
-never blocks the response** — the answer is already on its way back to the caller before a judgement
-starts. It is still sampled, because Ollama serialises on one runner slot, so a judge call occupies
-the chat model and the next user's generation queues behind it.
+never touches the response** — it runs in another process after the answer has been returned. It is
+still sampled, because Ollama serialises on one runner slot, so a judge call occupies the chat model
+and the next user's generation queues behind it.
 
 | Property | Default | Purpose |
 |---|---|---|
@@ -72,6 +77,7 @@ the chat model and the next user's generation queues behind it.
 | `online.max-concurrent-judgements` | `1` | Judgements in flight. Over this bound a judgement is **dropped and counted**, never queued |
 | `golden.judged` | `false` | Whether a suite run also asks the judges. Roughly triples the run time |
 | `golden.persist` | `true` | Write run and per-case rows to Postgres. Required for the dashboard's per-case tables **and** for its golden score panels |
+| `golden.chat-url` | `http://localhost:8080` | The running chat service a suite run drives |
 
 **The judge is the chat model grading its own answers**, which makes these rates optimistic. A
 dedicated judge would be better, but the smallest purpose-built one (`bespoke-minicheck`) needs
@@ -79,25 +85,42 @@ dedicated judge would be better, but the smallest purpose-built one (`bespoke-mi
 rates as a trend — a drop after a change is meaningful — rather than as an absolute quality score.
 
 **The curated regression suite** replays a fixed set of questions with known-correct pages, which is
-the only way to measure retrieval recall. It needs the corpus indexed and takes several minutes:
+the only way to measure retrieval recall. It sends each question to the **running** chat service's
+`/ai/generate`, marked with `X-Eval-Origin: GOLDEN` so the live metrics leave it out, and reads the turn
+back from Kafka. So the chat service must be up, with the corpus indexed; a run takes several minutes:
 
 ```bash
-./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
 
 Note that `-Dgroups=eval` on its own will **not** run it: a JUnit tag exclusion beats an inclusion, so
-the exclusion itself has to be cleared. Results are written to the `eval_run` and `eval_case_result`
-tables and picked up by the dashboard within 15 minutes (or on the next app restart).
+the exclusion itself has to be cleared. `-pl ragr-eval -am` builds only what the suite needs, and leaves
+the running chat service's compiled classes alone. Results are written to the `eval.eval_run` and
+`eval.eval_case_result` tables and picked up by the dashboard within 15 minutes (or on the next
+`ragr-eval` restart).
 
 ## Running the Application
 
-This project uses Spring Boot's Docker Compose support. Ensure Docker (and Ollama) are running, then start the application:
+The repository is a Maven multi-module build: `ragr-app` is the chat service, `ragr-eval` the
+evaluation application, and `ragr-shared` the library both depend on. They run as separate processes.
+
+This project uses Spring Boot's Docker Compose support. Ensure Docker (and Ollama) are running, then start
+the chat service first:
 
 ```bash
-./mvnw spring-boot:run
+./mvnw spring-boot:run -pl ragr-app -am
 ```
 
-This automatically starts the containers defined in `compose.yaml` (pgvector, Redis, and the observability stack).
+This automatically starts the containers defined in `compose.yaml` (pgvector, Redis, Kafka and the
+observability stack). Then, in a second terminal, start evaluation:
+
+```bash
+./mvnw spring-boot:run -pl ragr-eval -am
+```
+
+`ragr-eval` does not start or stop the containers; it expects the stack the chat service brought up. Its
+JVM runs with a small heap on this memory-constrained host - `-Xmx256m -XX:+UseSerialGC`, set in its
+`pom.xml` for `spring-boot:run` (measured at 265 MB private, 63 MB of heap in use).
 
 ## API Endpoints
 
@@ -246,11 +269,11 @@ Full OpenAPI docs are available via springdoc once the app is running (default: 
   * **AI / RAG metrics** — *is the AI pipeline healthy?* Ollama model calls, token throughput, the RAG advisor chain, and the pgvector store.
   * **RAG evaluation** — *are the answers any good?* Live citation fidelity and retrieval quality, plus the curated regression suite.
 
-  The Postgres datasource exists for the evaluation dashboard's per-case tables and reads `eval_run` / `eval_case_result`.
+  The Postgres datasource exists for the evaluation dashboard's per-case tables and reads `eval.eval_run` / `eval.eval_case_result`.
 * **tempo** — Distributed tracing backend. Port `3200`.
 * **loki** — Log aggregation. Port `3100`.
 
-The application's own actuator endpoints run on a separate management port `9095` — `health`, `metrics` and `prometheus` are exposed (for example `http://localhost:9095/actuator/prometheus`), and that is what Prometheus scrapes.
+The application's own actuator endpoints run on a separate management port `9095` — `health`, `metrics` and `prometheus` are exposed (for example `http://localhost:9095/actuator/prometheus`), and that is what Prometheus scrapes. The evaluation application, `ragr-eval`, serves the same three endpoints on port `9096` (it has no API of its own), scraped as the `ragr-eval` job; every `rag_eval_*` metric comes from there.
 
 Grafana is wired so you can move between signals: logs ↔ traces, metrics → traces (via exemplars on the `http_server_requests_*` panels), and metrics → logs (via a correlation on the `job` field, shown in Table view).
 
