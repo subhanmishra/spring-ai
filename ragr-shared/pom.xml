@@ -7,9 +7,9 @@
         <artifactId>spring-ai-ragr</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
-    <artifactId>ragr-citations</artifactId>
-    <name>ragr-citations</name>
-    <description>Parsing, resolving and stripping the citations in a chat answer</description>
+    <artifactId>ragr-shared</artifactId>
+    <name>ragr-shared</name>
+    <description>Citation handling and the chat-turn event, shared by the chat path and evaluation</description>
 
     <!-- A plain library: no Spring Boot, no beans. The only thing it needs from Spring AI is the
          Document type the retrieved chunks arrive as. -->

@@ -51,6 +51,45 @@ services:
     volumes:
       - ./docker-volume/redis:/data
 
+  # Carries completed chat turns from the app to evaluation, so scoring and LLM judging stay off the
+  # chat path. The GraalVM native image rather than apache/kafka: it is labelled experimental and for
+  # local development only, which is exactly this use, and a JVM broker is a heap this memory-tight
+  # host would rather not carry.
+  #
+  # Every setting is spelled out because the image applies its built-in defaults only when NO KAFKA_*
+  # variable is set - set one and the rest vanish. These mirror those defaults except for log.dirs,
+  # which the defaults put in /tmp inside the container, and topic auto-creation, which is off so a
+  # mistyped topic name fails instead of quietly creating an empty topic nothing reads.
+  kafka:
+    image: apache/kafka-native:4.3.1
+    container_name: ai_kafka
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: 'ragr-local-kraft-01'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093'
+      # Advertised as localhost because both clients - the app and, next, the eval app - run on the
+      # host. A client inside this compose network would need a second listener.
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+    volumes:
+      # Persisted so the topic's retention window survives a restart: replaying retained turns
+      # through a new judge or metric is one of the reasons for putting a log here at all.
+      - ./docker-volume/kafka:/var/lib/kafka/data
+
   redis-exporter:
     image: oliver006/redis_exporter:latest
     container_name: ai_redis-exporter

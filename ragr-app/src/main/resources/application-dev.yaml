@@ -75,6 +75,38 @@ spring:
       # spring-boot-maven-plugin setting in ragr-app/pom.xml, under ./mvnw spring-boot:run too. A
       # relative path here would tie startup to whichever working directory each run config happens
       # to use.
+  # Spring Boot has no Docker Compose service connection for Kafka, so unlike Postgres and Redis the
+  # broker's address is set here rather than discovered. It matches the advertised listener in
+  # compose.yaml.
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      # The payload is mostly retrieved chunk text, which compresses well.
+      compression-type: zstd
+      properties:
+        # How long send() may block the calling thread for metadata or buffer space. The default is
+        # 60s, which with the broker down would stall whatever called it. ChatTurnPublisher already
+        # sends off the chat thread; this bounds how long each of those sends can linger.
+        max.block.ms: 500
+        # Ceiling on the producer's reconnect backoff to an unreachable broker. The default 1s logs a
+        # "Bootstrap broker ... disconnected" WARN about twice a second, all of it shipped to Loki:
+        # measured over the same 40s outage, 80 lines at the default and 21 at 10s. The backoff ramps
+        # up exponentially from 50ms, so a short outage spends much of itself in the ramp and the saving
+        # grows with the outage's length. The cost is up to ~10s before sends resume once the broker
+        # is back - turns sent in that gap are dropped and counted like any other outage. Measured
+        # after an outage, the first turn sent ~8s after the broker returned was published.
+        reconnect.backoff.max.ms: 10000
+        # Plain JSON, no __TypeId__ header naming this app's class: the consumer is a different
+        # application and deserializes into its own type.
+        spring.json.add.type.headers: false
+    template:
+      # Propagates the chat turn's trace into the record headers.
+      observation-enabled: true
+    admin:
+      # KafkaAdmin waits this long at startup to create the topic before giving up and carrying on.
+      # The default 30s would add half a minute to every start with the broker down.
+      operation-timeout: 5s
   datasource:
     url: jdbc:postgresql://localhost:5432/ragdatabase
     username: myuser
@@ -222,6 +254,15 @@ app:
                                  # ingested before it was turned on need re-uploading.
   ai: # New section for Spring AI properties
     max-chat-messages: 10
+
+  events:
+    chat-turns:
+      enabled: true
+      topic: rag.chat.turn.completed
+      # Evaluation normally keeps up within seconds; the rest of the window is for replaying past
+      # traffic through a new judge or metric. At a few KB per turn, three days of dev traffic is
+      # nothing on disk.
+      retention: 3d
 
   eval:
     enabled: true

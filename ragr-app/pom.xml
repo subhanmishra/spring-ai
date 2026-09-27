@@ -17,7 +17,12 @@
     <dependencies>
         <dependency>
             <groupId>com.example</groupId>
-            <artifactId>ragr-citations</artifactId>
+            <artifactId>ragr-shared</artifactId>
+        </dependency>
+        <!-- Publishes each completed chat turn for evaluation to consume off the chat path. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-kafka</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

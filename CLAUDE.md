@@ -18,6 +18,8 @@ measured continuously on live traffic and on demand against a curated dataset.
   OpenAI config is present but commented out.
 - **Vector store**: PostgreSQL + `pgvector`
 - **Chat memory**: Redis (`spring-ai-model-chat-memory-repository-redis`)
+- **Events**: Kafka (`spring-boot-starter-kafka`, broker `apache/kafka-native` in compose) — completed chat
+  turns are published for evaluation to consume off the chat path
 - **Migrations**: Flyway (`flyway-database-postgresql`)
 - **API docs**: springdoc-openapi 3.1.0 (`springdoc-openapi-starter-webmvc-ui`)
 - **Mapping**: modelmapper 3.2.4
@@ -47,16 +49,18 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 
 ```
 .
-├── ragr-citations   # plain library, no Spring Boot; shared by the chat path and evaluation
-│   └── src/main/java/.../subhanmishra/citation
-│                    # Citation, CitationParser, CitationResolver, AnswerCitations
+├── ragr-shared      # plain library, no Spring Boot; shared by the chat path and evaluation
+│   └── src/main/java/.../subhanmishra/
+│       ├── citation # Citation, CitationParser, CitationResolver, AnswerCitations
+│       └── event    # ChatTurnCompleted - the Kafka contract between chat and evaluation
 ├── ragr-app         # the Spring Boot application
 │   └── src
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
 │       │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
-│       │   │   │               # SpringAiProperties, EvalConfig, EvalProperties
+│       │   │   │               # SpringAiProperties, EvalConfig, EvalProperties,
+│       │   │   │               # KafkaConfig, EventsProperties
 │       │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │       │   │   ├── dto
 │       │   │   ├── entity
@@ -66,7 +70,7 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 │       │   │       │           # DocumentMetadataService, DocumentHistoryService,
 │       │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
 │       │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
-│       │   │       │           # GoldenEvalService
+│       │   │       │           # GoldenEvalService, ChatTurnPublisher
 │       │   │       ├── eval    # EvalScores, RetrievalScores, CitationScores, AnswerScores,
 │       │   │       │           # ExpectationScores, ContextPrecisionScores,
 │       │   │       │           # ContextPrecisionEvaluator, GoldenCase, GoldenDataset,
@@ -104,7 +108,8 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 
 **Chat**: `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor`
 retrieves from pgvector → Ollama generates → history to Redis → `OnlineEvalService` scores the turn
-after the response has already been returned.
+and `ChatTurnPublisher` sends it to Kafka (`rag.chat.turn.completed`); neither holds up the
+response. The two coexist until evaluation moves to its own application.
 
 Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake
 it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through

@@ -15,12 +15,13 @@
     <name>spring-ai-ragr</name>
     <description>Retrieval-augmented generation service and the modules it shares</description>
 
-    <!-- ragr-citations is shared because the chat path and evaluation must read citations with the
-         same code: ChatService resolves and strips them to build every answer, and the scorer counts
-         them afterwards. Scores computed by a copy of the parser that had drifted would describe
-         nothing. -->
+    <!-- ragr-shared holds what the chat path and evaluation must agree on exactly. The citation code,
+         because ChatService resolves and strips citations to build every answer and the scorer counts
+         them afterwards - scores computed by a copy of the parser that had drifted would describe
+         nothing. And the ChatTurnCompleted event, so the publisher and the consumer cannot disagree
+         about its shape. -->
     <modules>
-        <module>ragr-citations</module>
+        <module>ragr-shared</module>
         <module>ragr-app</module>
     </modules>
 
@@ -48,7 +49,7 @@
         <dependencies>
             <dependency>
                 <groupId>com.example</groupId>
-                <artifactId>ragr-citations</artifactId>
+                <artifactId>ragr-shared</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

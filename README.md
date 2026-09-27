@@ -236,6 +236,7 @@ Full OpenAPI docs are available via springdoc once the app is running (default: 
 * **pgvector** — PostgreSQL 16 + pgvector extension. Port `5432`, db `ragdatabase`, user `myuser` / `secret`.
 * **pgadmin** — Postgres admin UI. Port `5050`, `admin@localhost.com` / `admin`.
 * **redis** — Redis Stack, used as the chat memory store. Ports `6379` (Redis), `8001` (UI).
+* **kafka** — Apache Kafka 4.3.1 (the GraalVM native image), single-node KRaft. Port `9092`, no authentication. Carries each completed chat turn on the `rag.chat.turn.completed` topic (one partition, 3-day retention) for evaluation to consume off the chat path. Data persists under `docker-volume/kafka`.
 * **redis-exporter** — Exposes Redis metrics to Prometheus. Port `9121`.
 * **postgres-exporter** — Exposes server-side Postgres metrics to Prometheus. Port `9187`. Runs with the `stat_user_tables` and `statio_user_indexes` collectors enabled so `vector_store` index-vs-sequential scan counts are visible.
 * **otel-collector** — OpenTelemetry Collector. Ports `4317` (gRPC), `4318` (HTTP).

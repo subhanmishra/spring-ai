@@ -47,17 +47,20 @@ public class ChatService {
     private final ChatMemoryRepository chatMemoryRepository;
     private final SpringAiProperties springAiProperties;
     private final OnlineEvalService onlineEvalService;
+    private final ChatTurnPublisher chatTurnPublisher;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
                        ChatMemoryRepository chatMemoryRepository,
                        SpringAiProperties springAiProperties,
-                       OnlineEvalService onlineEvalService) {
+                       OnlineEvalService onlineEvalService,
+                       ChatTurnPublisher chatTurnPublisher) {
         this.chatClient = chatClient;
         this.chatMemoryRepository = chatMemoryRepository;
         this.chatMemory = chatMemory;
         this.springAiProperties = springAiProperties;
         this.onlineEvalService = onlineEvalService;
+        this.chatTurnPublisher = chatTurnPublisher;
     }
 
     /**
@@ -76,7 +79,10 @@ public class ChatService {
      * stripped of them by {@link AnswerCitations}.
      *
      * <p>The evaluation call returns immediately: deterministic scoring is a few regex passes, and any
-     * LLM judging is handed to a virtual thread. Nothing about it is on this method's critical path.
+     * LLM judging is handed to a virtual thread. Nothing about it is on this method's critical path. The
+     * turn is also published to Kafka by {@link ChatTurnPublisher}, which likewise sends on a virtual
+     * thread - the in-process evaluation and the published event coexist until evaluation moves to its
+     * own application.
      */
     public ChatAnswerDto generate(String prompt, String conversationId) {
         long started = System.nanoTime();
@@ -89,6 +95,7 @@ public class ChatService {
         List<Document> retrieved = retrievedDocuments(response);
         Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
         onlineEvalService.evaluate(prompt, resolution, retrieved);
+        chatTurnPublisher.publish(conversationId, prompt, resolution, retrieved, modelOf(response.chatResponse()));
 
         AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
         List<CitationDto> citations = citations(resolution, retrieved, context);
@@ -150,6 +157,7 @@ public class ChatService {
             List<Document> documents = retrieved.get();
             Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
             onlineEvalService.evaluate(prompt, resolution, documents);
+            chatTurnPublisher.publish(conversationId, prompt, resolution, documents, modelOf(last.get()));
 
             List<CitationDto> citations = citations(resolution, documents, context.get());
             return token(stripper.finish(context.get())).concatWith(Flux.just(
@@ -160,6 +168,10 @@ public class ChatService {
         });
 
         return tokens.concatWith(closing);
+    }
+
+    private static @Nullable String modelOf(@Nullable ChatResponse chatResponse) {
+        return chatResponse != null && chatResponse.getMetadata() != null ? chatResponse.getMetadata().getModel() : null;
     }
 
     private static Flux<ServerSentEvent<?>> token(String text) {
