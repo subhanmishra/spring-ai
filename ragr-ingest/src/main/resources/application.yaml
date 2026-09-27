@@ -1,0 +1,131 @@
+spring:
+  application:
+    name: ragr-ingest
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 50MB
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ragdatabase
+    username: myuser
+    password: secret
+    hikari:
+      pool-name: ragr-ingest-hikari-pool
+      maximum-pool-size: 20          # app.ingestion.concurrency must stay well below this
+      minimum-idle: 5                # must be < maximum-pool-size, otherwise idle-timeout never reaps
+      connection-timeout: 30000      # 30s - fail rather than queue forever on an exhausted pool
+      idle-timeout: 300000           # 5m
+      keepalive-time: 120000         # 2m - stops idle connections being silently dropped by NAT/firewalls
+      max-lifetime: 1800000          # 30m - must stay below any DB-side or proxy-side connection lifetime
+      validation-timeout: 5000
+      leak-detection-threshold: 60000
+      data-source-properties:
+        reWriteBatchedInserts: true  # collapse JDBC batches into one multi-row INSERT
+  ai:
+    # Nothing here generates; the chat model belongs to ragr-app.
+    model:
+      chat: none
+    retry:
+      backoff:
+        initial-interval: 2000
+        max-interval: 10000
+        multiplier: 2
+      max-attempts: 3
+    # The embedding model and dimensions MUST match ragr-app's, which embeds each query with the same
+    # model to search what this application wrote. A different dimension fails loudly at query time; a
+    # different model with the same dimension fails silently, returning poor matches with no error.
+    # Changing either means changing ragr-app too and re-ingesting every document.
+    vectorstore:
+      pgvector:
+        table-name: vector_store
+        schema-name: public
+        initialize-schema: false     # created by this application's Flyway V1
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 768              # nomic-embed-text
+    ollama:
+      base-url: http://localhost:11434
+      embedding:
+        model: nomic-embed-text
+        keep-alive: "-1"   # pin the embedding model in memory: avoids the ~28s cold start, and the
+                           # runner-startup race that concurrent batches would otherwise hit
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,metrics,prometheus"
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  server:
+    port: 9097
+  otlp:
+    tracing:
+      endpoint: "http://localhost:4318/v1/traces"
+  tracing:
+    sampling:
+      probability: 1.0
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+        step: 5s
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      env: local
+    distribution:
+      # Histograms only for the timers a dashboard runs histogram_quantile against; everything else
+      # still exports _count, _sum and _max. These keys are PREFIX matches, so each timer's separate
+      # `.active` LongTaskTimer has to be switched off explicitly - see ragr-app's application-dev.yaml
+      # for the measurement behind this.
+      percentiles-histogram:
+        "[http.server.requests]": true
+        "[gen_ai.client.operation]": true
+        "[db.vector.client.operation]": true
+        "[http.server.requests.active]": false
+        "[gen_ai.client.operation.active]": false
+        "[db.vector.client.operation.active]": false
+    enable:
+      all: true
+
+loki:
+  url: http://localhost:3100/loki/api/v1/push
+
+logging:
+  level:
+    org:
+      springframework:
+        ai:
+          vectorstore: DEBUG
+        jdbc:
+          core: DEBUG
+
+app:
+  ingestion:
+    # Changing any of the chunk-shaping settings below changes what is stored, and means re-ingesting
+    # the whole corpus. batch-size, concurrency and the retry settings only change how fast.
+    chunk-size: 400
+    min-chunk-size-chars: 150
+    min-chunk-length-to-embed: 100   # characters; a shorter chunk is MERGED into the one before it, never
+                                     # dropped - the splitter's own discard behaviour deleted real content
+    max-num-chunks: 10000
+    max-embed-tokens: 2048       # nomic-embed-text's context; a chunk above this is truncated by Ollama
+                                 # before embedding, so only an unsplittable table row may exceed it
+    table-detection: auto        # off | auto | lattice | stream. AUTO picks per page: ruled pages take
+                                 # columns from the rules, unruled ones from text alignment. This replaces
+                                 # the PDF reader entirely, so prose extraction changes too.
+    batch-size: 35               # chunks per batch; cost scales with TOKENS, not chunk count. At the
+                                 # current mean of 279 tokens/chunk this carries ~10k tokens per batch,
+                                 # the weight the Hikari pool was sized against. Re-check it whenever
+                                 # chunk sizing changes.
+    concurrency: 4
+    max-attempts: 3              # only for an unreachable Ollama model runner; other failures fail fast
+    retry-backoff: 2s            # doubled on each further attempt

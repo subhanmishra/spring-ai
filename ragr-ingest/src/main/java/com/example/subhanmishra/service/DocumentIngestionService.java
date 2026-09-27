@@ -1,7 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
-import com.example.subhanmishra.config.RagProperties;
+import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
 import com.example.subhanmishra.exception.DocumentProcessingException;
@@ -46,7 +46,7 @@ public class DocumentIngestionService {
     private final VectorStore vectorStore;
     private final DocumentHistoryService historyService;
     private final VectorStoreRepository vectorStoreRepository;
-    private final RagProperties ragProperties;
+    private final IngestionProperties ingestionProperties;
 
     /**
      * Each batch commits on its own connection, so batch writes cannot join the caller's transaction.
@@ -67,15 +67,15 @@ public class DocumentIngestionService {
     public DocumentIngestionService(VectorStore vectorStore,
                                     DocumentHistoryService historyService,
                                     VectorStoreRepository vectorStoreRepository,
-                                    RagProperties ragProperties,
+                                    IngestionProperties ingestionProperties,
                                     PlatformTransactionManager transactionManager) {
         this.vectorStore = vectorStore;
         this.historyService = historyService;
         this.vectorStoreRepository = vectorStoreRepository;
-        this.ragProperties = ragProperties;
+        this.ingestionProperties = ingestionProperties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.ingestionPermits = new Semaphore(Math.max(1, ragProperties.ingestionConcurrency()));
+        this.ingestionPermits = new Semaphore(Math.max(1, ingestionProperties.concurrency()));
     }
 
     /**
@@ -94,7 +94,7 @@ public class DocumentIngestionService {
         Stream<Document> enrichedStream = getEnrichedStream(metadata, (Stream<Document>) parseResult.get("documentStream"));
 
         // 2. Batch the stream, then write the batches concurrently to the vector store
-        List<List<Document>> batches = partition(enrichedStream, ragProperties.batchSize()).toList();
+        List<List<Document>> batches = partition(enrichedStream, ingestionProperties.batchSize()).toList();
         int totalChunks = writeBatches(metadata, batches);
 
         if (totalChunks == 0) {
@@ -166,18 +166,18 @@ public class DocumentIngestionService {
      * because the vector store upserts on chunk id, so a partially applied attempt is overwritten.
      */
     private int writeBatch(DocumentMetadata metadata, List<Document> batch, AtomicBoolean aborted) throws InterruptedException {
-        long backoffMillis = ragProperties.ingestionRetryBackoff().toMillis();
+        long backoffMillis = ingestionProperties.retryBackoff().toMillis();
 
         for (int attempt = 1; ; attempt++) {
             try {
                 return writeBatchOnce(metadata, batch, aborted);
             } catch (RuntimeException e) {
-                if (attempt >= ragProperties.ingestionMaxAttempts() || !isModelRunnerUnavailable(e)) {
+                if (attempt >= ingestionProperties.maxAttempts() || !isModelRunnerUnavailable(e)) {
                     aborted.set(true);
                     throw e;
                 }
                 log.warn("Embedding model runner was unreachable on attempt {}/{} for document: {}. Retrying in {}ms",
-                         attempt, ragProperties.ingestionMaxAttempts(), metadata.getFilename(), backoffMillis);
+                         attempt, ingestionProperties.maxAttempts(), metadata.getFilename(), backoffMillis);
                 Thread.sleep(backoffMillis);
                 backoffMillis *= 2;
             }

@@ -113,16 +113,16 @@ spring:
     password: secret
     hikari:
       pool-name: rag-hikari-pool
-      maximum-pool-size: 20          # app.rag.ingestion-concurrency must stay well below this
-      minimum-idle: 5                # must be < maximum-pool-size, otherwise idle-timeout never reaps
+      # Chat only reads: one similarity search per turn. Ingestion's writes, and the pool sized for
+      # them, are ragr-ingest's.
+      maximum-pool-size: 5
+      minimum-idle: 2                # must be < maximum-pool-size, otherwise idle-timeout never reaps
       connection-timeout: 30000      # 30s - fail rather than queue forever on an exhausted pool
       idle-timeout: 300000           # 5m
       keepalive-time: 120000         # 2m - stops idle connections being silently dropped by NAT/firewalls
       max-lifetime: 1800000          # 30m - must stay below any DB-side or proxy-side connection lifetime
       validation-timeout: 5000
       leak-detection-threshold: 60000
-      data-source-properties:
-        reWriteBatchedInserts: true  # collapse JDBC batches into one multi-row INSERT
   ai:
     retry:
       backoff:
@@ -130,11 +130,14 @@ spring:
         max-interval: 10000
         multiplier: 2
       max-attempts: 3
+    # The embedding model and dimensions MUST match ragr-ingest's: each query is embedded with the
+    # same model to search what ingestion wrote. A different dimension fails loudly at query time; a
+    # different model with the same dimension fails silently, returning poor matches with no error.
     vectorstore:
       pgvector:
         table-name: vector_store
         schema-name: public
-        initialize-schema: false
+        initialize-schema: false     # created by ragr-ingest's Flyway V1
         index-type: HNSW # Reverted to HNSW as it works with 768 dimensions
         distance-type: COSINE_DISTANCE
         dimensions: 768 # Set to 768 for nomic-embed-text
@@ -232,26 +235,9 @@ logging:
 #app configurations
 app:
   rag:
-    chunk-size: 400
-    min-chunk-size-chars: 150
-    min-chunk-length-to-embed: 100   # characters; a shorter chunk is MERGED into the one before it, never
-                                     # dropped - the splitter's own discard behaviour deleted real content
-    max-num-chunks: 10000
-    max-embed-tokens: 2048       # nomic-embed-text's context; a chunk above this is truncated by Ollama
-                                 # before embedding, so only an unsplittable table row may exceed it
+    # Retrieval only. What is chunked and stored is configured in ragr-ingest under app.ingestion.
     top-k: 5
     similarity-threshold: 0.6
-    batch-size: 35               # chunks per batch; cost scales with TOKENS, not chunk count. At the
-                                 # current mean of 279 tokens/chunk this carries ~10k tokens per batch,
-                                 # the weight the Hikari pool was sized against. Re-check it whenever
-                                 # chunk sizing changes.
-    ingestion-concurrency: 4
-    ingestion-max-attempts: 3      # only for an unreachable Ollama model runner; other failures fail fast
-    ingestion-retry-backoff: 2s    # doubled on each further attempt
-    table-detection: auto         # off | auto | lattice | stream. AUTO picks per page: ruled pages take
-                                 # columns from the rules, unruled ones from text alignment. This replaces
-                                 # the PDF reader entirely, so prose extraction changes too - documents
-                                 # ingested before it was turned on need re-uploading.
   ai: # New section for Spring AI properties
     max-chat-messages: 10
 

@@ -11,8 +11,8 @@ public class OpenApiConfig {
 
     @Bean
     public OpenAPI openAPI() {
-        return new OpenAPI().info(new Info().title("DocAI — chat")
-                            .description("Conversational Q&A with Gemma 4, grounded in the documents indexed in PostgreSQL pgvector, plus retrieval diagnostics. Documents are uploaded to the ingestion service on port 8081.")
+        return new OpenAPI().info(new Info().title("DocAI — document ingestion")
+                            .description("Upload, parse and index documents: multi-format parsing, chunking, and nomic-embed-text embeddings written to PostgreSQL pgvector. Questions are answered by the chat service on port 8080.")
                             .version("1.0.0")
                             .contact(new Contact().name("Subhankar Mishra")
                                                   .email("subhan.mishra@gmail.com")

@@ -63,8 +63,7 @@ class ChatTurnPublisherTest {
         EventsProperties properties = new EventsProperties(
                 new EventsProperties.ChatTurns(enabled, TOPIC, Duration.ofDays(3)));
         // Runs the send on the calling thread so the outcome can be asserted straight away.
-        RagProperties rag = new RagProperties(400, 150, 100, 10000, 2048, 5, 0.6, 35, 4, 3, Duration.ofSeconds(2),
-                                              RagProperties.TableDetection.AUTO);
+        RagProperties rag = new RagProperties(5, 0.6);
         return new ChatTurnPublisher(template, properties, rag, registry, Runnable::run);
     }
 

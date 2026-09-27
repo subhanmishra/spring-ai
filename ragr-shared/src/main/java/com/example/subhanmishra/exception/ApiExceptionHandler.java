@@ -5,59 +5,35 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.ErrorResponse;
 import org.springframework.validation.FieldError;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
-@RestControllerAdvice
-public class DocAiExceptionHandler {
+/**
+ * The error handling every HTTP-facing application here shares: each one extends this with its own
+ * {@code @RestControllerAdvice} and adds the handlers only it needs.
+ *
+ * <p>Deliberately not annotated itself. Every application component-scans
+ * {@code com.example.subhanmishra}, so an annotated advice in this library would register in all of
+ * them - including one that serves nothing but actuator endpoints - and a subclass would then run
+ * alongside it rather than instead of it. Spring resolves {@code @ExceptionHandler} methods on
+ * superclasses, so a subclass inherits all of these.
+ */
+public abstract class ApiExceptionHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(DocAiExceptionHandler.class);
-
+    protected final Logger logger = LoggerFactory.getLogger(getClass());
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
         logger.warn("Resource not found : {}", ex.getMessage());
         return problem(HttpStatus.NOT_FOUND, "Resource Not Found", ex.getMessage());
-    }
-
-
-    /**
-     * An upload whose type the parser does not handle.
-     *
-     * <p>Registered on the subclass while {@link DocumentProcessingException} keeps its 422: Spring
-     * resolves to the closest match in the hierarchy, so the two coexist without ambiguity. The
-     * distinction is worth keeping - 422 means the content could not be processed, whereas this means
-     * the type was never accepted, and nothing was written before saying so.
-     */
-    @ExceptionHandler(UnsupportedDocumentTypeException.class)
-    public ProblemDetail handleUnsupportedType(UnsupportedDocumentTypeException ex) {
-        logger.warn("Unsupported document type: {}", ex.getMessage());
-        return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported File Type", ex.getMessage());
-    }
-
-
-    @ExceptionHandler(DocumentProcessingException.class)
-    public ProblemDetail handleProcessingError(DocumentProcessingException ex) {
-        logger.error("Document processing error: {}", ex.getMessage(), ex);
-        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Document Processing Error", ex.getMessage());
-    }
-
-
-    @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ProblemDetail handleMaxSize(MaxUploadSizeExceededException ex) {
-        logger.warn("File size limit exceeded: {}", ex.getMessage());
-        return problem(HttpStatus.CONTENT_TOO_LARGE, "File Too Large",
-                "The uploaded file exceeds the maximum allowed size of 25MB.");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -169,7 +145,7 @@ public class DocAiExceptionHandler {
     }
 
 
-    private static ProblemDetail problem(HttpStatus status, String title, String detail) {
+    protected static ProblemDetail problem(HttpStatus status, String title, String detail) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(status, detail);
         problemDetail.setTitle(title);
         problemDetail.setProperty("Timestamp", LocalDateTime.now());

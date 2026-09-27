@@ -1,8 +1,8 @@
 package com.example.subhanmishra.service;
 
-import com.example.subhanmishra.config.RagProperties;
-import com.example.subhanmishra.config.SpringAiConfig;
 import com.example.subhanmishra.chunk.ChunkMetadata;
+import com.example.subhanmishra.config.ChunkingConfig;
+import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TokenCounter;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Covers the paragraph coalescing that makes app.rag.chunk-size meaningful - splitting by paragraph alone
+ * Covers the paragraph coalescing that makes app.ingestion.chunk-size meaningful - splitting by paragraph alone
  * left every short paragraph as its own chunk, so a 645-page manual produced 7289 chunks with a median of
  * 27 tokens against a configured budget of 400 - and the block boundaries that keep a table out of the
  * prose around it.
@@ -39,9 +39,9 @@ class DocumentParserServiceTest {
 
     @BeforeEach
     void setUp() {
-        RagProperties ragProperties = new RagProperties(CHUNK_SIZE_TOKENS, 150, 5, 10000, CEILING_TOKENS, 5, 0.6,
-                                                        200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
-        parserService = new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), ragProperties);
+        IngestionProperties ingestionProperties = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 5, 10000, CEILING_TOKENS,
+                                                        200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
+        parserService = new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), ingestionProperties);
     }
 
     @Test
@@ -135,10 +135,10 @@ class DocumentParserServiceTest {
     void noContentIsLostThroughTheWholePipeline() {
         // Built with the app's own splitter configuration, because the content loss came from the
         // interaction between the budget and the splitter's discard-below-floor behaviour.
-        RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
+        IngestionProperties appLike = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
+                                                  200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
         DocumentParserService service = new DocumentParserService(
-                new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
+                new ChunkingConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 
         List<String> paragraphs = java.util.stream.IntStream.rangeClosed(1, 40)
                                                             .mapToObj(i -> "Distinctive marker " + i + " appears exactly once here.")
@@ -159,10 +159,10 @@ class DocumentParserServiceTest {
     @Test
     @DisplayName("a short trailing piece is merged into the chunk before it, never dropped")
     void shortTailIsMergedNotDropped() {
-        RagProperties appLike = new RagProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  5, 0.6, 200, 4, 3, Duration.ofSeconds(2), RagProperties.TableDetection.OFF);
+        IngestionProperties appLike = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
+                                                  200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
         DocumentParserService service = new DocumentParserService(
-                new SpringAiConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
+                new ChunkingConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 
         // One paragraph well over the budget, so the splitter has to cut it and will leave a remainder.
         String oversized = "The quick brown fox jumps over the lazy dog. ".repeat(12) + "Tiny tail.";

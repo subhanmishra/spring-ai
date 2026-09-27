@@ -7,53 +7,20 @@
         <artifactId>spring-ai-ragr</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
-    <artifactId>ragr-app</artifactId>
-    <name>ragr-app</name>
-    <description>The chat service: grounded Q&amp;A over the indexed corpus, publishing each turn to Kafka</description>
+    <artifactId>ragr-ingest</artifactId>
+    <name>ragr-ingest</name>
+    <description>Document ingestion: upload, parse, chunk, embed and index into pgvector</description>
+
     <properties>
         <spring-boot.run.skip>false</spring-boot.run.skip>
     </properties>
+
+    <!-- Deliberately no Kafka, no Redis and no spring-boot-docker-compose: nothing here chats, and it
+         must never start or stop the stack that ragr-app owns. -->
     <dependencies>
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>ragr-shared</artifactId>
-        </dependency>
-        <!-- Publishes each completed chat turn for evaluation to consume off the chat path. -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-kafka</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-        <!-- 1. OpenTelemetry SDK autoconfiguration (provides the base OpenTelemetry/Tracer beans) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-opentelemetry</artifactId>
-        </dependency>
-        <!-- 2. Micrometer Tracing Bridge for OpenTelemetry -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-otel</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-exporter-otlp</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.loki4j</groupId>
-            <artifactId>loki-logback-appender</artifactId>
-            <version>2.0.3</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -63,14 +30,51 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-        <!--		<dependency>-->
-        <!--			<groupId>org.springframework.ai</groupId>-->
-        <!--			<artifactId>spring-ai-starter-model-openai</artifactId>-->
-        <!--		</dependency>-->
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-vector-store-advisor</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.loki4j</groupId>
+            <artifactId>loki-logback-appender</artifactId>
+            <version>2.0.3</version>
+        </dependency>
+        <!-- The public schema: document metadata, its history, and vector_store, which this application
+             writes and ragr-app reads. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Embedding only. Chat is switched off in configuration: nothing here generates. -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-ollama</artifactId>
@@ -79,25 +83,30 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
         </dependency>
-
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-pdf-document-reader</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-tika-document-reader</artifactId>
+        </dependency>
+        <!-- Declared rather than used transitively: DocumentParserService parses the XHTML Tika emits
+             with it, to recover tables the default flat-text handler would discard. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
         </dependency>
-
-
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-docker-compose</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-spring-boot-docker-compose</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
+            <groupId>org.modelmapper</groupId>
+            <artifactId>modelmapper</artifactId>
+            <version>${modelmapper.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -105,8 +114,9 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-model-chat-memory-repository-redis</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jdbc-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -116,16 +126,13 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- Run from the repository root, as IntelliJ does by default, so Docker Compose
-                         finds the root compose.yaml. See spring.docker.compose in
-                         application-dev.yaml. -->
-                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
-                    <!-- Measured over a grounded chat turn: heap peaked at 242 MB uncapped (with a 4 GB
-                         default max, so largely uncollected garbage) and 150 MB under this cap, 471 MB
-                         private against 726 MB uncapped. The host has a few hundred MB to spare once
-                         both Ollama models are loaded. The IntelliJ run configuration needs the same
-                         VM option. -->
-                    <jvmArguments>-Xmx384m</jvmArguments>
+                    <!-- Measured uploading the 645-page reference manual (946 chunks): heap peaked at
+                         384 MB uncapped and 354 MB under this cap, 651 MB private, with 0.24s of GC in
+                         total and the upload 245s against 231s uncapped. Uncapped, the JVM sized its
+                         heap to 4 GB on a host with a few hundred MB to spare once both Ollama models
+                         are loaded, and available RAM fell to 144 MB mid-upload. The IntelliJ run
+                         configuration needs the same VM option. -->
+                    <jvmArguments>-Xmx512m</jvmArguments>
                 </configuration>
             </plugin>
             <plugin>
@@ -134,7 +141,7 @@
                 <configuration>
                     <!-- The same cap for the test JVM, which loads the full context beside the running
                          applications. Merged with the parent's surefire configuration. -->
-                    <argLine>-Xmx384m</argLine>
+                    <argLine>-Xmx512m</argLine>
                 </configuration>
             </plugin>
         </plugins>

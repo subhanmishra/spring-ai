@@ -45,9 +45,9 @@ public final class TableChunker {
      * Splits a table into chunks that each stay within {@code budgetTokens} where possible.
      *
      * @param table         the table to render
-     * @param budgetTokens  the per-chunk token budget, i.e. {@code app.rag.chunk-size}
+     * @param budgetTokens  the per-chunk token budget, i.e. {@code app.ingestion.chunk-size}
      * @param ceilingTokens the hard limit above which the embedding model would silently truncate the
-     *                      text, i.e. {@code app.rag.max-embed-tokens}
+     *                      text, i.e. {@code app.ingestion.max-embed-tokens}
      * @return at least one chunk; never empty for a table that has any content
      */
     public static List<TableChunk> chunk(ContentBlock.Table table, int budgetTokens, int ceilingTokens) {

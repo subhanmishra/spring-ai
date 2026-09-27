@@ -1,7 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
-import com.example.subhanmishra.config.RagProperties;
+import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.exception.DocumentProcessingException;
 import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TableChunker;
@@ -54,12 +54,12 @@ public class DocumentParserService {
 
     private final TextSplitter textSplitter;
     private final ForkJoinPool documentProcessingPool;
-    private final RagProperties ragProperties;
+    private final IngestionProperties ingestionProperties;
 
-    public DocumentParserService(TextSplitter textSplitter, ForkJoinPool documentProcessingPool, RagProperties ragProperties) {
+    public DocumentParserService(TextSplitter textSplitter, ForkJoinPool documentProcessingPool, IngestionProperties ingestionProperties) {
         this.textSplitter = textSplitter;
         this.documentProcessingPool = documentProcessingPool;
-        this.ragProperties = ragProperties;
+        this.ingestionProperties = ingestionProperties;
     }
 
     /**
@@ -106,13 +106,13 @@ public class DocumentParserService {
     }
 
     /**
-     * With {@code app.rag.table-detection} off, PDFs go through {@code PagePdfDocumentReader}, which yields
+     * With {@code app.ingestion.table-detection} off, PDFs go through {@code PagePdfDocumentReader}, which yields
      * flat page text with no structure, so every page becomes a single prose block. Routing them through
      * Tika instead would not help: Tika's default PDF handler has no table support either, and its
      * marked-content handler works only on tagged PDFs, which neither sample document is.
      */
     private Map<String, Object> parsePdf(Resource resource) throws IOException {
-        if (ragProperties.tableDetection() != RagProperties.TableDetection.OFF) {
+        if (ingestionProperties.tableDetection() != IngestionProperties.TableDetection.OFF) {
             return parsePdfWithTableDetection(resource);
         }
 
@@ -185,7 +185,7 @@ public class DocumentParserService {
      * which point the columns cannot be recovered.
      */
     private Map<String, Object> parsePdfWithTableDetection(Resource resource) throws IOException {
-        PdfTableDetector.Mode forced = switch (ragProperties.tableDetection()) {
+        PdfTableDetector.Mode forced = switch (ingestionProperties.tableDetection()) {
             case LATTICE -> PdfTableDetector.Mode.LATTICE;
             case STREAM -> PdfTableDetector.Mode.STREAM;
             default -> null;
@@ -207,7 +207,7 @@ public class DocumentParserService {
                            .filter(ContentBlock.Table.class::isInstance)
                            .count();
         log.info("Read {} of {} page(s) of {} with table detection {}, recovering {} table(s)",
-                 pages.size(), pdf.pageCount(), resource.getFilename(), ragProperties.tableDetection(), tables);
+                 pages.size(), pdf.pageCount(), resource.getFilename(), ingestionProperties.tableDetection(), tables);
 
         return Map.of("documentStream", chunk(units), "totalPages", pdf.pageCount());
     }
@@ -277,7 +277,7 @@ public class DocumentParserService {
     }
 
     /**
-     * Applies {@code app.rag.min-chunk-length-to-embed} by <em>merging</em> a short piece into the one
+     * Applies {@code app.ingestion.min-chunk-length-to-embed} by <em>merging</em> a short piece into the one
      * before it, rather than deleting it.
      * <p>
      * {@code TokenTextSplitter} enforces that floor by discarding, and the pieces it discards are ones it
@@ -294,7 +294,7 @@ public class DocumentParserService {
         List<Document> kept = new ArrayList<>(pieces.size());
 
         for (Document piece : pieces) {
-            if (kept.isEmpty() || piece.getText().length() >= ragProperties.minChunkLengthToEmbed()) {
+            if (kept.isEmpty() || piece.getText().length() >= ingestionProperties.minChunkLengthToEmbed()) {
                 kept.add(piece);
                 continue;
             }
@@ -306,7 +306,7 @@ public class DocumentParserService {
     }
 
     /**
-     * Groups one source unit's blocks into chunks that fill {@code app.rag.chunk-size} tokens.
+     * Groups one source unit's blocks into chunks that fill {@code app.ingestion.chunk-size} tokens.
      * <p>
      * Prose is coalesced paragraph by paragraph until the next paragraph would overflow the budget -
      * without this, every short paragraph became its own chunk and the configured chunk size was never
@@ -320,7 +320,7 @@ public class DocumentParserService {
      */
     List<Document> coalesceBlocks(List<ContentBlock> blocks, Map<String, Object> sourceMetadata) {
         List<Document> chunks = new ArrayList<>();
-        ProseGroups prose = new ProseGroups(chunks, sourceMetadata, ragProperties.chunkSize());
+        ProseGroups prose = new ProseGroups(chunks, sourceMetadata, ingestionProperties.chunkSize());
         int tableIndex = 0;
 
         for (ContentBlock block : blocks) {
@@ -350,7 +350,7 @@ public class DocumentParserService {
 
     private List<Document> renderTable(ContentBlock.Table table, int tableIndex, Map<String, Object> sourceMetadata) {
         List<TableChunker.TableChunk> pieces =
-                TableChunker.chunk(table, ragProperties.chunkSize(), ragProperties.maxEmbedTokens());
+                TableChunker.chunk(table, ingestionProperties.chunkSize(), ingestionProperties.maxEmbedTokens());
 
         List<Document> documents = new ArrayList<>(pieces.size());
         for (TableChunker.TableChunk piece : pieces) {

@@ -142,7 +142,7 @@ public class DocumentMetadataService {
      *
      * <p>The loop is deliberately serial. Ollama pins embedding runners to a single slot regardless of
      * concurrency, so uploading in parallel would not embed any faster; it would only contend for the
-     * Hikari pool that {@code app.rag.ingestion-concurrency} already sizes against that single slot.
+     * Hikari pool that {@code app.ingestion.concurrency} already sizes against that single slot.
      */
     public List<DocumentResponseDto> uploadMultipleDocuments(List<MultipartFile> files) {
         List<DocumentResponseDto> responseDtos = new ArrayList<>();

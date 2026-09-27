@@ -11,7 +11,7 @@ import java.util.Set;
  * read their {@code <table>} markup - even though the endpoint's documentation long claimed a
  * narrower set.
  *
- * <p>It is a constant rather than an {@code app.rag.*} property on purpose. The set is determined by
+ * <p>It is a constant rather than an {@code app.ingestion.*} property on purpose. The set is determined by
  * what the parser has been verified to carry through chunking and the table paths, not by deployment
  * preference; adding a format should require someone to check that it works, which a configuration
  * knob would let them skip.

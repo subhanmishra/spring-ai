@@ -23,6 +23,7 @@
     <modules>
         <module>ragr-shared</module>
         <module>ragr-app</module>
+        <module>ragr-ingest</module>
         <module>ragr-eval</module>
     </modules>
 

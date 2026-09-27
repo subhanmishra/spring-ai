@@ -8,7 +8,6 @@ import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.redis.RedisChatMemoryRepository;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.context.annotation.Bean;
@@ -98,20 +97,5 @@ public class SpringAiConfig {
                                       .chatMemoryRepository(chatMemoryRepository)
                                       .maxMessages(springAiProperties.maxChatMessages())
                                       .build();
-    }
-
-    @Bean
-    public TokenTextSplitter tokenTextSplitter(RagProperties ragProperties) {
-        return TokenTextSplitter.builder()
-                .withChunkSize(ragProperties.chunkSize())
-                .withMinChunkSizeChars(ragProperties.minChunkSizeChars())
-                // Deliberately 1, not app.rag.min-chunk-length-to-embed. TokenTextSplitter enforces that
-                // floor by DISCARDING a short piece, and the short pieces are ones it manufactures by
-                // cutting an over-budget chunk - which silently deleted real content. The floor is applied
-                // in DocumentParserService instead, by merging a short piece into the one before it.
-                .withMinChunkLengthToEmbed(1)
-                .withMaxNumChunks(ragProperties.maxNumChunks())
-                .withKeepSeparator(true)
-                .build();
     }
 }
