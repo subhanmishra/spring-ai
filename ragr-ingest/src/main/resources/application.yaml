@@ -131,9 +131,10 @@ app:
                                  # columns from the rules, unruled ones from text alignment. This replaces
                                  # the PDF reader entirely, so prose extraction changes too.
     batch-size: 35               # chunks per batch; cost scales with TOKENS, not chunk count. At the
-                                 # current mean of 279 tokens/chunk this carries ~10k tokens per batch,
-                                 # the weight the Hikari pool was sized against. Re-check it whenever
-                                 # chunk sizing changes.
+                                 # mean of 261 tokens per chunk as embedded (header included, measured
+                                 # 2026-09-27) this carries ~9.1k tokens per batch, just under the ~10k
+                                 # the Hikari pool was sized against. Re-check it whenever chunk sizing
+                                 # changes.
     concurrency: 4
     max-attempts: 3              # only for an unreachable Ollama model runner; other failures fail fast
     retry-backoff: 2s            # doubled on each further attempt

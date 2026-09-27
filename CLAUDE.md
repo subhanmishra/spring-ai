@@ -44,6 +44,9 @@ vector store and a Kafka topic, never by calling each other, except the golden s
 ./mvnw clean package
 ```
 
+Those `spring-boot:run` lines are for people. A Claude session launches all three applications through
+IntelliJ's run configurations instead, killing any running instance first - the `restart-app` skill.
+
 ```bash
 ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
@@ -94,11 +97,8 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │   │   ├── repository
 │       │   │   └── service     # DocumentParserService, DocumentIngestionService,
 │       │   │       │           # DocumentMetadataService, DocumentHistoryService
-│       │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
-│       │   │           │       # TableChunker, TokenCounter, SupportedDocumentTypes
-│       │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
-│       │   │                   # PdfTextRunExtractor, TextRun, LineSegment,
-│       │   │                   # PageFooterStripper, TocEntryStripper
+│       │   │       └── parse   # ContentBlock (sealed: Prose | Table) and the Tika/XHTML path
+│       │   │           └── pdf # PdfBlockReader: positioned text, table geometry, the two strippers
 │       │   └── resources
 │       │       ├── application.yaml          # all of it; no profiles; multipart limits
 │       │       ├── logback-spring.xml
@@ -113,17 +113,14 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │   │   ├── repository
 │       │   │   └── service     # OnlineEvalService (the Kafka listener), EvalScoringService,
 │       │   │       │           # EvalMetricsService, GoldenEvalService
-│       │   │       └── eval    # EvalScores, RetrievalScores, CitationScores, AnswerScores,
-│       │   │                   # ExpectationScores, ContextPrecisionScores,
-│       │   │                   # ContextPrecisionEvaluator, GoldenCase, GoldenDataset,
-│       │   │                   # GoldenDatasetLoader
+│       │   │       └── eval    # the score records, ContextPrecisionEvaluator, the golden dataset model
 │       │   └── resources
 │       │       ├── application.yaml          # all of it; no profiles. Port 9096, actuator only
 │       │       ├── eval/golden-dataset.yaml  # curated regression cases
 │       │       └── db/migration/             # Flyway V1, eval schema, own history table
 │       └── test                              # EvalApplicationTests, scoring tests,
 │                                             # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
-├── docker/          # observability stack config (grafana, loki, otel, pgadmin, prometheus, tempo)
+├── docker/          # compose service config (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime volume data, not source
 ├── .claude/         # gitignored; context documents + hooks (see below)
 ├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
