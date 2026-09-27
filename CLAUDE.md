@@ -47,46 +47,50 @@ The eval command is not the obvious one and `-Dgroups=eval` alone does not work 
 
 ```
 .
-├── src
-│   ├── main
-│   │   ├── java/.../subhanmishra/
-│   │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
-│   │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
-│   │   │   │               # SpringAiProperties, EvalConfig, EvalProperties
-│   │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
-│   │   │   ├── dto
-│   │   │   ├── entity
-│   │   │   ├── exception
-│   │   │   ├── repository
-│   │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
-│   │   │       │           # DocumentMetadataService, DocumentHistoryService,
-│   │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
-│   │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
-│   │   │       │           # GoldenEvalService
-│   │   │       ├── eval    # CitationParser, CitationResolver, Citation, EvalScores,
-│   │   │       │           # RetrievalScores, CitationScores, AnswerScores,
-│   │   │       │           # ExpectationScores, GoldenCase, GoldenDataset,
-│   │   │       │           # GoldenDatasetLoader
-│   │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
-│   │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
-│   │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
-│   │   │           │       # SupportedDocumentTypes
-│   │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
-│   │   │                   # PdfTextRunExtractor, TextRun, LineSegment,
-│   │   │                   # PageFooterStripper, TocEntryStripper
-│   │   └── resources
-│   │       ├── application.yaml          # active profile = dev, multipart limits
-│   │       ├── application-dev.yaml      # everything else
-│   │       ├── logback-spring.xml        # console + Loki appenders
-│   │       ├── eval/golden-dataset.yaml  # curated regression cases
-│   │       └── db/migration/             # Flyway V1..V5
-│   └── test                              # SpringAiApplicationTests, parser tests, eval tests,
-│                                         # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
+├── ragr-citations   # plain library, no Spring Boot; shared by the chat path and evaluation
+│   └── src/main/java/.../subhanmishra/citation
+│                    # Citation, CitationParser, CitationResolver, AnswerCitations
+├── ragr-app         # the Spring Boot application
+│   └── src
+│       ├── main
+│       │   ├── java/.../subhanmishra/
+│       │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
+│       │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
+│       │   │   │               # SpringAiProperties, EvalConfig, EvalProperties
+│       │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
+│       │   │   ├── dto
+│       │   │   ├── entity
+│       │   │   ├── exception
+│       │   │   ├── repository
+│       │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
+│       │   │       │           # DocumentMetadataService, DocumentHistoryService,
+│       │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
+│       │   │       │           # EvalScoringService, EvalMetricsService, OnlineEvalService,
+│       │   │       │           # GoldenEvalService
+│       │   │       ├── eval    # EvalScores, RetrievalScores, CitationScores, AnswerScores,
+│       │   │       │           # ExpectationScores, ContextPrecisionScores,
+│       │   │       │           # ContextPrecisionEvaluator, GoldenCase, GoldenDataset,
+│       │   │       │           # GoldenDatasetLoader
+│       │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
+│       │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
+│       │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
+│       │   │           │       # SupportedDocumentTypes
+│       │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
+│       │   │                   # PdfTextRunExtractor, TextRun, LineSegment,
+│       │   │                   # PageFooterStripper, TocEntryStripper
+│       │   └── resources
+│       │       ├── application.yaml          # active profile = dev, multipart limits
+│       │       ├── application-dev.yaml      # everything else
+│       │       ├── logback-spring.xml        # console + Loki appenders
+│       │       ├── eval/golden-dataset.yaml  # curated regression cases
+│       │       └── db/migration/             # Flyway V1..V5
+│       └── test                              # SpringAiApplicationTests, parser tests, eval tests,
+│                                             # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
 ├── docker/          # observability stack config (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime volume data, not source
 ├── .claude/         # gitignored; context documents + hooks (see below)
-├── pom.xml
-├── compose.yaml
+├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
+├── compose.yaml     # stays at the root; the app runs from the root to find it
 ├── CLAUDE.md        # this file
 └── README.md        # user-facing quick-start; canonical for endpoint tables + infra ports/creds
 ```

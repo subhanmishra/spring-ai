@@ -20,7 +20,7 @@ ollama pull gemma4:e2b
 
 ## Configuration
 
-No API key is needed — Ollama is called locally. The default connection is `http://localhost:11434` (`src/main/resources/application-dev.yaml`, `spring.ai.ollama.base-url`); override it there if Ollama runs elsewhere.
+No API key is needed — Ollama is called locally. The default connection is `http://localhost:11434` (`ragr-app/src/main/resources/application-dev.yaml`, `spring.ai.ollama.base-url`); override it there if Ollama runs elsewhere.
 
 ### Ollama: enable the integrated GPU
 

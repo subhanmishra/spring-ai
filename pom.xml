@@ -9,162 +9,48 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.example</groupId>
-    <artifactId>spring-ai</artifactId>
+    <artifactId>spring-ai-ragr</artifactId>
     <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
     <name>spring-ai-ragr</name>
-    <description>Demo project for Spring Boot</description>
-    <url/>
-    <licenses>
-        <license/>
-    </licenses>
-    <developers>
-        <developer/>
-    </developers>
-    <scm>
-        <connection/>
-        <developerConnection/>
-        <tag/>
-        <url/>
-    </scm>
+    <description>Retrieval-augmented generation service and the modules it shares</description>
+
+    <!-- ragr-citations is shared because the chat path and evaluation must read citations with the
+         same code: ChatService resolves and strips them to build every answer, and the scorer counts
+         them afterwards. Scores computed by a copy of the parser that had drifted would describe
+         nothing. -->
+    <modules>
+        <module>ragr-citations</module>
+        <module>ragr-app</module>
+    </modules>
+
     <properties>
         <java.version>26</java.version>
         <spring-ai.version>2.0.1</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
         <modelmapper.version>3.2.4</modelmapper.version>
         <!-- Matches the version spring-ai-tika-document-reader already pulls in, so the explicit
-             declaration below does not introduce a second copy on the classpath. -->
+             declaration in ragr-app does not introduce a second copy on the classpath. -->
         <jsoup.version>1.22.2</jsoup.version>
         <!-- Test tags excluded from the ordinary build. Cleared on the command line to run the
              evaluation suite: ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT -->
         <surefire.excludedGroups>eval</surefire.excludedGroups>
+        <!-- So that the command above still works from the root. -Dtest is applied to every module in
+             the reactor, and without this each module that has no EvalSuiteIT fails the build for
+             matching nothing. The cost is that a mistyped -Dtest now runs nothing and passes. -->
+        <surefire.failIfNoSpecifiedTests>false</surefire.failIfNoSpecifiedTests>
+        <!-- Only ragr-app has a main class. Skipped everywhere else so ./mvnw spring-boot:run works
+             from the root; ragr-app sets it back to false. -->
+        <spring-boot.run.skip>true</spring-boot.run.skip>
     </properties>
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-        <!-- 1. OpenTelemetry SDK autoconfiguration (provides the base OpenTelemetry/Tracer beans) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-opentelemetry</artifactId>
-        </dependency>
-        <!-- 2. Micrometer Tracing Bridge for OpenTelemetry -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-otel</artifactId>
-        </dependency>
 
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-exporter-otlp</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.loki4j</groupId>
-            <artifactId>loki-logback-appender</artifactId>
-            <version>2.0.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-database-postgresql</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-flyway</artifactId>
-        </dependency>
-        <!--		<dependency>-->
-        <!--			<groupId>org.springframework.ai</groupId>-->
-        <!--			<artifactId>spring-ai-starter-model-openai</artifactId>-->
-        <!--		</dependency>-->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-vector-store-advisor</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-ollama</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-pdf-document-reader</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-tika-document-reader</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>${springdoc.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.modelmapper</groupId>
-            <artifactId>modelmapper</artifactId>
-            <version>${modelmapper.version}</version>
-        </dependency>
-
-        <!-- Declared rather than used transitively: DocumentParserService parses the XHTML Tika emits
-             with it, to recover tables the default flat-text handler would discard. -->
-        <dependency>
-            <groupId>org.jsoup</groupId>
-            <artifactId>jsoup</artifactId>
-            <version>${jsoup.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-docker-compose</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-spring-boot-docker-compose</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jdbc-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-model-chat-memory-repository-redis</artifactId>
-        </dependency>
-    </dependencies>
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>ragr-citations</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
@@ -177,10 +63,6 @@
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

@@ -38,4 +38,4 @@ build/
 
 ### Sample documents ###
 # Test corpus for the ingestion pipeline; large binaries, kept out of the repo.
-src/main/resources/docs/
+ragr-app/src/main/resources/docs/
