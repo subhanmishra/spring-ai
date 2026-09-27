@@ -84,7 +84,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\", outcome=\"fabricated\"}) / sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_citations_total{application=\"ragr-eval\", outcome=\"fabricated\"}) / sum(rag_eval_online_citations_total{application=\"ragr-eval\"})",
           "legendFormat": "fabricated",
           "refId": "A"
         }
@@ -146,7 +146,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\", outcome=\"valid\"}) / sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_citations_total{application=\"ragr-eval\", outcome=\"valid\"}) / sum(rag_eval_online_citations_total{application=\"ragr-eval\"})",
           "legendFormat": "valid",
           "refId": "A"
         }
@@ -208,7 +208,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_uncited_answers_total{application=\"spring-ai-ragr\"}) / sum(rag_eval_online_turns_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_uncited_answers_total{application=\"ragr-eval\"}) / sum(rag_eval_online_turns_total{application=\"ragr-eval\"})",
           "legendFormat": "uncited",
           "refId": "A"
         }
@@ -270,7 +270,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_zero_hit_total{application=\"spring-ai-ragr\"}) / sum(rag_eval_online_turns_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_zero_hit_total{application=\"ragr-eval\"}) / sum(rag_eval_online_turns_total{application=\"ragr-eval\"})",
           "legendFormat": "zero-hit",
           "refId": "A"
         }
@@ -340,7 +340,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_citations_total{application=\"spring-ai-ragr\"}) by (outcome)",
+          "expr": "sum(rag_eval_online_citations_total{application=\"ragr-eval\"}) by (outcome)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -374,7 +374,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(rag_eval_online_top_score_sum{application=\"spring-ai-ragr\"}[1h]) / clamp_min(rate(rag_eval_online_top_score_count{application=\"spring-ai-ragr\"}[1h]), 0.0000001)",
+          "expr": "rate(rag_eval_online_top_score_sum{application=\"ragr-eval\"}[1h]) / clamp_min(rate(rag_eval_online_top_score_count{application=\"ragr-eval\"}[1h]), 0.0000001)",
           "legendFormat": "mean top score",
           "refId": "A"
         },
@@ -383,7 +383,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(rag_eval_online_score_spread_sum{application=\"spring-ai-ragr\"}[1h]) / clamp_min(rate(rag_eval_online_score_spread_count{application=\"spring-ai-ragr\"}[1h]), 0.0000001)",
+          "expr": "rate(rag_eval_online_score_spread_sum{application=\"ragr-eval\"}[1h]) / clamp_min(rate(rag_eval_online_score_spread_count{application=\"ragr-eval\"}[1h]), 0.0000001)",
           "legendFormat": "mean spread",
           "refId": "B"
         }
@@ -421,7 +421,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (metric) (rag_eval_online_judgements_total{application=\"spring-ai-ragr\", outcome=\"pass\"}) / sum by (metric) (rag_eval_online_judgements_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum by (metric) (rag_eval_online_judgements_total{application=\"ragr-eval\", outcome=\"pass\"}) / sum by (metric) (rag_eval_online_judgements_total{application=\"ragr-eval\"})",
           "legendFormat": "{{metric}} pass rate",
           "refId": "A"
         }
@@ -476,7 +476,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_judgements_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_judgements_total{application=\"ragr-eval\"})",
           "legendFormat": "completed",
           "refId": "A"
         },
@@ -485,7 +485,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_judgements_dropped_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_judgements_dropped_total{application=\"ragr-eval\"})",
           "legendFormat": "dropped (over concurrency bound)",
           "refId": "B"
         },
@@ -494,7 +494,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_judgements_errors_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_judgements_errors_total{application=\"ragr-eval\"})",
           "legendFormat": "errors",
           "refId": "C"
         }
@@ -549,7 +549,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_refusals_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_refusals_total{application=\"ragr-eval\"})",
           "legendFormat": "refusals",
           "refId": "A"
         },
@@ -558,7 +558,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_instruction_echoes_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_instruction_echoes_total{application=\"ragr-eval\"})",
           "legendFormat": "instruction echoes",
           "refId": "B"
         },
@@ -567,7 +567,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"spring-ai-ragr\"})",
+          "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"ragr-eval\"})",
           "legendFormat": "retrieved chunks without citation header",
           "refId": "C"
         }
@@ -637,7 +637,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "time() - max(rag_eval_golden_last_run_timestamp_seconds{application=\"spring-ai-ragr\"})",
+          "expr": "time() - max(rag_eval_golden_last_run_timestamp_seconds{application=\"ragr-eval\"})",
           "legendFormat": "age",
           "refId": "A"
         }
@@ -698,7 +698,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_hit_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_hit_rate{application=\"ragr-eval\"})",
           "legendFormat": "hit rate",
           "refId": "A"
         }
@@ -759,7 +759,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_mrr{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_mrr{application=\"ragr-eval\"})",
           "legendFormat": "MRR",
           "refId": "A"
         }
@@ -820,7 +820,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_pass_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_pass_rate{application=\"ragr-eval\"})",
           "legendFormat": "pass rate",
           "refId": "A"
         }
@@ -873,7 +873,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_context_precision{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_context_precision{application=\"ragr-eval\"})",
           "legendFormat": "expected pages",
           "refId": "A"
         },
@@ -882,7 +882,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_judged_context_precision{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_judged_context_precision{application=\"ragr-eval\"})",
           "legendFormat": "LLM judged",
           "refId": "B"
         }
@@ -935,7 +935,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_precision_at_k{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_precision_at_k{application=\"ragr-eval\"})",
           "legendFormat": "expected pages",
           "refId": "A"
         },
@@ -944,7 +944,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_judged_precision_at_k{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_judged_precision_at_k{application=\"ragr-eval\"})",
           "legendFormat": "LLM judged",
           "refId": "B"
         }
@@ -999,7 +999,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_hit_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_hit_rate{application=\"ragr-eval\"})",
           "legendFormat": "hit rate",
           "refId": "A"
         },
@@ -1008,7 +1008,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_mrr{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_mrr{application=\"ragr-eval\"})",
           "legendFormat": "MRR",
           "refId": "B"
         },
@@ -1017,7 +1017,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_citation_validity_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_citation_validity_rate{application=\"ragr-eval\"})",
           "legendFormat": "citation validity",
           "refId": "C"
         },
@@ -1026,7 +1026,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_citation_fabrication_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_citation_fabrication_rate{application=\"ragr-eval\"})",
           "legendFormat": "citation fabrication",
           "refId": "D"
         },
@@ -1035,7 +1035,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_pass_rate{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_pass_rate{application=\"ragr-eval\"})",
           "legendFormat": "pass rate",
           "refId": "E"
         },
@@ -1044,7 +1044,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_context_precision{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_context_precision{application=\"ragr-eval\"})",
           "legendFormat": "context precision",
           "refId": "F"
         },
@@ -1053,7 +1053,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(rag_eval_golden_precision_at_k{application=\"spring-ai-ragr\"})",
+          "expr": "max(rag_eval_golden_precision_at_k{application=\"ragr-eval\"})",
           "legendFormat": "precision @ k",
           "refId": "G"
         }
