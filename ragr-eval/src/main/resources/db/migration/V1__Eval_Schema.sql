@@ -1,25 +1,9 @@
--- V1__Move_Eval_Results_Into_Eval_Schema.sql
+-- V1__Eval_Schema.sql
 --
 -- Runs under ragr-eval's Flyway, with the eval schema as its default, so every unqualified name below
--- resolves to eval.
+-- resolves to eval. Evaluation keeps its results in their own schema, apart from ragr-app's tables in
+-- public.
 --
--- These tables used to live in public, created by ragr-app's V5, until evaluation moved into its own
--- application. A database that already has them keeps every recorded run: the DO block moves them,
--- data, indexes and foreign key intact, and the CREATE ... IF NOT EXISTS statements after it are then
--- no-ops. A fresh database has nothing to move and gets the tables created here.
-
-DO
-$$
-BEGIN
-    IF to_regclass('public.eval_run') IS NOT NULL THEN
-        ALTER TABLE public.eval_run SET SCHEMA eval;
-    END IF;
-    IF to_regclass('public.eval_case_result') IS NOT NULL THEN
-        ALTER TABLE public.eval_case_result SET SCHEMA eval;
-    END IF;
-END
-$$;
-
 -- Store the results of curated ("golden") evaluation runs, so pipeline quality can be compared over
 -- time rather than only observed in the moment.
 --
@@ -45,15 +29,12 @@ CREATE TABLE IF NOT EXISTS eval_run
 
     -- Everything below describes the configuration under test. A score is not comparable to an earlier
     -- score unless these match, and recording them is what turns a list of runs into a regression
-    -- history. pipeline_version in particular ties a score to the ingestion generation that produced
-    -- the chunks being retrieved: a corpus re-ingested under a new PipelineProvenance.CURRENT_VERSION
-    -- is a different corpus, and comparing across that boundary silently compares two different things.
-    chat_model           VARCHAR(100),
+    -- history.
+    chat_model          VARCHAR(100),
     judge_model          VARCHAR(100),
     judged               BOOLEAN                          NOT NULL DEFAULT FALSE,
     top_k                INT,
     similarity_threshold DOUBLE PRECISION,
-    pipeline_version     INT,
 
     -- Aggregates, denormalised from eval_case_result so a trend query does not have to re-aggregate
     -- every case on every dashboard refresh.

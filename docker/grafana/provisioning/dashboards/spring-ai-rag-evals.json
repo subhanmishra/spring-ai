@@ -1174,7 +1174,7 @@
     {
       "id": 17,
       "title": "Run history",
-      "description": "Every suite run with the configuration that produced it. A score is only comparable to another score when the chat model, judge model, top-k, threshold AND pipeline version all match — comparing across a PipelineProvenance.CURRENT_VERSION bump silently compares two different corpora, because a re-ingest changes the chunks being retrieved. That is why those columns are recorded per run rather than assumed. A run stuck in RUNNING was killed partway through.",
+      "description": "Every suite run with the configuration that produced it. A score is only comparable to another score when the chat model, judge model, top-k and threshold all match. The corpus is not recorded: a pipeline change drops every chunk and re-ingests, so two runs either side of a re-ingest look comparable while scoring different chunks. A run stuck in RUNNING was killed partway through.",
       "type": "table",
       "gridPos": {
         "h": 9,
@@ -1202,7 +1202,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.context_precision::numeric, 3) AS \"ctx prec\", ROUND(e.precision_at_k::numeric, 3) AS \"prec@k\", ROUND(e.judged_context_precision::numeric, 3) AS \"judged ctx prec\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval.eval_run e ORDER BY e.started_at DESC LIMIT 50",
+          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.context_precision::numeric, 3) AS \"ctx prec\", ROUND(e.precision_at_k::numeric, 3) AS \"prec@k\", ROUND(e.judged_context_precision::numeric, 3) AS \"judged ctx prec\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.duration_millis AS \"ms\" FROM eval.eval_run e ORDER BY e.started_at DESC LIMIT 50",
           "refId": "A"
         }
       ]

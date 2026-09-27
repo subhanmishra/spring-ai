@@ -39,8 +39,6 @@ import java.util.UUID;
  * @param chatModel           the model that answered, when the response reported it
  * @param topK                how many chunks retrieval was asked for
  * @param similarityThreshold the minimum score a chunk needed to be retrieved
- * @param pipelineVersion     the parse-and-chunk pipeline version of the code that answered - not of the
- *                            retrieved chunks, which carry their own document's provenance
  */
 public record ChatTurnCompleted(UUID turnId,
                                 TurnOrigin origin,
@@ -54,8 +52,7 @@ public record ChatTurnCompleted(UUID turnId,
                                 List<RetrievedChunk> retrieved,
                                 @Nullable String chatModel,
                                 int topK,
-                                double similarityThreshold,
-                                int pipelineVersion) {
+                                double similarityThreshold) {
 
     public ChatTurnCompleted {
         unresolved = List.copyOf(unresolved);

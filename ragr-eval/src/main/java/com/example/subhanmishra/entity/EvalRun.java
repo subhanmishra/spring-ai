@@ -16,9 +16,12 @@ import java.util.UUID;
  * lets Postgres supply {@code gen_random_uuid()}.
  *
  * <p>The configuration columns are the point of the table. A score without the chat model, judge
- * model, top-k, threshold and pipeline version that produced it cannot be compared to any other score,
- * and comparing across a {@code PipelineProvenance.CURRENT_VERSION} bump silently compares two
- * different corpora.
+ * model, top-k and threshold that produced it cannot be compared to any other score.
+ *
+ * <p>What is deliberately not recorded is the corpus. A pipeline change is handled by dropping every
+ * chunk and re-ingesting, and nothing marks that boundary here: two runs either side of a re-ingest
+ * look comparable and are scoring different chunks. Read the trend with the date of the last re-ingest
+ * in mind.
  */
 @Table(name = "eval_run")
 public record EvalRun(@Id @Nullable UUID id,
@@ -33,7 +36,6 @@ public record EvalRun(@Id @Nullable UUID id,
                       boolean judged,
                       @Nullable Integer topK,
                       @Nullable Double similarityThreshold,
-                      @Nullable Integer pipelineVersion,
                       @Nullable Double hitRate,
                       @Nullable Double meanReciprocalRank,
                       @Nullable Double contextPrecision,
@@ -56,18 +58,17 @@ public record EvalRun(@Id @Nullable UUID id,
                                    @Nullable String judgeModel,
                                    boolean judged) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
-                           null, judgeModel, judged, null, null, null,
+                           null, judgeModel, judged, null, null,
                            null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
-     * The chat model, retrieval settings and pipeline version the run's answers were produced with,
-     * as the first turn reported them.
+     * The chat model and retrieval settings the run's answers were produced with, as the first turn
+     * reported them.
      */
-    public EvalRun withPipeline(@Nullable String chatModel, int topK, double similarityThreshold,
-                                int pipelineVersion) {
+    public EvalRun withPipeline(@Nullable String chatModel, int topK, double similarityThreshold) {
         return new EvalRun(id, suite, status, startedAt, finishedAt, caseCount, passedCount,
-                           chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
+                           chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK, citationValidity,
                            citationFabrication, relevancyRate, groundednessRate, durationMillis, errorMessage);
@@ -94,7 +95,7 @@ public record EvalRun(@Id @Nullable UUID id,
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.COMPLETED, startedAt, finished, caseCount,
                            passedCount, chatModel, judgeModel, judged, topK, similarityThreshold,
-                           pipelineVersion, hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
+                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK, citationValidity,
                            citationFabrication, relevancyRate, groundednessRate,
                            finished.toEpochMilli() - startedAt.toEpochMilli(), null);
@@ -103,7 +104,7 @@ public record EvalRun(@Id @Nullable UUID id,
     public EvalRun failed(String message) {
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.FAILED, startedAt, finished, caseCount, passedCount,
-                           chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
+                           chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK,
                            citationValidity, citationFabrication,

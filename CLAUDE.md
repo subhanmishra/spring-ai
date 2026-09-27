@@ -54,6 +54,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 .
 ├── ragr-shared      # plain library, no Spring Boot; shared by the chat path and evaluation
 │   └── src/main/java/.../subhanmishra/
+│       ├── chunk    # ChunkMetadata - the metadata keys every stored chunk carries
 │       ├── citation # Citation, CitationParser, CitationResolver, AnswerCitations
 │       └── event    # ChatTurnCompleted, TurnOrigin - the Kafka contract between chat and eval
 ├── ragr-app         # the chat service (upload, parse, index, chat); publishes turns to Kafka
@@ -61,7 +62,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # SpringAiConfig, ThreadPoolConfig, RedisConfig, OpenApiConfig,
-│       │   │   │               # ModelMapperConfig, JdbcConversionsConfig, RagProperties,
+│       │   │   │               # ModelMapperConfig, RagProperties,
 │       │   │   │               # SpringAiProperties, KafkaConfig, EventsProperties
 │       │   │   ├── controller  # ChatController, DocumentController, AdminDiagnosticsController
 │       │   │   ├── dto
@@ -70,12 +71,9 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │   │   ├── repository
 │       │   │   └── service     # ChatService, DocumentParserService, DocumentIngestionService,
 │       │   │       │           # DocumentMetadataService, DocumentHistoryService,
-│       │   │       │           # RetrievalDiagnosticsService, PipelineProvenanceService,
-│       │   │       │           # ChatTurnPublisher
-│       │   │       ├── provenance # PipelineProvenance (CURRENT_VERSION), PipelineSettings
+│       │   │       │           # RetrievalDiagnosticsService, ChatTurnPublisher
 │       │   │       └── parse   # ContentBlock (sealed: Prose | Table), XhtmlBlockParser,
-│       │   │           │       # TableChunker, TokenCounter, ChunkMetadata,
-│       │   │           │       # SupportedDocumentTypes
+│       │   │           │       # TableChunker, TokenCounter, SupportedDocumentTypes
 │       │   │           └── pdf # PdfBlockReader, PdfTableDetector, PdfLineExtractor,
 │       │   │                   # PdfTextRunExtractor, TextRun, LineSegment,
 │       │   │                   # PageFooterStripper, TocEntryStripper
@@ -83,7 +81,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │       ├── application.yaml          # active profile = dev, multipart limits
 │       │       ├── application-dev.yaml      # everything else
 │       │       ├── logback-spring.xml        # console + Loki appenders
-│       │       └── db/migration/             # Flyway V1..V4, public schema
+│       │       └── db/migration/             # Flyway V1, public schema
 │       └── test                              # SpringAiApplicationTests, parser tests
 ├── ragr-eval        # evaluation, its own app: consumes turns, scores, judges, runs the golden suite
 │   └── src
@@ -156,7 +154,6 @@ these.
 | `parsing.md` | `ContentBlock`, Tika/jsoup, PDF table geometry, strippers, the chunk-size budget | `service/parse/**`, `DocumentParserService` |
 | `ingestion.md` | batching, virtual threads, Hikari, retry/compensation, throughput measurements, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `ThreadPoolConfig` |
 | `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics, the turn event | `ChatService`, `ChatController`, `SpringAiConfig`, `citation/**`, `event/**`, `ChatTurnPublisher` |
-| `provenance.md` | `CURRENT_VERSION`, `PipelineSettings`, the two Jackson/ModelMapper traps | `PipelineProvenanceService`, `JdbcConversionsConfig` |
 | `evaluation.md` | where eval runs (ragr-eval, Kafka) and why, online vs golden split, judge selection, metric registration, citation fabrication and resolution | `ragr-eval/**`, `service/eval/**`, `Eval*`, `EvalSuiteIT` |
 | `observability.md` | compose stack, tracing/logging wiring, the three dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
 | `api-and-errors.md` | `DocAiExceptionHandler`, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |

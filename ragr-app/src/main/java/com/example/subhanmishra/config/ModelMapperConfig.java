@@ -2,7 +2,6 @@ package com.example.subhanmishra.config;
 
 import com.example.subhanmishra.dto.DocumentMetadataDto;
 import com.example.subhanmishra.entity.DocumentMetadata;
-import com.example.subhanmishra.service.PipelineProvenanceService;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.convention.MatchingStrategies;
 import org.springframework.context.annotation.Bean;
@@ -12,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 public class ModelMapperConfig {
 
     @Bean
-    public ModelMapper modelMapper(PipelineProvenanceService provenanceService) {
+    public ModelMapper modelMapper() {
         ModelMapper modelMapper = new ModelMapper();
         modelMapper.getConfiguration()
                 .setMatchingStrategy(MatchingStrategies.STRICT);
@@ -26,10 +25,6 @@ public class ModelMapperConfig {
         modelMapper.createTypeMap(DocumentMetadata.class, DocumentMetadataDto.class)
                 .setConverter(context -> {
                     DocumentMetadata source = context.getSource();
-                    // Staleness is judged by the provenance service rather than computed here; this
-                    // config only wires it in, so the rule itself stays in one place.
-                    String staleReason = provenanceService.stalenessReason(source.getPipelineVersion(),
-                                                                          source.getPipelineSettings());
                     return new DocumentMetadataDto(
                             source.getId(),
                             source.getFilename(),
@@ -40,11 +35,7 @@ public class ModelMapperConfig {
                             source.getStatus(),
                             source.getErrorMessage(),
                             source.getCreatedAt(),
-                            source.getUpdatedAt(),
-                            source.getPipelineVersion(),
-                            source.getPipelineSettings(),
-                            staleReason != null,
-                            staleReason
+                            source.getUpdatedAt()
                     );
                 });
 

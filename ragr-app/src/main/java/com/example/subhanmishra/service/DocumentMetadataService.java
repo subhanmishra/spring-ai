@@ -31,22 +31,19 @@ public class DocumentMetadataService {
     private final ModelMapper modelMapper;
     private final VectorStoreRepository vectorStoreRepository;
     private final DocumentHistoryService historyService;
-    private final PipelineProvenanceService provenanceService;
 
     public DocumentMetadataService(DocumentMetadataRepository documentMetadataRepo,
                                    DocumentParserService parserService,
                                    DocumentIngestionService ingestionService,
                                    ModelMapper modelMapper,
                                    VectorStoreRepository vectorStoreRepository,
-                                   DocumentHistoryService historyService,
-                                   PipelineProvenanceService provenanceService) {
+                                   DocumentHistoryService historyService) {
         this.documentMetadataRepo = documentMetadataRepo;
         this.parserService = parserService;
         this.ingestionService = ingestionService;
         this.modelMapper = modelMapper;
         this.vectorStoreRepository = vectorStoreRepository;
         this.historyService = historyService;
-        this.provenanceService = provenanceService;
     }
 
     public DocumentResponseDto uploadAndProcess(MultipartFile file) {
@@ -86,15 +83,11 @@ public class DocumentMetadataService {
 
             int totalPages = (int) parseResult.getOrDefault("totalPages", 0);
 
-            // 4. On success, update the main record to the terminal INDEXED status, stamping the
-            // pipeline that produced these chunks. Only on this path: a FAILED document produced no
-            // chunks, so provenance for it would describe nothing.
+            // 4. On success, update the main record to the terminal INDEXED status.
             DocumentMetadata finalMetadata = documentMetadata.toBuilder()
                     .status(DocumentStatus.INDEXED)
                     .totalChunks(chunksCreated)
                     .totalPages(totalPages)
-                    .pipelineVersion(provenanceService.currentVersion())
-                    .pipelineSettings(provenanceService.currentSettings())
                     .updatedAt(Instant.now())
                     .build();
             documentMetadataRepo.save(finalMetadata);

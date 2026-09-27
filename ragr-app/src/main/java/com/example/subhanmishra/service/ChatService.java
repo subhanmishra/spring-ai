@@ -11,13 +11,13 @@ import com.example.subhanmishra.dto.SourceDto;
 import com.example.subhanmishra.dto.UsageDto;
 import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.citation.AnswerCitations;
 import com.example.subhanmishra.citation.Citation;
 import com.example.subhanmishra.citation.CitationParser;
 import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.citation.CitationResolver.Repair;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
-import com.example.subhanmishra.service.parse.ChunkMetadata;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -250,10 +250,10 @@ public class ChatService {
             boolean cited = citations.stream().anyMatch(citation -> citation.status() != CitationDto.Status.UNVERIFIED
                     && key.citedBy(new Citation(citation.fileName(), citation.page())));
             sources.add(new SourceDto(i + 1,
-                                      RetrievalDiagnosticsService.asString(document.getMetadata().get("documentId")),
+                                      ChunkMetadata.asString(document.getMetadata().get(ChunkMetadata.DOCUMENT_ID)),
                                       key.fileName(),
                                       key.page(),
-                                      RetrievalDiagnosticsService.asString(document.getMetadata().get(ChunkMetadata.BLOCK_TYPE)),
+                                      ChunkMetadata.asString(document.getMetadata().get(ChunkMetadata.BLOCK_TYPE)),
                                       document.getScore(),
                                       CitationParser.stripHeader(document.getText()),
                                       cited));
@@ -285,8 +285,8 @@ public class ChatService {
             if (header != null) {
                 return new SourceKey(header.fileName(), header.pageNumber());
             }
-            return new SourceKey(RetrievalDiagnosticsService.asString(document.getMetadata().get("fileName")),
-                                 RetrievalDiagnosticsService.asInteger(document.getMetadata().get("pageNumber")));
+            return new SourceKey(ChunkMetadata.asString(document.getMetadata().get(ChunkMetadata.FILE_NAME)),
+                                 ChunkMetadata.asInteger(document.getMetadata().get(ChunkMetadata.PAGE_NUMBER)));
         }
 
         /** A pageless citation names the whole file, so it points at every chunk of it. */

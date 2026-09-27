@@ -2,7 +2,7 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.config.SpringAiConfig;
-import com.example.subhanmishra.service.parse.ChunkMetadata;
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TokenCounter;
 import org.junit.jupiter.api.BeforeEach;

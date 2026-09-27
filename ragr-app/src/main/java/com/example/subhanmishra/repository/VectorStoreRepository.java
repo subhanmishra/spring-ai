@@ -1,5 +1,6 @@
 package com.example.subhanmishra.repository;
 
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.entity.VectorStoreEntity;
 import org.springframework.data.jdbc.repository.query.Modifying;
 import org.springframework.data.jdbc.repository.query.Query;
@@ -13,6 +14,6 @@ import java.util.UUID;
 public interface VectorStoreRepository extends CrudRepository<VectorStoreEntity, UUID> {
 
     @Modifying
-    @Query("DELETE FROM vector_store WHERE metadata->>'documentId' = :documentId")
+    @Query("DELETE FROM vector_store WHERE metadata->>'" + ChunkMetadata.DOCUMENT_ID + "' = :documentId")
     void deleteByDocumentId(@Param("documentId") String documentId);
 }

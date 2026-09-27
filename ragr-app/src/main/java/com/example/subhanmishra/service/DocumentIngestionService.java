@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
@@ -241,18 +242,18 @@ public class DocumentIngestionService {
         AtomicInteger chunkIndex = new AtomicInteger(0);
         return documentStream.map(chunk -> {
             Map<String, Object> newMetadata = new HashMap<>(chunk.getMetadata());
-            newMetadata.put("documentId", metadata.getId().toString());
-            newMetadata.put("fileName", metadata.getFilename());
-            newMetadata.put("contentType", metadata.getContentType());
-            newMetadata.put("chunkIndex", chunkIndex.getAndIncrement());
+            newMetadata.put(ChunkMetadata.DOCUMENT_ID, metadata.getId().toString());
+            newMetadata.put(ChunkMetadata.FILE_NAME, metadata.getFilename());
+            newMetadata.put(ChunkMetadata.CONTENT_TYPE, metadata.getContentType());
+            newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
 
             // Normalize page number metadata
             Object pageNumber = chunk.getMetadata().get("page_number");
             if (pageNumber == null) {
-                pageNumber = chunk.getMetadata().get("pageNumber");
+                pageNumber = chunk.getMetadata().get(ChunkMetadata.PAGE_NUMBER);
             }
             if (pageNumber != null) {
-                newMetadata.put("pageNumber", pageNumber);
+                newMetadata.put(ChunkMetadata.PAGE_NUMBER, pageNumber);
             }
             return new Document(citationHeader(metadata.getFilename(), pageNumber) + chunk.getText(), newMetadata);
         });

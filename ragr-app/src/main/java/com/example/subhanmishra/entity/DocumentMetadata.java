@@ -1,6 +1,5 @@
 package com.example.subhanmishra.entity;
 
-import com.example.subhanmishra.service.provenance.PipelineSettings;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
@@ -22,8 +21,6 @@ public class DocumentMetadata {
     private String errorMessage;
     private Instant createdAt;
     private Instant updatedAt;
-    private Integer pipelineVersion;
-    private PipelineSettings pipelineSettings;
 
     public DocumentMetadata() {
     }
@@ -39,8 +36,6 @@ public class DocumentMetadata {
         this.errorMessage = builder.errorMessage;
         this.createdAt = builder.createdAt;
         this.updatedAt = builder.updatedAt;
-        this.pipelineVersion = builder.pipelineVersion;
-        this.pipelineSettings = builder.pipelineSettings;
     }
 
     public static Builder builder() {
@@ -58,9 +53,7 @@ public class DocumentMetadata {
                 .status(this.status)
                 .errorMessage(this.errorMessage)
                 .createdAt(this.createdAt)
-                .updatedAt(this.updatedAt)
-                .pipelineVersion(this.pipelineVersion)
-                .pipelineSettings(this.pipelineSettings);
+                .updatedAt(this.updatedAt);
     }
 
     public static class Builder {
@@ -74,8 +67,6 @@ public class DocumentMetadata {
         private String errorMessage;
         private Instant createdAt;
         private Instant updatedAt;
-        private Integer pipelineVersion;
-        private PipelineSettings pipelineSettings;
 
         public Builder id(UUID id) {
             this.id = id;
@@ -127,16 +118,6 @@ public class DocumentMetadata {
             return this;
         }
 
-        public Builder pipelineVersion(Integer pipelineVersion) {
-            this.pipelineVersion = pipelineVersion;
-            return this;
-        }
-
-        public Builder pipelineSettings(PipelineSettings pipelineSettings) {
-            this.pipelineSettings = pipelineSettings;
-            return this;
-        }
-
         public DocumentMetadata build() {
             return new DocumentMetadata(this);
         }
@@ -180,16 +161,6 @@ public class DocumentMetadata {
 
     public Instant getUpdatedAt() {
         return updatedAt;
-    }
-
-    /** The ingestion pipeline version that produced this document's chunks; null if it predates tracking. */
-    public Integer getPipelineVersion() {
-        return pipelineVersion;
-    }
-
-    /** The output-affecting settings in force when this document was ingested; null if unrecorded. */
-    public PipelineSettings getPipelineSettings() {
-        return pipelineSettings;
     }
 
     @Override

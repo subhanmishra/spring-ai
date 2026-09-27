@@ -120,9 +120,9 @@ class EvalSuiteIT {
      * citations in general are sound. Collapsing them would lose the distinction exactly when it
      * matters.
      *
-     * <p>If this fails, something is genuinely broken. Check in this order: is the corpus stale (a
-     * document ingested by an older pipeline version still carries page footers, so its citations are 19
-     * pages out); did chunking change the page boundaries the dataset was verified against; only then
+     * <p>If this fails, something is genuinely broken. Check in this order: was the corpus re-ingested
+     * after the last pipeline change (chunks from an older pipeline can still carry page footers, so
+     * their citations are 19 pages out); did chunking change the page boundaries the dataset was verified against; only then
      * suspect the model.
      */
     private static final int MAX_INVENTED_PAGES = 0;

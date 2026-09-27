@@ -6,7 +6,6 @@ import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.ChatTurnCompleted.RetrievedChunk;
 import com.example.subhanmishra.event.TurnOrigin;
-import com.example.subhanmishra.service.provenance.PipelineProvenance;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.Counter;
@@ -109,8 +108,7 @@ public class ChatTurnPublisher {
                                                             retrieved.stream().map(RetrievedChunk::of).toList(),
                                                             chatModel,
                                                             ragProperties.topK(),
-                                                            ragProperties.similarityThreshold(),
-                                                            PipelineProvenance.CURRENT_VERSION);
+                                                            ragProperties.similarityThreshold());
             ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
             executor.execute(snapshot.wrap(() -> send(event)));
         } catch (RuntimeException e) {

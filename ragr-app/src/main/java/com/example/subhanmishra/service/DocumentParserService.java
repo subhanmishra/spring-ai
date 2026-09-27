@@ -1,8 +1,8 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.exception.DocumentProcessingException;
-import com.example.subhanmishra.service.parse.ChunkMetadata;
 import com.example.subhanmishra.service.parse.ContentBlock;
 import com.example.subhanmishra.service.parse.TableChunker;
 import com.example.subhanmishra.service.parse.TokenCounter;

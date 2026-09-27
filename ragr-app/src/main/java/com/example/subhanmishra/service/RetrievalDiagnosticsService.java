@@ -1,10 +1,10 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.dto.RetrievalRequestDto;
 import com.example.subhanmishra.dto.RetrievalResponseDto;
 import com.example.subhanmishra.dto.RetrievedChunkDto;
-import com.example.subhanmishra.service.parse.ChunkMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -108,13 +108,13 @@ public class RetrievalDiagnosticsService {
 
         return new RetrievedChunkDto(document.getId(),
                                      document.getScore(),
-                                     asString(metadata.get("documentId")),
-                                     asString(metadata.get("fileName")),
-                                     asInteger(metadata.get("pageNumber")),
-                                     asInteger(metadata.get("chunkIndex")),
-                                     asString(metadata.get(ChunkMetadata.BLOCK_TYPE)),
-                                     asInteger(metadata.get(ChunkMetadata.TABLE_INDEX)),
-                                     asString(metadata.get(ChunkMetadata.TABLE_ROWS)),
+                                     ChunkMetadata.asString(metadata.get(ChunkMetadata.DOCUMENT_ID)),
+                                     ChunkMetadata.asString(metadata.get(ChunkMetadata.FILE_NAME)),
+                                     ChunkMetadata.asInteger(metadata.get(ChunkMetadata.PAGE_NUMBER)),
+                                     ChunkMetadata.asInteger(metadata.get(ChunkMetadata.CHUNK_INDEX)),
+                                     ChunkMetadata.asString(metadata.get(ChunkMetadata.BLOCK_TYPE)),
+                                     ChunkMetadata.asInteger(metadata.get(ChunkMetadata.TABLE_INDEX)),
+                                     ChunkMetadata.asString(metadata.get(ChunkMetadata.TABLE_ROWS)),
                                      split[0],
                                      split[1],
                                      split[0] != null);
@@ -137,27 +137,5 @@ public class RetrievalDiagnosticsService {
             return new String[]{null, text};
         }
         return new String[]{firstLine, text.substring(firstBreak).stripLeading()};
-    }
-
-    static String asString(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    /**
-     * Metadata makes a round trip through a JSONB column, so a value written as an {@code int} can come
-     * back as any {@link Number} subtype - or, for a page number a reader supplied as text, as a String.
-     */
-    static Integer asInteger(Object value) {
-        return switch (value) {
-            case Number number -> number.intValue();
-            case String string -> {
-                try {
-                    yield Integer.valueOf(string.trim());
-                } catch (NumberFormatException e) {
-                    yield null;
-                }
-            }
-            case null, default -> null;
-        };
     }
 }

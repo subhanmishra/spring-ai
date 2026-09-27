@@ -162,14 +162,14 @@ public class GoldenEvalService {
         try {
             List<CaseOutcome> outcomes = execute(dataset, judged);
 
-            // The chat model, retrieval settings and pipeline version belong to ragr-app, so they are
-            // recorded from what its first turn reported rather than from any configuration here.
+            // The chat model and retrieval settings belong to ragr-app, so they are recorded from what
+            // its first turn reported rather than from any configuration here.
             if (!outcomes.isEmpty()) {
                 ChatTurnCompleted first = outcomes.getFirst().turn();
                 persisted = persist(persisted.withPipeline(first.chatModel(), first.topK(),
-                                                           first.similarityThreshold(), first.pipelineVersion()));
-                log.info("Golden eval run answered by [model={}, topK={}, threshold={}, pipelineVersion={}]",
-                         first.chatModel(), first.topK(), first.similarityThreshold(), first.pipelineVersion());
+                                                           first.similarityThreshold()));
+                log.info("Golden eval run answered by [model={}, topK={}, threshold={}]",
+                         first.chatModel(), first.topK(), first.similarityThreshold());
             }
             GoldenRunResult result = aggregate(dataset, outcomes, judged,
                                                System.currentTimeMillis() - persisted.startedAt().toEpochMilli());
