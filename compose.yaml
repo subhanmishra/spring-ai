@@ -70,13 +70,15 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
-      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093'
-      # Advertised as localhost because both clients - the app and, next, the eval app - run on the
-      # host. A client inside this compose network would need a second listener.
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093'
+      # Two listeners because a client is told to reconnect to whatever address the listener it came in
+      # on advertises. PLAINTEXT serves the three applications on the host, as localhost:9092. INTERNAL,
+      # which is not published, serves containers in this compose network - kafka-console - as
+      # kafka:29092; handed localhost:9092 instead, a container reconnects to itself and fails.
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092,INTERNAL://kafka:29092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -89,6 +91,30 @@ services:
       # Persisted so the topic's retention window survives a restart: replaying retained turns
       # through a new judge or metric is one of the reasons for putting a log here at all.
       - ./docker-volume/kafka:/var/lib/kafka/data
+
+  # A browser view of the broker: topics, the retained chat turns decoded as JSON with their traceparent
+  # header, and the ragr-eval consumer group's offsets. The Grafana Kafka row shows rates and lag; this
+  # shows the messages. Redpanda Console rather than a JVM-based UI because it is a Go binary: measured
+  # at 50 MiB idle and 48-50 MiB while streaming the whole topic five times, with no growth - the
+  # broker itself uses ~190 MiB. The limit is ~2.5x that, so a leak shows up as an OOM kill rather than
+  # as memory quietly taken from the Ollama models. Pinned, not latest, for the same reason.
+  kafka-console:
+    image: redpandadata/console:v3.12.0
+    container_name: ai_kafka-console
+    mem_limit: 128m
+    # depends_on only orders the start. The console gives up after ~31s of retries and exits, and the
+    # broker has been measured taking 31s to recover its log after a recreate, so it is restarted until
+    # the broker answers.
+    restart: on-failure
+    environment:
+      KAFKA_BROKERS: 'kafka:29092'
+      SERVER_LISTENPORT: 8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      - kafka
+    labels:
+      - "org.springframework.boot.readiness-check.skip=true"
 
   redis-exporter:
     image: oliver006/redis_exporter:latest
