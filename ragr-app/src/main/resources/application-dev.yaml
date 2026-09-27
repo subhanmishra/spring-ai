@@ -132,11 +132,13 @@ spring:
         # obeying it. gemma4:e2b cited seven pages across the same three, every one genuinely in the
         # retrieved context. A follow-up five-query run cited 18 pages, all valid, none fabricated.
         #
-        # It is also CHEAPER than the model it replaces, which the 7.2 GB file hides: the E-series
-        # offloads per-layer embeddings, so Ollama reports it resident at 1.59 GB against llama3.2's
-        # 2.81-2.88 GB. It coexists with nomic-embed-text indefinitely (five consecutive turns, 0s
-        # load every time, free RAM steady at ~2 GB), and generates FASTER - 12.8-13.9 tok/s against
-        # 10.7-12.1, i.e. 53-70s per answer against 58-91s.
+        # It is NOT cheap, whatever /api/ps says. Ollama reports it at 1.59-1.70 GB against llama3.2's
+        # 2.81-2.88 GB, but that is only the share placed on the iGPU: its llama-server commits ~8.1 GB
+        # (the scheduler predicts 6.9 GiB), most of it cold in the pagefile, and a cold load of it
+        # evicts nomic-embed-text once - see .claude/context/ingestion.md. llama3.2 was never measured
+        # the same way, so which of the two costs more is unknown. Once both are loaded it coexists
+        # with nomic-embed-text indefinitely (five consecutive turns, 0s load every time), and it
+        # generated FASTER - 12.8-13.9 tok/s against 10.7-12.1, i.e. 53-70s per answer against 58-91s.
         model: gemma4:e2b
         # Gemma 4 advertises a `thinking` capability and Spring AI 2.0.1 returns that separately, in
         # OllamaApi.Message.thinking, which ChatService never reads. Left enabled it is pure waste in
@@ -224,11 +226,13 @@ app:
   eval:
     enabled: true
     # The SAME model the chat path uses, and that is a memory decision rather than a quality one.
-    # Measured on this host: gemma4:e2b is resident at 1.59 GiB and nomic-embed-text at 0.30 GiB,
-    # leaving 0.74 GB free of 15.63 GB total (2.81 GB with nothing loaded). The smallest purpose-built
-    # grounded-factuality judge, bespoke-minicheck, ships only at 7B with a 4.39 GiB weights layer - it
-    # does not fit even after evicting BOTH resident models, so every judgement would page to disk.
-    # Reusing the chat model evicts nothing and costs nothing.
+    # Measured on this host: gemma4:e2b's llama-server commits ~8.1 GB (Ollama's scheduler predicts
+    # 6.9 GiB; /api/ps reports only the 1.70 GB placed on the iGPU) and nomic-embed-text ~0.5 GB,
+    # leaving ~1.1 GB of RAM available of 15.63 GB and ~2.7 GB of commit headroom. Loading gemma cold
+    # already evicts the embedder once. The smallest purpose-built grounded-factuality judge,
+    # bespoke-minicheck, ships only at 7B with a 4.39 GiB weights layer - there is no room for it
+    # alongside the pair, so every judgement would evict a model or page to disk. Reusing the chat
+    # model loads nothing new.
     #
     # The price is self-judging bias: a model grading its own output is more generous than an
     # independent one, so these rates are optimistic in absolute terms. Read them as a TREND - the bias

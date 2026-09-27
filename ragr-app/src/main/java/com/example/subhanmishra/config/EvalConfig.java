@@ -27,12 +27,13 @@ import org.springframework.util.StringUtils;
  * would throw, log, or look wrong - the scores would just quietly stop meaning anything.
  *
  * <p>Judging reuses the chat model rather than a dedicated one, and that is a memory decision, not a
- * quality one. Measured on the dev host: {@code gemma4:e2b} is resident at 1.59 GiB and
- * {@code nomic-embed-text} at 0.30 GiB, leaving 0.74 GB free of 15.63 GB total, against 2.81 GB with
- * nothing loaded. The smallest purpose-built grounded-factuality judge,
- * {@code bespoke-minicheck}, ships only at 7B with a 4.39 GiB weights layer - it does not fit even
- * after evicting both resident models, so every judgement would page. Reusing the resident chat model
- * costs nothing and evicts nothing.
+ * quality one. Measured on the dev host: {@code gemma4:e2b}'s {@code llama-server} commits ~8.1 GB
+ * (Ollama's scheduler predicts 6.9 GiB; {@code /api/ps} reports only the 1.70 GB placed on the iGPU)
+ * and {@code nomic-embed-text} ~0.5 GB, leaving ~1.1 GB of RAM available of 15.63 GB total and ~2.7 GB
+ * of commit headroom - tight enough that a cold load of gemma already evicts the embedder once. The
+ * smallest purpose-built grounded-factuality judge, {@code bespoke-minicheck}, ships only at 7B with a
+ * 4.39 GiB weights layer - there is no room for it alongside the pair, so every judgement would evict
+ * a model or page. Reusing the resident chat model loads nothing new.
  *
  * <p>The price is <strong>self-judging bias</strong>, and it should not be glossed over: a model
  * grading its own output is measurably more generous than an independent judge, so these rates are

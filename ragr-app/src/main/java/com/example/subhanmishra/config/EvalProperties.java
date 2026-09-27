@@ -15,10 +15,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                          deterministic metrics still report.
  * @param judgeModel        the Ollama model the LLM judges use. Defaults to the configured chat model,
  *                          and that default is load-bearing on a memory-constrained host: measured on
- *                          the dev machine, {@code gemma4:e2b} is resident at 1.59 GiB alongside
- *                          {@code nomic-embed-text} at 0.30 GiB, leaving 0.74 GB free. Any other judge
- *                          evicts one of them on every call. Reusing the chat model costs nothing
- *                          because it is already loaded - at the price of self-judging bias, for which
+ *                          the dev machine, {@code gemma4:e2b} commits ~8.1 GB alongside
+ *                          {@code nomic-embed-text} at ~0.5 GB, leaving ~1.1 GB of RAM available.
+ *                          Any other judge evicts one of them on every call. Reusing the chat model
+ *                          costs nothing because it is already loaded - at the price of self-judging bias, for which
  *                          see {@code OnlineEvalService}.
  * @param judgeTemperature  judges answer YES or NO, so sampling should be effectively deterministic.
  *                          Spring AI sends no temperature unless one is configured, which for Gemma
