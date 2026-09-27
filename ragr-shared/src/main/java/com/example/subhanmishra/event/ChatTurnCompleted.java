@@ -23,6 +23,8 @@ import java.util.UUID;
  * its own copy of this record - add fields freely, but renaming or removing one breaks the other side.
  *
  * @param turnId              unique per turn; the consumer's idempotency key
+ * @param origin              whether a real user asked, or the golden suite - which the online
+ *                            evaluation leaves out of the live metrics
  * @param occurredAt          when the answer finished, not when the event was sent
  * @param conversationId      also the Kafka record key, so one conversation's turns stay in order
  * @param query               the user's prompt
@@ -39,6 +41,7 @@ import java.util.UUID;
  *                            retrieved chunks, which carry their own document's provenance
  */
 public record ChatTurnCompleted(UUID turnId,
+                                TurnOrigin origin,
                                 Instant occurredAt,
                                 String conversationId,
                                 String query,

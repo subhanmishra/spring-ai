@@ -4,6 +4,7 @@ import com.example.subhanmishra.citation.Citation;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.TurnOrigin;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -79,12 +80,13 @@ class ChatTurnPublisherTest {
             when(template.send(eq(TOPIC), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
 
-            publisher(true).publish("conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
+            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
 
             ArgumentCaptor<ChatTurnCompleted> sent = ArgumentCaptor.forClass(ChatTurnCompleted.class);
             verify(template).send(eq(TOPIC), eq("conv-1"), sent.capture());
             ChatTurnCompleted event = sent.getValue();
             assertThat(event.conversationId()).isEqualTo("conv-1");
+            assertThat(event.origin()).isEqualTo(TurnOrigin.LIVE);
             assertThat(event.answer()).isEqualTo(resolution.answer());
             assertThat(event.citationsRepaired()).isEqualTo(1);
             assertThat(event.citationsAbstained()).isEqualTo(1);
@@ -97,7 +99,7 @@ class ChatTurnPublisherTest {
         @Test
         @DisplayName("sends nothing when disabled")
         void disabled() {
-            publisher(false).publish("conv-1", "q", resolution, List.of(chunk), null);
+            publisher(false).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null);
 
             verify(template, never()).send(anyString(), anyString(), any(ChatTurnCompleted.class));
         }
@@ -114,7 +116,7 @@ class ChatTurnPublisherTest {
                     .thenThrow(new TimeoutException("Topic not present in metadata after 500 ms."));
 
             assertThatNoException().isThrownBy(
-                    () -> publisher(true).publish("conv-1", "q", resolution, List.of(chunk), null));
+                    () -> publisher(true).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null));
             assertThat(count("dropped")).isEqualTo(1);
             assertThat(count("published")).isZero();
         }
@@ -125,7 +127,7 @@ class ChatTurnPublisherTest {
             when(template.send(anyString(), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(CompletableFuture.failedFuture(new TimeoutException("Expiring 1 record(s)")));
 
-            publisher(true).publish("conv-1", "q", resolution, List.of(chunk), null);
+            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null);
 
             assertThat(count("dropped")).isEqualTo(1);
         }
@@ -140,7 +142,7 @@ class ChatTurnPublisherTest {
         void roundTrips() {
             when(template.send(anyString(), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(new CompletableFuture<>());
-            publisher(true).publish("conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
+            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
             ArgumentCaptor<ChatTurnCompleted> sent = ArgumentCaptor.forClass(ChatTurnCompleted.class);
             verify(template).send(anyString(), anyString(), sent.capture());
             ChatTurnCompleted original = sent.getValue();

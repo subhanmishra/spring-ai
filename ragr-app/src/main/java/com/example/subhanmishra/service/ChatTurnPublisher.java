@@ -4,6 +4,7 @@ import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.ChatTurnCompleted.RetrievedChunk;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.service.provenance.PipelineProvenance;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -85,13 +86,14 @@ public class ChatTurnPublisher {
      *
      * @param resolution the answer after {@code CitationResolver} - the text the evaluation scores
      */
-    public void publish(String conversationId, String query, Resolution resolution,
+    public void publish(TurnOrigin origin, String conversationId, String query, Resolution resolution,
                         List<Document> retrieved, @Nullable String chatModel) {
         if (!properties.enabled()) {
             return;
         }
         try {
             ChatTurnCompleted event = new ChatTurnCompleted(UUID.randomUUID(),
+                                                            origin,
                                                             Instant.now(),
                                                             conversationId,
                                                             query,

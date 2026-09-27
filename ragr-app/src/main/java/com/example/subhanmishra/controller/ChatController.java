@@ -3,6 +3,7 @@ package com.example.subhanmishra.controller;
 import com.example.subhanmishra.dto.ChatAnswerDto;
 import com.example.subhanmishra.dto.ChatRequestDto;
 import com.example.subhanmishra.dto.ConversationDto;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,8 +40,9 @@ public class ChatController {
                     "same conversation. The prompt travels in the request body rather than a query parameter so " +
                     "it stays out of access logs, browser history and proxy logs, and is not bounded by URL " +
                     "length limits.")
-    public ChatAnswerDto generate(@Valid @RequestBody ChatRequestDto request) {
-        return chatService.generate(request.prompt(), request.conversationId());
+    public ChatAnswerDto generate(@Valid @RequestBody ChatRequestDto request,
+                                  @RequestHeader(name = TurnOrigin.HEADER, defaultValue = "LIVE") TurnOrigin origin) {
+        return chatService.generate(request.prompt(), request.conversationId(), origin);
     }
 
     @PostMapping(value = "/generateStream",
@@ -55,8 +57,9 @@ public class ChatController {
                     "header so it can be passed back in on subsequent calls to continue the same conversation. Note " +
                     "that because this is a POST, a browser client cannot consume it with the native EventSource API, " +
                     "which only issues GET requests - use fetch with a ReadableStream instead.")
-    public Flux<ServerSentEvent<?>> generateStream(@Valid @RequestBody ChatRequestDto request) {
-        return chatService.generateStream(request.prompt(), request.conversationId());
+    public Flux<ServerSentEvent<?>> generateStream(@Valid @RequestBody ChatRequestDto request,
+                                                   @RequestHeader(name = TurnOrigin.HEADER, defaultValue = "LIVE") TurnOrigin origin) {
+        return chatService.generateStream(request.prompt(), request.conversationId(), origin);
     }
 
     @GetMapping("/conversations")

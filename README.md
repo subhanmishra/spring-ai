@@ -105,7 +105,7 @@ This automatically starts the containers defined in `compose.yaml` (pgvector, Re
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional) |
+| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional). Optional header `X-Eval-Origin: GOLDEN` (upper case; anything else but `LIVE` is a 400) marks the turn as the golden evaluation suite's, which online evaluation leaves out of the live metrics |
 | POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body as above |
 | GET | `/ai/conversations` | List all active conversation IDs |
 | GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |

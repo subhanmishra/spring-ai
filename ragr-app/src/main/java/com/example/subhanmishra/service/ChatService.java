@@ -9,6 +9,7 @@ import com.example.subhanmishra.dto.CitationDto;
 import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.dto.SourceDto;
 import com.example.subhanmishra.dto.UsageDto;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
 import com.example.subhanmishra.citation.AnswerCitations;
 import com.example.subhanmishra.citation.Citation;
@@ -84,7 +85,7 @@ public class ChatService {
      * thread - the in-process evaluation and the published event coexist until evaluation moves to its
      * own application.
      */
-    public ChatAnswerDto generate(String prompt, String conversationId) {
+    public ChatAnswerDto generate(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
         ChatClientResponse response = chatClient.prompt()
                 .user(prompt)
@@ -95,7 +96,7 @@ public class ChatService {
         List<Document> retrieved = retrievedDocuments(response);
         Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
         onlineEvalService.evaluate(prompt, resolution, retrieved);
-        chatTurnPublisher.publish(conversationId, prompt, resolution, retrieved, modelOf(response.chatResponse()));
+        chatTurnPublisher.publish(origin, conversationId, prompt, resolution, retrieved, modelOf(response.chatResponse()));
 
         AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
         List<CitationDto> citations = citations(resolution, retrieved, context);
@@ -125,7 +126,7 @@ public class ChatService {
      * failed stream is neither scored nor reported, since a half-delivered answer is not an answer, and
      * judging one would report a truncation as a quality problem.
      */
-    public Flux<ServerSentEvent<?>> generateStream(String prompt, String conversationId) {
+    public Flux<ServerSentEvent<?>> generateStream(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
         StringBuilder answer = new StringBuilder();
         AtomicReference<List<Document>> retrieved = new AtomicReference<>(List.of());
@@ -157,7 +158,7 @@ public class ChatService {
             List<Document> documents = retrieved.get();
             Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
             onlineEvalService.evaluate(prompt, resolution, documents);
-            chatTurnPublisher.publish(conversationId, prompt, resolution, documents, modelOf(last.get()));
+            chatTurnPublisher.publish(origin, conversationId, prompt, resolution, documents, modelOf(last.get()));
 
             List<CitationDto> citations = citations(resolution, documents, context.get());
             return token(stripper.finish(context.get())).concatWith(Flux.just(
