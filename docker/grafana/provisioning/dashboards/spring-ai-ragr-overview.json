@@ -693,6 +693,13 @@
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
+      ],
+      "links": [
+        {
+          "title": "Open rag.chat.turn.completed in Kafka console",
+          "url": "http://localhost:8082/topics/rag.chat.turn.completed",
+          "targetBlank": true
+        }
       ]
     },
     {
@@ -728,6 +735,13 @@
           "expr": "max by (partition) (kafka_consumer_fetch_manager_records_lag{topic=\"rag.chat.turn.completed\"})",
           "legendFormat": "partition {{partition}}",
           "refId": "A"
+        }
+      ],
+      "links": [
+        {
+          "title": "Open the ragr-eval consumer group in Kafka console",
+          "url": "http://localhost:8082/groups/ragr-eval",
+          "targetBlank": true
         }
       ]
     },
@@ -770,6 +784,13 @@
           "expr": "sum(rate(kafka_consumer_fetch_manager_records_consumed_total{topic=\"rag.chat.turn.completed\"}[5m]))",
           "legendFormat": "consumed (ragr-eval)",
           "refId": "B"
+        }
+      ],
+      "links": [
+        {
+          "title": "Open rag.chat.turn.completed in Kafka console",
+          "url": "http://localhost:8082/topics/rag.chat.turn.completed",
+          "targetBlank": true
         }
       ]
     },
@@ -818,6 +839,14 @@
       "asDropdown": true,
       "includeVars": false,
       "keepTime": true
+    },
+    {
+      "title": "Kafka console",
+      "type": "link",
+      "url": "http://localhost:8082",
+      "icon": "external link",
+      "tooltip": "Redpanda Console: the retained chat turns, partition watermarks and consumer group offsets",
+      "targetBlank": true
     }
   ],
   "templating": {
