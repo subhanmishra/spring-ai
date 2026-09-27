@@ -1,6 +1,5 @@
 package com.example.subhanmishra;
 
-import com.example.subhanmishra.config.EvalProperties;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.config.SpringAiProperties; // Import the new properties class
@@ -9,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({RagProperties.class, SpringAiProperties.class, EvalProperties.class,
+@EnableConfigurationProperties({RagProperties.class, SpringAiProperties.class,
         EventsProperties.class})
 public class SpringAiApplication {
 

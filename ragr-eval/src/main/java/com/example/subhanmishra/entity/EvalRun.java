@@ -47,18 +47,30 @@ public record EvalRun(@Id @Nullable UUID id,
                       @Nullable Long durationMillis,
                       @Nullable String errorMessage) {
 
-    /** A run about to start, with its configuration recorded and its results not yet known. */
+    /**
+     * A run about to start. The pipeline's own settings are not known yet - they belong to ragr-app,
+     * which the run drives over HTTP - and are filled in by {@link #withPipeline} from the first turn.
+     */
     public static EvalRun starting(String suite,
                                    int caseCount,
-                                   String chatModel,
                                    @Nullable String judgeModel,
-                                   boolean judged,
-                                   int topK,
-                                   double similarityThreshold,
-                                   @Nullable Integer pipelineVersion) {
+                                   boolean judged) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
-                           chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
+                           null, judgeModel, judged, null, null, null,
                            null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * The chat model, retrieval settings and pipeline version the run's answers were produced with,
+     * as the first turn reported them.
+     */
+    public EvalRun withPipeline(@Nullable String chatModel, int topK, double similarityThreshold,
+                                int pipelineVersion) {
+        return new EvalRun(id, suite, status, startedAt, finishedAt, caseCount, passedCount,
+                           chatModel, judgeModel, judged, topK, similarityThreshold, pipelineVersion,
+                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
+                           judgedContextPrecision, judgedPrecisionAtK, citationValidity,
+                           citationFabrication, relevancyRate, groundednessRate, durationMillis, errorMessage);
     }
 
     /**

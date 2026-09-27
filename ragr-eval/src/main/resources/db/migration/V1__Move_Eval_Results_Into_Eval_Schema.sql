@@ -1,10 +1,30 @@
--- V5__Add_Eval_Results.sql
+-- V1__Move_Eval_Results_Into_Eval_Schema.sql
+--
+-- Runs under ragr-eval's Flyway, with the eval schema as its default, so every unqualified name below
+-- resolves to eval.
+--
+-- These tables used to live in public, created by ragr-app's V5, until evaluation moved into its own
+-- application. A database that already has them keeps every recorded run: the DO block moves them,
+-- data, indexes and foreign key intact, and the CREATE ... IF NOT EXISTS statements after it are then
+-- no-ops. A fresh database has nothing to move and gets the tables created here.
+
+DO
+$$
+BEGIN
+    IF to_regclass('public.eval_run') IS NOT NULL THEN
+        ALTER TABLE public.eval_run SET SCHEMA eval;
+    END IF;
+    IF to_regclass('public.eval_case_result') IS NOT NULL THEN
+        ALTER TABLE public.eval_case_result SET SCHEMA eval;
+    END IF;
+END
+$$;
 
 -- Store the results of curated ("golden") evaluation runs, so pipeline quality can be compared over
 -- time rather than only observed in the moment.
 --
 -- Live chat traffic is NOT stored here. Online evaluation emits Micrometer metrics and nothing else:
--- a per-request time series belongs in Prometheus, which already scrapes this application, and writing
+-- a per-request time series belongs in Prometheus, which already scrapes ragr-eval, and writing
 -- a row per chat turn would put a database write on the chat path to record a metric that Prometheus
 -- stores better. These tables hold discrete, comparable runs of a fixed dataset - the thing you want
 -- to diff across a pipeline change - and that is a different shape of data with a different lifetime.

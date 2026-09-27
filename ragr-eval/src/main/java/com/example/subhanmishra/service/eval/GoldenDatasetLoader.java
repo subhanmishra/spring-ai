@@ -1,36 +1,35 @@
 package com.example.subhanmishra.service.eval;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 
 /**
  * Reads a {@link GoldenDataset} from a YAML resource.
  *
- * <p>Uses the Jackson 2 mapper explicitly rather than injecting one, for the same reason
- * {@code JdbcConversionsConfig} does: Spring Boot 4 ships both Jackson 2
- * ({@code com.fasterxml.jackson}) and Jackson 3 ({@code tools.jackson}) and publishes a bean only for
- * the latter, so injecting {@code ObjectMapper} would bind the wrong one. {@code jackson-dataformat-yaml}
- * is already on the compile classpath, so this needs no new dependency.
+ * <p>Jackson 3, the version Spring Boot 4 manages, with its YAML module declared in {@code pom.xml}. In
+ * {@code ragr-app} this class used Jackson 2 because a Jackson 2 YAML module happened to arrive there
+ * through springdoc; nothing here brings one, and taking a second major version of Jackson onto the
+ * classpath deliberately to keep that would be the wrong way round.
  */
 public final class GoldenDatasetLoader {
 
     private final ResourceLoader resourceLoader;
-    private final ObjectMapper yamlMapper;
+    private final YAMLMapper yamlMapper;
 
     public GoldenDatasetLoader(ResourceLoader resourceLoader) {
         this.resourceLoader = resourceLoader;
-        this.yamlMapper = new ObjectMapper(new YAMLFactory())
+        this.yamlMapper = YAMLMapper.builder()
                 // A typo in a case's key is a mistake in the dataset, not something to silently ignore -
                 // a misspelled `expectedPages` would turn a recall assertion into no assertion at all,
                 // and the suite would pass while measuring nothing.
-                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .build();
     }
 
     public GoldenDataset load(String location) {
@@ -44,8 +43,8 @@ public final class GoldenDatasetLoader {
                 throw new IllegalStateException("Golden eval dataset at " + location + " contains no cases");
             }
             return dataset;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read golden eval dataset at " + location, e);
+        } catch (IOException | JacksonException e) {
+            throw new IllegalStateException("Failed to read golden eval dataset at " + location, e);
         }
     }
 }

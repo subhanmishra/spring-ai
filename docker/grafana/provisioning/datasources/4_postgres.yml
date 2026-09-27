@@ -50,5 +50,5 @@ datasources:
       connMaxLifetime: 14400
       # Read-only: this datasource must never be able to write to the application's database. Grafana
       # cannot enforce that itself, so if this stack ever leaves a laptop, create a dedicated role with
-      # SELECT on eval_run and eval_case_result only and use it here.
+      # SELECT on eval.eval_run and eval.eval_case_result only and use it here.
       timescaledb: false

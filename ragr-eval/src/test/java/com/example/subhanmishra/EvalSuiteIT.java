@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,9 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * regressed.
  *
  * <p><strong>Excluded from {@code ./mvnw test}</strong> by the surefire {@code excludedGroups}
- * configuration in {@code pom.xml}. It needs Postgres, Redis and Ollama running with the reference
- * manual already indexed, and it takes minutes - a single grounded answer on the dev host is 53-70
- * seconds. Run it deliberately:
+ * configuration in {@code pom.xml}. It drives the running {@code ragr-app} over HTTP and reads its
+ * turns back from Kafka, so it needs {@code ragr-app} up with the whole compose stack and Ollama, and
+ * the reference manual already indexed. It takes minutes - a single grounded answer on the dev host
+ * is 53-70 seconds. Run it deliberately:
  *
  * <pre>{@code ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT}</pre>
  *
@@ -40,8 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * investigating a quality change, by passing {@code true} to
  * {@link GoldenEvalService#run(GoldenDataset, boolean)}.
  */
-@SpringBootTest
-@ActiveProfiles("dev")
+// The online listener is left stopped: this JVM runs the golden suite, and a second member of the
+// ragr-eval consumer group would take the partition away from the running ragr-eval application.
+@SpringBootTest(properties = "spring.kafka.listener.auto-startup=false")
 @Tag("eval")
 class EvalSuiteIT {
 

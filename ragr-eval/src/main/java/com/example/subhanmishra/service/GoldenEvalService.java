@@ -1,37 +1,40 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.EvalProperties;
-import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.entity.EvalCaseResult;
 import com.example.subhanmishra.entity.EvalRun;
+import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalCaseResultRepository;
 import com.example.subhanmishra.repository.EvalRunRepository;
-import com.example.subhanmishra.citation.CitationResolver;
-import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.service.eval.ContextPrecisionEvaluator;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
 import com.example.subhanmishra.service.eval.GoldenDataset;
 import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
-import com.example.subhanmishra.service.provenance.PipelineProvenance;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
 import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.evaluation.EvaluationRequest;
 import org.springframework.ai.evaluation.Evaluator;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -43,16 +46,23 @@ import java.util.UUID;
  * measured online; what a golden run adds is a fixed question set, so two runs are comparable and a
  * regression is visible as a number moving rather than as traffic changing shape.
  *
- * <p>Four things about how a run executes are load-bearing:
+ * <p>Five things about how a run executes are load-bearing:
  *
  * <ul>
- *   <li><strong>It goes through the real {@code ChatClient}.</strong> Same advisors, same prompt
- *       template, same model, same retrieval settings - the point is to measure the pipeline, not a
- *       replica of it that can drift away from the thing it claims to describe.</li>
- *   <li><strong>Each case gets a fresh conversation id, cleared afterwards.</strong>
+ *   <li><strong>It goes through the running {@code ragr-app}'s real endpoint.</strong> Each case is a
+ *       {@code POST /ai/generate}, so it gets the same advisors, prompt template, model, retrieval
+ *       settings and citation resolution a user gets - the point is to measure the pipeline, not a
+ *       replica of it that can drift away from the thing it claims to describe. This application has
+ *       no chat path of its own to drift.</li>
+ *   <li><strong>Each case reads its own turn back from Kafka.</strong> The HTTP response is what a
+ *       user reads, with citations stripped out; scoring needs the answer as the model cited it and
+ *       the chunks it was built on, and the {@code ChatTurnCompleted} event carries exactly that. The
+ *       request is marked {@link TurnOrigin#GOLDEN} so the online evaluation leaves it out of the live
+ *       metrics.</li>
+ *   <li><strong>Each case gets a fresh conversation id, deleted afterwards.</strong>
  *       {@code MessageWindowChatMemory} would otherwise feed case N's answer into case N+1's prompt,
  *       so cases would contaminate each other and the order of the dataset would change the scores.
- *       Clearing afterwards also keeps runs out of the conversation list the chat API exposes.</li>
+ *       Deleting afterwards also keeps runs out of the conversation list the chat API exposes.</li>
  *   <li><strong>Cases run serially.</strong> Ollama pins one runner slot, so parallel cases would not
  *       finish any sooner and would only contend - the same reasoning that keeps bulk document upload
  *       a serial loop.</li>
@@ -71,8 +81,15 @@ public class GoldenEvalService {
     private static final String RELEVANCY = "relevancy";
     private static final String GROUNDEDNESS = "groundedness";
 
-    private final ChatClient chatClient;
-    private final ChatMemory chatMemory;
+    /**
+     * A grounded answer on this host takes 53-70 seconds and a cold model load adds ~35 more, so the
+     * read timeout has to sit well clear of both. It exists at all so that a hung app fails the run
+     * instead of hanging it.
+     */
+    private static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(5);
+
+    private final RestClient chat;
+    private final ConsumerFactory<String, ChatTurnCompleted> consumerFactory;
     private final EvalScoringService scoringService;
     private final EvalMetricsService metricsService;
     private final GoldenDatasetLoader datasetLoader;
@@ -82,11 +99,9 @@ public class GoldenEvalService {
     private final EvalRunRepository runRepository;
     private final EvalCaseResultRepository caseResultRepository;
     private final EvalProperties evalProperties;
-    private final RagProperties ragProperties;
-    private final String chatModel;
 
-    public GoldenEvalService(ChatClient chatClient,
-                             ChatMemory chatMemory,
+    public GoldenEvalService(RestClient.Builder restClients,
+                             ConsumerFactory<String, ChatTurnCompleted> consumerFactory,
                              EvalScoringService scoringService,
                              EvalMetricsService metricsService,
                              GoldenDatasetLoader datasetLoader,
@@ -95,11 +110,13 @@ public class GoldenEvalService {
                              ContextPrecisionEvaluator contextPrecisionEvaluator,
                              EvalRunRepository runRepository,
                              EvalCaseResultRepository caseResultRepository,
-                             EvalProperties evalProperties,
-                             RagProperties ragProperties,
-                             @Value("${spring.ai.ollama.chat.model:unknown}") String chatModel) {
-        this.chatClient = chatClient;
-        this.chatMemory = chatMemory;
+                             EvalProperties evalProperties) {
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
+        requestFactory.setReadTimeout(ANSWER_TIMEOUT);
+        this.chat = restClients.baseUrl(evalProperties.golden().chatUrl().toString())
+                               .requestFactory(requestFactory)
+                               .build();
+        this.consumerFactory = consumerFactory;
         this.scoringService = scoringService;
         this.metricsService = metricsService;
         this.datasetLoader = datasetLoader;
@@ -109,8 +126,6 @@ public class GoldenEvalService {
         this.runRepository = runRepository;
         this.caseResultRepository = caseResultRepository;
         this.evalProperties = evalProperties;
-        this.ragProperties = ragProperties;
-        this.chatModel = chatModel;
     }
 
     /** Loads the configured dataset without running it - for inspecting what a run would cover. */
@@ -132,12 +147,8 @@ public class GoldenEvalService {
     public GoldenRunResult run(GoldenDataset dataset, boolean judged) {
         EvalRun run = EvalRun.starting(dataset.suite(),
                                        dataset.cases().size(),
-                                       chatModel,
                                        judged ? evalProperties.judgeModel() : null,
-                                       judged,
-                                       ragProperties.topK(),
-                                       ragProperties.similarityThreshold(),
-                                       PipelineProvenance.CURRENT_VERSION);
+                                       judged);
 
         // Persisted before any case executes. A suite takes minutes, and a run that dies partway
         // through would otherwise leave nothing behind at all - an empty table looks exactly like a
@@ -145,12 +156,21 @@ public class GoldenEvalService {
         EvalRun persisted = persist(run);
         UUID runId = persisted.id();
 
-        log.info("Starting golden eval run [suite={}, cases={}, judged={}, model={}, topK={}, threshold={}]",
-                 dataset.suite(), dataset.cases().size(), judged, chatModel,
-                 ragProperties.topK(), ragProperties.similarityThreshold());
+        log.info("Starting golden eval run [suite={}, cases={}, judged={}, chatUrl={}]",
+                 dataset.suite(), dataset.cases().size(), judged, evalProperties.golden().chatUrl());
 
         try {
             List<CaseOutcome> outcomes = execute(dataset, judged);
+
+            // The chat model, retrieval settings and pipeline version belong to ragr-app, so they are
+            // recorded from what its first turn reported rather than from any configuration here.
+            if (!outcomes.isEmpty()) {
+                ChatTurnCompleted first = outcomes.getFirst().turn();
+                persisted = persist(persisted.withPipeline(first.chatModel(), first.topK(),
+                                                           first.similarityThreshold(), first.pipelineVersion()));
+                log.info("Golden eval run answered by [model={}, topK={}, threshold={}, pipelineVersion={}]",
+                         first.chatModel(), first.topK(), first.similarityThreshold(), first.pipelineVersion());
+            }
             GoldenRunResult result = aggregate(dataset, outcomes, judged,
                                                System.currentTimeMillis() - persisted.startedAt().toEpochMilli());
 
@@ -203,9 +223,12 @@ public class GoldenEvalService {
     private List<CaseOutcome> execute(GoldenDataset dataset, boolean judged) {
         List<CaseOutcome> outcomes = new ArrayList<>();
 
-        // Phase 1 - generate.
-        for (GoldenCase goldenCase : dataset.cases()) {
-            outcomes.add(generate(goldenCase));
+        // Phase 1 - generate. The feed is positioned at the end of the topic before the first request,
+        // so every turn this run produces is read and nothing older is.
+        try (TurnFeed feed = new TurnFeed()) {
+            for (GoldenCase goldenCase : dataset.cases()) {
+                outcomes.add(generate(goldenCase, feed));
+            }
         }
 
         // Phase 2 - judge.
@@ -217,26 +240,29 @@ public class GoldenEvalService {
         return outcomes;
     }
 
-    private CaseOutcome generate(GoldenCase goldenCase) {
+    private CaseOutcome generate(GoldenCase goldenCase, TurnFeed feed) {
         // A fresh id per case, so no case can see another's turn through chat memory.
         String conversationId = "eval-" + UUID.randomUUID();
         long startedAt = System.nanoTime();
         try {
-            ChatResponse chatResponse = chatClient.prompt()
-                    .user(goldenCase.query())
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .call()
-                    .chatResponse();
-
+            // The body is what a user reads - citations stripped out - so it is not what gets scored.
+            chat.post()
+                .uri("/ai/generate")
+                .header(TurnOrigin.HEADER, TurnOrigin.GOLDEN.name())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("prompt", goldenCase.query(), "conversationId", conversationId))
+                .retrieve()
+                .toBodilessEntity();
             long millis = (System.nanoTime() - startedAt) / 1_000_000;
-            List<Document> retrieved = retrievedDocuments(chatResponse);
 
-            // Resolved exactly as ChatService resolves it, and for the same reason the run goes through
-            // the real ChatClient at all: the suite has to measure the answer a user would receive, not
-            // an intermediate one no caller ever sees. The stored answer is the resolved text too, so a
-            // failure investigated months later shows the citations as they were delivered.
-            Resolution resolution = CitationResolver.resolve(answerOf(chatResponse), retrieved);
-            String answer = resolution.answer();
+            ChatTurnCompleted turn = feed.await(conversationId, evalProperties.golden().turnTimeout());
+            List<Document> retrieved = turn.retrievedDocuments();
+
+            // Already resolved by ragr-app, exactly as the user's copy was: the suite has to measure the
+            // answer a user receives, not an intermediate one no caller ever sees. The stored answer is
+            // the resolved text too, so a failure investigated months later shows the citations as they
+            // were delivered.
+            String answer = turn.answer();
 
             EvalScores scores = scoringService.score(answer, retrieved, goldenCase);
             int rank = scoringService.firstRelevantRank(retrieved, goldenCase);
@@ -249,15 +275,83 @@ public class GoldenEvalService {
                      + "{} section number(s) resolved, {} left unresolved, context precision {}",
                      goldenCase.id(), millis, scores.retrieval().retrievedCount(),
                      scores.citations().emitted(), scores.citations().fabricated(),
-                     resolution.repaired(), resolution.abstained(),
+                     turn.citationsRepaired(), turn.citationsAbstained(),
                      precision != null ? format(precision.averagePrecision()) : "n/a");
 
-            return new CaseOutcome(goldenCase, answer, retrieved, scores, rank, precision, millis);
+            return new CaseOutcome(goldenCase, turn, answer, retrieved, scores, rank, precision, millis);
 
         } finally {
-            // Always cleared, including when the case threw, so a failed run does not leave eval
-            // conversations behind in Redis for the chat API to list.
-            chatMemory.clear(conversationId);
+            deleteConversation(conversationId);
+        }
+    }
+
+    /**
+     * Always attempted, including when the case threw, so a failed run does not leave eval
+     * conversations behind in Redis for the chat API to list. A failure to delete is logged rather than
+     * thrown: it would otherwise replace whatever exception made the case fail.
+     */
+    private void deleteConversation(String conversationId) {
+        try {
+            chat.delete().uri("/ai/conversations/{id}", conversationId).retrieve().toBodilessEntity();
+        } catch (RuntimeException e) {
+            log.warn("Could not delete eval conversation {}; it will show in the chat API's list", conversationId, e);
+        }
+    }
+
+    /**
+     * The golden run's own view of the chat-turn topic.
+     *
+     * <p>Assigned rather than subscribed, and never committed: it is not a member of the online
+     * consumer's group, so it neither takes that group's partition away nor moves its offsets. It is
+     * positioned at the end of the topic when opened, so it sees this run's turns and no earlier ones.
+     *
+     * <p>Every golden turn that arrives is kept by conversation id, not only the one being waited for.
+     * Cases run one at a time, so in practice the next record is the one wanted, but nothing about the
+     * topic guarantees that - and a turn left over from a previous case that timed out must not be
+     * mistaken for the current one.
+     */
+    private final class TurnFeed implements AutoCloseable {
+
+        private final Consumer<String, ChatTurnCompleted> consumer;
+        private final Map<String, ChatTurnCompleted> arrived = new HashMap<>();
+
+        TurnFeed() {
+            this.consumer = consumerFactory.createConsumer("ragr-eval-golden", null, "-golden", null);
+            String topic = evalProperties.topic();
+            List<TopicPartition> partitions = consumer.partitionsFor(topic).stream()
+                                                      .map(info -> new TopicPartition(topic, info.partition()))
+                                                      .toList();
+            consumer.assign(partitions);
+            consumer.seekToEnd(partitions);
+            // seekToEnd is lazy. Resolving the positions now pins "the end" to before the first request,
+            // rather than to whenever the first poll happens to run.
+            partitions.forEach(consumer::position);
+        }
+
+        ChatTurnCompleted await(String conversationId, Duration timeout) {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (!arrived.containsKey(conversationId)) {
+                if (System.nanoTime() > deadline) {
+                    throw new IllegalStateException("No chat turn arrived on " + evalProperties.topic()
+                            + " for conversation " + conversationId + " within " + timeout
+                            + " - was the broker down when ragr-app answered? Check "
+                            + "rag_chat_turn_events_total{outcome=\"dropped\"} on ragr-app.");
+                }
+                for (ConsumerRecord<String, ChatTurnCompleted> record : consumer.poll(Duration.ofMillis(500))) {
+                    ChatTurnCompleted turn = record.value();
+                    // Null when the record could not be deserialized; the error-handling deserializer
+                    // has already recorded why.
+                    if (turn != null && turn.origin() == TurnOrigin.GOLDEN) {
+                        arrived.put(turn.conversationId(), turn);
+                    }
+                }
+            }
+            return arrived.remove(conversationId);
+        }
+
+        @Override
+        public void close() {
+            consumer.close();
         }
     }
 
@@ -419,24 +513,6 @@ public class GoldenEvalService {
                                                       outcome.latencyMillis()));
     }
 
-    private static String answerOf(@Nullable ChatResponse chatResponse) {
-        if (chatResponse == null || chatResponse.getResult() == null
-                || chatResponse.getResult().getOutput() == null) {
-            return "";
-        }
-        String text = chatResponse.getResult().getOutput().getText();
-        return text != null ? text : "";
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Document> retrievedDocuments(@Nullable ChatResponse chatResponse) {
-        if (chatResponse == null || chatResponse.getMetadata() == null) {
-            return List.of();
-        }
-        Object documents = chatResponse.getMetadata().get(QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS);
-        return documents instanceof List<?> list ? (List<Document>) list : List.of();
-    }
-
     private static String format(double value) {
         return "%.3f".formatted(value);
     }
@@ -455,6 +531,7 @@ public class GoldenEvalService {
     public static final class CaseOutcome {
 
         private final GoldenCase goldenCase;
+        private final ChatTurnCompleted turn;
         private final String answer;
         private final List<Document> retrieved;
         private final int firstRelevantRank;
@@ -463,10 +540,11 @@ public class GoldenEvalService {
         private EvalScores scores;
         private @Nullable ContextPrecisionScores judgedContextPrecision;
 
-        CaseOutcome(GoldenCase goldenCase, String answer, List<Document> retrieved,
+        CaseOutcome(GoldenCase goldenCase, ChatTurnCompleted turn, String answer, List<Document> retrieved,
                     EvalScores scores, int firstRelevantRank,
                     @Nullable ContextPrecisionScores contextPrecision, long latencyMillis) {
             this.goldenCase = goldenCase;
+            this.turn = turn;
             this.answer = answer;
             this.retrieved = retrieved;
             this.scores = scores;
@@ -485,6 +563,11 @@ public class GoldenEvalService {
 
         public GoldenCase goldenCase() {
             return goldenCase;
+        }
+
+        /** The turn as ragr-app published it: what was answered, from what, and by which settings. */
+        public ChatTurnCompleted turn() {
+            return turn;
         }
 
         public String answer() {

@@ -37,6 +37,8 @@ import java.util.UUID;
  * @param retrieved           the chunks the answer was built on, in rank order; empty for an ungrounded
  *                            turn, which evaluation skips rather than scores
  * @param chatModel           the model that answered, when the response reported it
+ * @param topK                how many chunks retrieval was asked for
+ * @param similarityThreshold the minimum score a chunk needed to be retrieved
  * @param pipelineVersion     the parse-and-chunk pipeline version of the code that answered - not of the
  *                            retrieved chunks, which carry their own document's provenance
  */
@@ -51,6 +53,8 @@ public record ChatTurnCompleted(UUID turnId,
                                 List<Citation> unresolved,
                                 List<RetrievedChunk> retrieved,
                                 @Nullable String chatModel,
+                                int topK,
+                                double similarityThreshold,
                                 int pipelineVersion) {
 
     public ChatTurnCompleted {

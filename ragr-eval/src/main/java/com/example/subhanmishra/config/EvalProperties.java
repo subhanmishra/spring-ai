@@ -2,6 +2,9 @@ package com.example.subhanmishra.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.net.URI;
+import java.time.Duration;
+
 /**
  * Settings for the evaluation framework, which scores what the RAG pipeline actually produces.
  *
@@ -13,6 +16,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param enabled           master switch. Off, no evaluation runs at all and no eval meters are
  *                          registered - which is different from a zero sample rate, where the
  *                          deterministic metrics still report.
+ * @param topic             where ragr-app publishes completed chat turns; the online consumer reads
+ *                          it, and so does the golden suite, for its own turns
  * @param judgeModel        the Ollama model the LLM judges use. Defaults to the configured chat model,
  *                          and that default is load-bearing on a memory-constrained host: measured on
  *                          the dev machine, {@code gemma4:e2b} commits ~8.1 GB alongside
@@ -35,6 +40,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "app.eval")
 public record EvalProperties(boolean enabled,
+                             String topic,
                              String judgeModel,
                              double judgeTemperature,
                              int judgeNumPredict,
@@ -73,7 +79,14 @@ public record EvalProperties(boolean enabled,
      * @param persist         whether run and per-case rows are written to Postgres. The Grafana eval
      *                        dashboard's per-case tables read those rows, so turning this off leaves the
      *                        dashboard with trend lines only.
+     * @param chatUrl         the running ragr-app a run drives, through its real {@code /ai/generate}
+     *                        endpoint. The suite measures the answer a user receives, so it goes through
+     *                        exactly what a user goes through - not a replica of the chat path.
+     * @param turnTimeout     how long a case waits for its turn to arrive on the topic once the answer
+     *                        has returned. The publisher sends within milliseconds; running out means the
+     *                        event was dropped, which fails the run rather than scoring a case blind.
      */
-    public record Golden(String datasetLocation, boolean judged, boolean persist) {
+    public record Golden(String datasetLocation, boolean judged, boolean persist, URI chatUrl,
+                         Duration turnTimeout) {
     }
 }

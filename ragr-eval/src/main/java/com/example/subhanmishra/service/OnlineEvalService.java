@@ -3,6 +3,8 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.config.EvalProperties;
 import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
+import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.service.eval.EvalScores;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -15,6 +17,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.evaluation.EvaluationRequest;
 import org.springframework.ai.evaluation.EvaluationResponse;
 import org.springframework.ai.evaluation.Evaluator;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -27,19 +30,22 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Scores real chat traffic as it happens.
+ * Scores real chat traffic as it happens, from the turns {@code ragr-app} publishes to Kafka.
  *
- * <p>The contract with the chat path is absolute: <strong>nothing here may delay a response.</strong>
- * A user waits 53-70 seconds for a grounded answer already, and evaluation is observability - it
- * cannot be allowed to add to that. The class is split along exactly that line.
+ * <p>Running in its own application means nothing here can delay a response any more - the answer has
+ * been returned before the event is even sent. What it still shares with the chat path is Ollama, and
+ * that is what the judging bounds below protect: a user waits 53-70 seconds for a grounded answer
+ * already, and a judge call occupying the runner makes the next user wait longer.
  *
- * <p><strong>Deterministic scoring runs inline</strong> on every turn. It is a few regex passes over
- * the answer and a comparison against at most top-k retrieved chunks - no network, no model, no
- * database - so it costs microseconds and there is nothing to gain by deferring it. Running it inline
- * is also what gives these metrics 100% coverage, with no sampling and no drops.
+ * <p><strong>Deterministic scoring runs on the listener thread</strong>, for every turn. It is a few
+ * regex passes over the answer and a comparison against at most top-k retrieved chunks - no network,
+ * no model, no database - so it costs microseconds, and the listener is back to the next record at
+ * once. That keeps these metrics at 100% coverage and within seconds of real time.
  *
- * <p><strong>LLM judging is fired and forgotten.</strong> The answer has already been returned to the
- * caller by the time a judgement starts. Three bounds keep that from becoming a liability:
+ * <p><strong>LLM judging is fired and forgotten</strong>, on a virtual thread, rather than done on the
+ * listener thread with Kafka queueing the backlog. Queueing would lose nothing, but judgements would
+ * drift hours behind the traffic they describe and the deterministic metrics would wait behind them.
+ * Three bounds keep fire-and-forget from becoming a liability:
  *
  * <ul>
  *   <li><em>Sampling.</em> Judging is not free to the system even though it is free to the caller.
@@ -98,6 +104,29 @@ public class OnlineEvalService {
     }
 
     /**
+     * One completed turn, as {@code ragr-app} published it.
+     *
+     * <p>Golden-suite turns are skipped: they travel the same path so the suite measures what a user
+     * gets, but a run is a burst of hand-picked questions that would shift the live rates. An
+     * ungrounded turn is not skipped here - its deterministic metrics still count, and
+     * {@link #shouldJudge} keeps it away from the judges.
+     *
+     * <p>A record that cannot be deserialized never reaches this method: the
+     * {@code ErrorHandlingDeserializer} hands it to the error handler, which logs it and moves on.
+     */
+    @KafkaListener(topics = "${app.eval.topic}")
+    void onTurn(ChatTurnCompleted turn) {
+        if (turn.origin() == TurnOrigin.GOLDEN) {
+            return;
+        }
+        // The resolver already ran in ragr-app; the event carries what it did. The individual repairs
+        // are not sent - nothing here reads them - so the list is empty.
+        Resolution resolution = new Resolution(turn.answer(), turn.citationsRepaired(), turn.citationsAbstained(),
+                                               turn.unresolved(), List.of());
+        evaluate(turn.query(), resolution, turn.retrievedDocuments());
+    }
+
+    /**
      * Scores a turn whose citations have already been through {@link CitationResolver}, recording what
      * the resolver did before scoring the text it produced.
      *
@@ -121,9 +150,9 @@ public class OnlineEvalService {
     /**
      * Scores one completed chat turn. Returns immediately.
      *
-     * <p>Wrapped in a catch-all because the answer has already been generated and, on the blocking
-     * path, is about to be returned. There is no failure here worth turning a successful response into
-     * an error, so anything that goes wrong is logged and swallowed.
+     * <p>Wrapped in a catch-all because a failure here must not become a failed record: the listener
+     * would hand it to the error handler, and nothing about retrying a turn's scoring is worth that.
+     * Anything that goes wrong is logged and swallowed.
      */
     public void evaluate(String query, @Nullable String answer, @Nullable List<Document> retrieved) {
         if (!properties.enabled() || !properties.online().enabled()) {

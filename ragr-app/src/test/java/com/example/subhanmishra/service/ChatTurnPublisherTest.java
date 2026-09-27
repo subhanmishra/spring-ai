@@ -3,6 +3,7 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.citation.Citation;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
+import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.TurnOrigin;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -62,7 +63,9 @@ class ChatTurnPublisherTest {
         EventsProperties properties = new EventsProperties(
                 new EventsProperties.ChatTurns(enabled, TOPIC, Duration.ofDays(3)));
         // Runs the send on the calling thread so the outcome can be asserted straight away.
-        return new ChatTurnPublisher(template, properties, registry, Runnable::run);
+        RagProperties rag = new RagProperties(400, 150, 100, 10000, 2048, 5, 0.6, 35, 4, 3, Duration.ofSeconds(2),
+                                              RagProperties.TableDetection.AUTO);
+        return new ChatTurnPublisher(template, properties, rag, registry, Runnable::run);
     }
 
     private double count(String outcome) {
@@ -87,6 +90,8 @@ class ChatTurnPublisherTest {
             ChatTurnCompleted event = sent.getValue();
             assertThat(event.conversationId()).isEqualTo("conv-1");
             assertThat(event.origin()).isEqualTo(TurnOrigin.LIVE);
+            assertThat(event.topK()).isEqualTo(5);
+            assertThat(event.similarityThreshold()).isEqualTo(0.6);
             assertThat(event.answer()).isEqualTo(resolution.answer());
             assertThat(event.citationsRepaired()).isEqualTo(1);
             assertThat(event.citationsAbstained()).isEqualTo(1);

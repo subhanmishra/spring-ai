@@ -47,25 +47,22 @@ public class ChatService {
     private final ChatMemory chatMemory;
     private final ChatMemoryRepository chatMemoryRepository;
     private final SpringAiProperties springAiProperties;
-    private final OnlineEvalService onlineEvalService;
     private final ChatTurnPublisher chatTurnPublisher;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
                        ChatMemoryRepository chatMemoryRepository,
                        SpringAiProperties springAiProperties,
-                       OnlineEvalService onlineEvalService,
                        ChatTurnPublisher chatTurnPublisher) {
         this.chatClient = chatClient;
         this.chatMemoryRepository = chatMemoryRepository;
         this.chatMemory = chatMemory;
         this.springAiProperties = springAiProperties;
-        this.onlineEvalService = onlineEvalService;
         this.chatTurnPublisher = chatTurnPublisher;
     }
 
     /**
-     * Answers a prompt, and scores the turn on the way out.
+     * Answers a prompt, and publishes the turn for evaluation on the way out.
      *
      * <p>Takes the {@code ChatClientResponse} rather than {@code content()} so the retrieved documents
      * can be read back. {@code QuestionAnswerAdvisor} puts the chunks it retrieved into the advisor
@@ -73,17 +70,15 @@ public class ChatService {
      * context an answer was actually built on without re-running the search - and a second search would
      * be a different search, since it would not share this one's filters or timing.
      *
-     * <p>The answer is passed through {@link CitationResolver} before it is scored or reported. That
+     * <p>The answer is passed through {@link CitationResolver} before it is published or reported. That
      * rewrites a section number the model wrote where a page belongs - "(…, p. 5.3)" - into the page of
      * the retrieved chunk whose heading it names. The model still cites inline, and the evaluation scores
      * those inline citations; the caller receives them as {@code citations} instead, with the answer text
      * stripped of them by {@link AnswerCitations}.
      *
-     * <p>The evaluation call returns immediately: deterministic scoring is a few regex passes, and any
-     * LLM judging is handed to a virtual thread. Nothing about it is on this method's critical path. The
-     * turn is also published to Kafka by {@link ChatTurnPublisher}, which likewise sends on a virtual
-     * thread - the in-process evaluation and the published event coexist until evaluation moves to its
-     * own application.
+     * <p>Evaluation happens in a separate application. {@link ChatTurnPublisher} hands the turn to Kafka
+     * on a virtual thread and returns at once, so nothing about scoring or judging is on this method's
+     * critical path - not even when the broker is down.
      */
     public ChatAnswerDto generate(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
@@ -95,7 +90,6 @@ public class ChatService {
 
         List<Document> retrieved = retrievedDocuments(response);
         Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
-        onlineEvalService.evaluate(prompt, resolution, retrieved);
         chatTurnPublisher.publish(origin, conversationId, prompt, resolution, retrieved, modelOf(response.chatResponse()));
 
         AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
@@ -108,7 +102,7 @@ public class ChatService {
     }
 
     /**
-     * Streams an answer as server-sent events, scoring the turn once the stream completes.
+     * Streams an answer as server-sent events, publishing the turn once the stream completes.
      *
      * <p>The answer text arrives as unnamed events, with its inline citations removed as it goes by
      * {@link AnswerCitations.StreamingStripper} - which holds back a span only from its opening bracket
@@ -123,7 +117,7 @@ public class ChatService {
      *
      * <p>The answer is still accumulated whole, because the evaluation and the citation report need the
      * text as the model wrote it. They run only once the tokens have all been delivered: a cancelled or
-     * failed stream is neither scored nor reported, since a half-delivered answer is not an answer, and
+     * failed stream is neither published nor reported, since a half-delivered answer is not an answer, and
      * judging one would report a truncation as a quality problem.
      */
     public Flux<ServerSentEvent<?>> generateStream(String prompt, String conversationId, TurnOrigin origin) {
@@ -157,7 +151,6 @@ public class ChatService {
         Flux<ServerSentEvent<?>> closing = Flux.defer(() -> {
             List<Document> documents = retrieved.get();
             Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
-            onlineEvalService.evaluate(prompt, resolution, documents);
             chatTurnPublisher.publish(origin, conversationId, prompt, resolution, documents, modelOf(last.get()));
 
             List<CitationDto> citations = citations(resolution, documents, context.get());

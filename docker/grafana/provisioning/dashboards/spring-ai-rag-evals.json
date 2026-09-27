@@ -1090,7 +1090,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT r.case_id AS \"case\", r.query, r.failure_reasons AS \"why it failed\", r.retrieved_count AS \"chunks\", r.first_relevant_rank AS \"rank of correct page\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", r.pages_retrieved AS \"pages\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) AND r.passed = false ORDER BY r.citations_fabricated DESC, r.case_id",
+          "rawSql": "SELECT r.case_id AS \"case\", r.query, r.failure_reasons AS \"why it failed\", r.retrieved_count AS \"chunks\", r.first_relevant_rank AS \"rank of correct page\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", r.pages_retrieved AS \"pages\", r.latency_millis AS \"ms\" FROM eval.eval_case_result r WHERE r.run_id = (SELECT id FROM eval.eval_run ORDER BY started_at DESC LIMIT 1) AND r.passed = false ORDER BY r.citations_fabricated DESC, r.case_id",
           "refId": "A"
         }
       ]
@@ -1166,7 +1166,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.retrieved_count AS \"chunks\", ROUND(r.top_score::numeric, 3) AS \"top score\", r.first_relevant_rank AS \"rank\", ROUND(r.context_precision::numeric, 3) AS \"ctx prec\", ROUND(r.precision_at_k::numeric, 3) AS \"prec@k\", r.judged_relevance AS \"judge verdicts\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"phrase %\", r.relevancy_pass AS \"relevant\", r.groundedness_pass AS \"grounded\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval_case_result r WHERE r.run_id = (SELECT id FROM eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.case_id",
+          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.retrieved_count AS \"chunks\", ROUND(r.top_score::numeric, 3) AS \"top score\", r.first_relevant_rank AS \"rank\", ROUND(r.context_precision::numeric, 3) AS \"ctx prec\", ROUND(r.precision_at_k::numeric, 3) AS \"prec@k\", r.judged_relevance AS \"judge verdicts\", r.citations_emitted AS \"cited\", r.citations_fabricated AS \"fabricated\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"phrase %\", r.relevancy_pass AS \"relevant\", r.groundedness_pass AS \"grounded\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval.eval_case_result r WHERE r.run_id = (SELECT id FROM eval.eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.case_id",
           "refId": "A"
         }
       ]
@@ -1202,7 +1202,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.context_precision::numeric, 3) AS \"ctx prec\", ROUND(e.precision_at_k::numeric, 3) AS \"prec@k\", ROUND(e.judged_context_precision::numeric, 3) AS \"judged ctx prec\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval_run e ORDER BY e.started_at DESC LIMIT 50",
+          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.hit_rate::numeric, 3) AS \"hit rate\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"MRR\", ROUND(e.context_precision::numeric, 3) AS \"ctx prec\", ROUND(e.precision_at_k::numeric, 3) AS \"prec@k\", ROUND(e.judged_context_precision::numeric, 3) AS \"judged ctx prec\", ROUND(e.citation_validity::numeric, 3) AS \"cite valid\", ROUND(e.citation_fabrication::numeric, 3) AS \"cite fabricated\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.pipeline_version AS \"pipeline\", e.duration_millis AS \"ms\" FROM eval.eval_run e ORDER BY e.started_at DESC LIMIT 50",
           "refId": "A"
         }
       ]
@@ -1238,7 +1238,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT r.case_id AS \"case\", COUNT(*) AS \"runs\", SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS \"passed\", ROUND(AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END)::numeric, 2) AS \"pass rate\", SUM(r.citations_fabricated) AS \"total fabricated\", ROUND(AVG(r.first_relevant_rank)::numeric, 2) AS \"avg rank\", ROUND(AVG(r.latency_millis)::numeric, 0) AS \"avg ms\" FROM eval_case_result r GROUP BY r.case_id ORDER BY AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END) ASC, r.case_id",
+          "rawSql": "SELECT r.case_id AS \"case\", COUNT(*) AS \"runs\", SUM(CASE WHEN r.passed THEN 1 ELSE 0 END) AS \"passed\", ROUND(AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END)::numeric, 2) AS \"pass rate\", SUM(r.citations_fabricated) AS \"total fabricated\", ROUND(AVG(r.first_relevant_rank)::numeric, 2) AS \"avg rank\", ROUND(AVG(r.latency_millis)::numeric, 0) AS \"avg ms\" FROM eval.eval_case_result r GROUP BY r.case_id ORDER BY AVG(CASE WHEN r.passed THEN 1.0 ELSE 0.0 END) ASC, r.case_id",
           "refId": "A"
         }
       ]

@@ -2,6 +2,7 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
+import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.ChatTurnCompleted.RetrievedChunk;
 import com.example.subhanmishra.event.TurnOrigin;
@@ -49,6 +50,7 @@ public class ChatTurnPublisher {
 
     private final KafkaTemplate<String, ChatTurnCompleted> kafkaTemplate;
     private final EventsProperties.ChatTurns properties;
+    private final RagProperties ragProperties;
     private final Executor executor;
     private final ContextSnapshotFactory contextSnapshotFactory = ContextSnapshotFactory.builder().build();
     private final Counter published;
@@ -57,18 +59,21 @@ public class ChatTurnPublisher {
     @Autowired
     public ChatTurnPublisher(KafkaTemplate<String, ChatTurnCompleted> kafkaTemplate,
                              EventsProperties properties,
+                             RagProperties ragProperties,
                              MeterRegistry registry) {
-        this(kafkaTemplate, properties, registry,
+        this(kafkaTemplate, properties, ragProperties, registry,
              Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("chat-turn-publish-", 0).factory()));
     }
 
     /** Takes the executor so a test can run the send on its own thread and assert on the outcome. */
     ChatTurnPublisher(KafkaTemplate<String, ChatTurnCompleted> kafkaTemplate,
                       EventsProperties properties,
+                      RagProperties ragProperties,
                       MeterRegistry registry,
                       Executor executor) {
         this.kafkaTemplate = kafkaTemplate;
         this.properties = properties.chatTurns();
+        this.ragProperties = ragProperties;
         this.executor = executor;
         this.published = Counter.builder("rag.chat.turn.events")
                                 .description("Completed chat turns handed to Kafka for evaluation")
@@ -103,6 +108,8 @@ public class ChatTurnPublisher {
                                                             resolution.unresolved(),
                                                             retrieved.stream().map(RetrievedChunk::of).toList(),
                                                             chatModel,
+                                                            ragProperties.topK(),
+                                                            ragProperties.similarityThreshold(),
                                                             PipelineProvenance.CURRENT_VERSION);
             ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
             executor.execute(snapshot.wrap(() -> send(event)));
