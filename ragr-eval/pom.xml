@@ -111,6 +111,18 @@
                     <jvmArguments>-Xmx256m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- The same cap as the application, for the same reason. EvalSuiteIT's test JVM
+                         runs alongside ragr-app and both Ollama models; uncapped it reached 930 MB
+                         private during a golden run, sizing its heap from physical RAM the host does
+                         not have to spare. Merged with the parent's surefire configuration, which
+                         keeps the eval tag excluded. -->
+                    <argLine>-Xmx256m -XX:+UseSerialGC</argLine>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
