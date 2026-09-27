@@ -57,6 +57,17 @@ management:
         # `spring.ai.chat.client` also switches on the separate `spring.ai.chat.client.active`
         # LongTaskTimer, which no panel queries and which was 319 bucket lines for its siblings.
         "[spring.ai.chat.client.active]": false
+      # Where the histogram's buckets stop. Micrometer's default is 30s, and a chat turn takes 76-84s
+      # (gemma4:e2b, up to num-predict 1024 tokens), so half of all turns landed in the +Inf bucket and
+      # histogram_quantile reported p95 as exactly 30s - a number that was never measured. 300s leaves
+      # headroom above the slowest answer the num-predict ceiling allows. Prefix matches, like the keys
+      # above.
+      maximum-expected-value:
+        "[http.server.requests]": 300s
+        "[gen_ai.client.operation]": 300s
+        "[spring.ai.chat.client]": 300s
+        "[spring.ai.advisor]": 300s
+        "[db.vector.client.operation]": 300s
     enable:
       all: true
 

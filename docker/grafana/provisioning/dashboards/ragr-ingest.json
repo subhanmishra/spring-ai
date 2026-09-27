@@ -1,0 +1,469 @@
+{
+  "uid": "ragr-ingest",
+  "title": "ragr-ingest — ingestion",
+  "tags": [
+    "ragr",
+    "spring-ai",
+    "ingestion"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 3,
+  "refresh": "10s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "ragr dashboards",
+      "type": "dashboards",
+      "tags": [
+        "ragr"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true
+    }
+  ],
+  "description": "Document ingestion: every upload with its parse and embed-and-write time, embedding calls to nomic-embed-text, and chunks written to vector_store. The two upload panels read Postgres (document_metadata_history), because uploads are rare and Prometheus never counts the first observation of a metric after the application starts; everything else is Prometheus, application=\"ragr-ingest\". Runtime health (JVM, HTTP, Hikari) is on the overview.",
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Uploads",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Uploads — one row per document",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "description": "Every upload in the time range, read from document_metadata_history rather than Prometheus. Uploads are rare and each run of ragr-ingest typically sees one, and Prometheus never counts the first observation of a metric after the application starts - so the Prometheus upload panels used to miss exactly the upload you were looking for. The history table records every status change with its time and outlives the document. parse is UPLOADING to PROCESSING (read, parse, chunk); embed + write is PROCESSING to INDEXED or FAILED. The history holds no file name, so a document deleted since - for example by a re-ingest - shows as \"(deleted since)\" and loses its chunk count. An upload refused for its file type writes nothing and appears only in the request panel below.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "refId": "A",
+          "rawSql": "WITH t AS (SELECT document_metadata_id AS id, MIN(created_at) FILTER (WHERE status = 'UPLOADING') AS uploaded, MIN(created_at) FILTER (WHERE status = 'PROCESSING') AS processing, MIN(created_at) FILTER (WHERE status IN ('INDEXED', 'FAILED')) AS finished, (ARRAY_AGG(status ORDER BY created_at DESC))[1] AS outcome FROM document_metadata_history GROUP BY document_metadata_id) SELECT t.uploaded AS \"started\", COALESCE(d.filename, '(deleted since)') AS \"file\", t.outcome, ROUND(EXTRACT(EPOCH FROM t.processing - t.uploaded)::numeric, 1) AS \"parse s\", ROUND(EXTRACT(EPOCH FROM t.finished - t.processing)::numeric, 1) AS \"embed + write s\", ROUND(EXTRACT(EPOCH FROM t.finished - t.uploaded)::numeric, 1) AS \"total s\", d.total_chunks AS \"chunks\" FROM t LEFT JOIN document_metadata d ON d.id = t.id WHERE $__timeFilter(t.uploaded) ORDER BY t.uploaded DESC LIMIT 100"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Upload duration per document",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "description": "One point per finished upload, at the time it finished, split into its two phases. Read from document_metadata_history, so every upload is here - including the first after a restart, which Prometheus-based panels cannot see. The 645-page reference manual takes about three to four minutes, nearly all of it embedding.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "refId": "A",
+          "rawSql": "WITH t AS (SELECT document_metadata_id AS id, MIN(created_at) FILTER (WHERE status = 'UPLOADING') AS uploaded, MIN(created_at) FILTER (WHERE status = 'PROCESSING') AS processing, MIN(created_at) FILTER (WHERE status IN ('INDEXED', 'FAILED')) AS finished, (ARRAY_AGG(status ORDER BY created_at DESC))[1] AS outcome FROM document_metadata_history GROUP BY document_metadata_id) SELECT t.finished AS time, EXTRACT(EPOCH FROM t.finished - t.uploaded) AS \"total\", EXTRACT(EPOCH FROM t.processing - t.uploaded) AS \"parse\", EXTRACT(EPOCH FROM t.finished - t.processing) AS \"embed + write\" FROM t WHERE t.finished IS NOT NULL AND $__timeFilter(t.finished) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 9,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Document API requests by status",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Every /api/v1/documents endpoint by status, from Prometheus: listing, lookup, history and delete as well as upload. The one place a 415 (unsupported type) shows, since it writes nothing to Postgres. As with every Prometheus panel here, the first request of each kind after ragr-ingest starts is not counted.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"ragr-ingest\", uri=~\"^/api/v1/documents(/.*)?$\"}[5m])) by (method, uri, status)",
+          "legendFormat": "{{method}} {{uri}} [{{status}}]",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Embedding — nomic-embed-text",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "panels": []
+    },
+    {
+      "id": 4,
+      "title": "Embedding call rate",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Calls to Ollama's embedding endpoint - one per batch of chunks (app.ingestion.batch-size).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"ragr-ingest\"}[5m])) by (gen_ai_operation_name, gen_ai_response_model)",
+          "legendFormat": "{{gen_ai_operation_name}} ({{gen_ai_response_model}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Embedding call latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Per batch. Cost scales with the tokens in the batch rather than the number of chunks, so this moves with chunk sizing as well as with model load. Quantiles and averages use a 1h window: with a handful of requests an hour, a 5m window is NaN (drawn as nothing, not as zero) except in the five minutes after a request. A value here therefore describes the last hour of requests, and a line holding flat means no new ones.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Embedding errors",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Failed embedding calls. An unreachable model runner is retried (app.ingestion.max-attempts); anything else fails the document, and its already-written chunks are deleted.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"ragr-ingest\", error!=\"none\"}[5m])) by (error)",
+          "legendFormat": "{{error}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Embedding throughput — nomic-embed-text (peak, 15m)",
+      "description": "Peak wall-clock embedding rate over the last 15 minutes. Embedding is bursty - it only runs while a document is ingesting (~190s) and is idle otherwise - so a plain live rate reads 0 whenever anyone actually looks at it, which is after an upload finishes. Taking the peak over 15m holds the figure long enough to be read. The inner window is 2m rather than 5m because a 5m window averages a 190s burst against surrounding idle and under-reports it: measured on the same ingestion, 5m peaked at 1599 tok/s where 2m saw 2026 and 1m saw 2189. 2m is the compromise - it fits inside a burst while still spanning 8 scrapes at the 15s scrape interval. This is deliberately wall-clock throughput, not per-request speed: ingestion runs app.rag.ingestion-concurrency requests at once against Ollama's single embedding slot, so dividing by summed request duration would understate it by roughly the concurrency factor. Hardware ceiling is ~830 tok/s on CPU and ~1750+ with OLLAMA_IGPU_ENABLE=1. The trailing '> 50' floor exists so that the single small query embedding every chat performs does not register: a ~16-token question spread over the 2m window reads 0.133 tok/s, which is visually indistinguishable from zero on this scale and implies embedding is running when nothing bulk is. The floor separates the two cleanly - even one ingestion batch (35 chunks, ~7.8k tokens) reads ~65 tok/s over a 2m window, and that holds on CPU too. Below the floor the series is empty and noValue renders 'idle'. Both this gauge and the chat one next to it must stay instant:true - as range queries reduced with lastNotNull they showed the last value the expression held anywhere in the dashboard's time window, so with a 3h window this panel displayed a stale 665 tok/s from an ingestion an hour earlier while nothing was running, contradicting its own title. BLANK WHILE IDLE BY DESIGN: the query ends in `> 50`, which suppresses the gauge below 50 tok/s so it reports genuine ingestion peaks rather than the near-zero trickle of a single chat turn embedding its query. Expect a reading only while a document is being ingested.",
+      "type": "gauge",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 2500,
+          "noValue": "idle",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "blue",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 1200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max_over_time(sum(rate(gen_ai_client_token_usage_total{application=\"ragr-ingest\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}[2m]))[15m:30s]) > 50",
+          "instant": true,
+          "range": false,
+          "legendFormat": "tok/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Tokens embedded (cumulative)",
+      "description": "Total input tokens sent to the embedding model since the application started. Resets on restart, since this is a process-scoped counter.",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(gen_ai_client_token_usage_total{application=\"ragr-ingest\", gen_ai_operation_name=\"embedding\", gen_ai_token_type=\"input\"}) by (gen_ai_response_model)",
+          "legendFormat": "{{gen_ai_response_model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "type": "row",
+      "title": "Vector store writes",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "pgvector add latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Client-side timing of VectorStore.add, per batch. It includes the Ollama embedding round-trip, since add embeds before inserting - compare with the embedding latency above to see how much is the insert itself. Quantiles and averages use a 1h window: with a handful of requests an hour, a 5m window is NaN (drawn as nothing, not as zero) except in the five minutes after a request. A value here therefore describes the last hour of requests, and a line holding flat means no new ones.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum(rate(db_vector_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le, db_operation_name))",
+          "legendFormat": "p50 {{db_operation_name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(db_vector_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le, db_operation_name))",
+          "legendFormat": "p95 {{db_operation_name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "vector_store live rows",
+      "description": "Chunks currently stored. Should equal the sum of total_chunks across INDEXED documents; a mismatch points at orphaned chunks from an ingestion that died before its compensating delete ran.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_user_tables_n_live_tup{relname=\"vector_store\"}",
+          "legendFormat": "live rows",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

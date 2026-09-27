@@ -1,13 +1,14 @@
 {
   "uid": "spring-ai-ragr-overview",
-  "title": "spring-ai-ragr overview",
+  "title": "ragr — overview",
   "tags": [
+    "ragr",
     "spring-boot",
     "micrometer"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 9,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -52,11 +53,21 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "jvm_memory_used_bytes{application=\"spring-ai-ragr\", area=\"heap\"}",
-          "legendFormat": "{{id}}",
+          "expr": "sum by (application) (jvm_memory_used_bytes{application=~\"$application\", area=\"heap\"})",
+          "legendFormat": "{{application}} used",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (application) (jvm_memory_max_bytes{application=~\"$application\", area=\"heap\"} > 0)",
+          "legendFormat": "{{application}} max (-Xmx)",
+          "refId": "B"
         }
-      ]
+      ],
+      "description": "Heap in use per application, against its -Xmx cap. All three run capped (ragr-app 384m, ragr-ingest 512m, ragr-eval 256m) because the host has a few hundred MB to spare once both Ollama models are loaded; a used line pressing against its max line is the one to watch."
     },
     {
       "id": 2,
@@ -85,8 +96,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(jvm_gc_pause_seconds_sum{application=\"spring-ai-ragr\"}[5m])",
-          "legendFormat": "{{action}} · {{cause}}",
+          "expr": "sum by (application) (rate(jvm_gc_pause_seconds_sum{application=~\"$application\"}[5m]))",
+          "legendFormat": "{{application}}",
           "refId": "A"
         }
       ]
@@ -117,8 +128,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "jvm_threads_live_threads{application=\"spring-ai-ragr\"}",
-          "legendFormat": "live threads",
+          "expr": "jvm_threads_live_threads{application=~\"$application\"}",
+          "legendFormat": "{{application}}",
           "refId": "A"
         }
       ]
@@ -137,7 +148,7 @@
     },
     {
       "id": 3,
-      "title": "HTTP request rate by status — controller endpoints",
+      "title": "HTTP request rate by status — API endpoints",
       "description": "/ai/** (ChatController) and /api/v1/documents/** (DocumentController)",
       "type": "timeseries",
       "gridPos": {
@@ -162,9 +173,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (uri, status)",
-          "exemplar": true,
-          "legendFormat": "{{uri}} [{{status}}]",
+          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", uri=~\"^/(ai|api/v1)(/.*)?$\"}[5m])) by (application, uri, status)",
+          "legendFormat": "{{application}} {{uri}} [{{status}}]",
           "refId": "A"
         }
       ]
@@ -196,17 +206,16 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_requests_seconds_count{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (uri, status)",
-          "exemplar": true,
-          "legendFormat": "{{uri}} [{{status}}]",
+          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[5m])) by (application, uri, status)",
+          "legendFormat": "{{application}} {{uri}} [{{status}}]",
           "refId": "A"
         }
       ]
     },
     {
       "id": 5,
-      "title": "HTTP request latency (p50/p80/p95/p99) — controller endpoints",
-      "description": "/ai/** (ChatController) and /api/v1/documents/** (DocumentController)",
+      "title": "HTTP request latency (p50/p80/p95/p99) — API endpoints",
+      "description": "/ai/** (ChatController) and /api/v1/documents/** (DocumentController) Quantiles and averages use a 1h window: with a handful of requests an hour, a 5m window is NaN (drawn as nothing, not as zero) except in the five minutes after a request. A value here therefore describes the last hour of requests, and a line holding flat means no new ones.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -230,9 +239,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p50",
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri=~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p50",
           "refId": "A"
         },
         {
@@ -240,9 +248,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p80",
+          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri=~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p80",
           "refId": "B"
         },
         {
@@ -250,9 +257,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p95",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri=~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p95",
           "refId": "C"
         },
         {
@@ -260,9 +266,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri=~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p99",
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri=~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p99",
           "refId": "D"
         }
       ]
@@ -270,7 +275,7 @@
     {
       "id": 6,
       "title": "HTTP request latency (p50/p80/p95/p99) — other endpoints",
-      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.)",
+      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.) Quantiles and averages use a 1h window: with a handful of requests an hour, a 5m window is NaN (drawn as nothing, not as zero) except in the five minutes after a request. A value here therefore describes the last hour of requests, and a line holding flat means no new ones.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -294,9 +299,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p50",
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p50",
           "refId": "A"
         },
         {
@@ -304,9 +308,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p80",
+          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p80",
           "refId": "B"
         },
         {
@@ -314,9 +317,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p95",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p95",
           "refId": "C"
         },
         {
@@ -324,9 +326,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"spring-ai-ragr\", uri!~\"^/(ai|api/v1/documents)(/.*)?$\"}[5m])) by (le, uri))",
-          "exemplar": true,
-          "legendFormat": "{{uri}} p99",
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "legendFormat": "{{application}} {{uri}} p99",
           "refId": "D"
         }
       ]
@@ -369,8 +370,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "hikaricp_connections_active{application=\"spring-ai-ragr\"}",
-          "legendFormat": "active",
+          "expr": "hikaricp_connections_active{application=~\"$application\"}",
+          "legendFormat": "{{application}} active",
           "refId": "A"
         },
         {
@@ -378,8 +379,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "hikaricp_connections_idle{application=\"spring-ai-ragr\"}",
-          "legendFormat": "idle",
+          "expr": "hikaricp_connections_idle{application=~\"$application\"}",
+          "legendFormat": "{{application}} idle",
           "refId": "B"
         },
         {
@@ -387,21 +388,22 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "hikaricp_connections_pending{application=\"spring-ai-ragr\"}",
-          "legendFormat": "pending",
+          "expr": "hikaricp_connections_pending{application=~\"$application\"}",
+          "legendFormat": "{{application}} pending",
           "refId": "C"
         }
-      ]
+      ],
+      "description": "Each application has its own pool: ragr-ingest 20, sized for app.ingestion.concurrency batch writes; ragr-app 5, for one similarity search per chat turn; ragr-eval 3. Pending above zero means callers are queueing for a connection."
     },
     {
       "id": 400,
       "type": "row",
-      "title": "Backing services — Redis & Postgres",
+      "title": "Shared infrastructure — Redis & Postgres",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 44
       },
       "collapsed": false
     },
@@ -414,7 +416,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 45
       },
       "datasource": {
         "type": "prometheus",
@@ -446,7 +448,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 45
       },
       "datasource": {
         "type": "prometheus",
@@ -478,7 +480,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 53
       },
       "datasource": {
         "type": "prometheus",
@@ -511,7 +513,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 53
       },
       "datasource": {
         "type": "prometheus",
@@ -546,7 +548,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 61
       },
       "datasource": {
         "type": "prometheus",
@@ -579,7 +581,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 61
       },
       "datasource": {
         "type": "prometheus",
@@ -614,7 +616,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 61
       },
       "datasource": {
         "type": "prometheus",
@@ -646,7 +648,207 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "id": 500,
+      "type": "row",
+      "title": "Kafka — chat turns from ragr-app to ragr-eval",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "panels": []
+    },
+    {
+      "id": 501,
+      "title": "Chat turns handed to Kafka, by outcome",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Published by ragr-app after each answer, off the chat thread. Delivery is at most once: \"dropped\" counts turns the broker did not acknowledge, which evaluation will never see. The answer itself is never affected.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(rag_chat_turn_events_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 502,
+      "title": "Evaluation consumer lag",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Records on rag.chat.turn.completed that ragr-eval has not yet read. It normally sits at 0; a rising line means evaluation is falling behind live traffic. Absent while ragr-eval is stopped - the consumer reports its own lag. A caught-up consumer draws a flat line along 0.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "softMax": 5,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (partition) (kafka_consumer_fetch_manager_records_lag{topic=\"rag.chat.turn.completed\"})",
+          "legendFormat": "partition {{partition}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 503,
+      "title": "Records sent and consumed",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Client-side view from both ends of the topic. There is no broker exporter, so broker health itself is not on any dashboard - a stopped broker shows here as sends turning into \"dropped\" above.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(kafka_producer_record_send_total{application=\"spring-ai-ragr\"}[5m]))",
+          "legendFormat": "sent (ragr-app)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(kafka_consumer_fetch_manager_records_consumed_total{topic=\"rag.chat.turn.completed\"}[5m]))",
+          "legendFormat": "consumed (ragr-eval)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 504,
+      "title": "Postgres live rows by table",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "One database, two schemas with separate owners: public belongs to ragr-ingest (documents, their history, vector_store) and eval to ragr-eval. vector_store should equal the sum of total_chunks across INDEXED documents.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_user_tables_n_live_tup{datname=\"ragdatabase\", relname!=\"flyway_schema_history\"}",
+          "legendFormat": "{{schemaname}}.{{relname}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
-  "description": "JVM runtime, Spring MVC, the application datasource and the backing services it depends on. AI and RAG panels deliberately live on the separate \"AI / RAG metrics\" dashboard, so this one answers \"is the application healthy\" without model or retrieval detail."
+  "description": "Runtime health of the three applications - spring-ai-ragr (chat), ragr-ingest and ragr-eval - and the infrastructure they share. Pick applications with the selector; every JVM, HTTP and Hikari panel splits by application. What each application does - model calls, retrieval, ingestion, evaluation scores - lives on its own dashboard, linked top right.",
+  "links": [
+    {
+      "title": "ragr dashboards",
+      "type": "dashboards",
+      "tags": [
+        "ragr"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "label": "application",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(jvm_memory_used_bytes{env=\"local\"}, application)",
+          "refId": "app"
+        },
+        "definition": "label_values(jvm_memory_used_bytes{env=\"local\"}, application)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  }
 }

@@ -1,7 +1,8 @@
 {
   "uid": "spring-ai-rag-evals",
-  "title": "spring-ai-ragr — RAG evaluation",
+  "title": "ragr-eval — evaluation",
   "tags": [
+    "ragr",
     "spring-ai",
     "rag",
     "eval",
@@ -9,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -1242,6 +1243,18 @@
           "refId": "A"
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "title": "ragr dashboards",
+      "type": "dashboards",
+      "tags": [
+        "ragr"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true
     }
   ]
 }

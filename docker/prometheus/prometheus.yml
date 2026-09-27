@@ -16,10 +16,15 @@ scrape_configs:
     static_configs:
       - targets: ['postgres-exporter:9187']
 
-  # Evaluation, run as its own application: the rag_eval_* metrics come from here, not from
-  # spring-ai-ragr. The dashboards query by metric name without a job filter, so nothing on them needs
-  # to change - but that also means no second process may ever publish the same names, or every eval
-  # panel would count twice.
+  # The chat service's two siblings, each run as its own application. Every Spring application tags its
+  # meters with application=<spring.application.name> - spring-ai-ragr, ragr-ingest, ragr-eval - and
+  # the dashboards select on that tag, so a metric moving between applications empties any panel still
+  # selecting the old one.
+  - job_name: 'ragr-ingest'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:9097']
+
   - job_name: 'ragr-eval'
     metrics_path: '/actuator/prometheus'
     static_configs:

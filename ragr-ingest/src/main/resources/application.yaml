@@ -93,6 +93,14 @@ management:
         "[http.server.requests.active]": false
         "[gen_ai.client.operation.active]": false
         "[db.vector.client.operation.active]": false
+      # Where the histogram's buckets stop. Micrometer's default is 30s, and indexing the 645-page
+      # reference manual is one ~240s upload request, so every upload landed in the +Inf bucket and its
+      # quantiles read 30s. 900s covers a document near the 25MB upload limit; embedding batches and
+      # vector writes take tens of seconds, so 300s leaves them headroom.
+      maximum-expected-value:
+        "[http.server.requests]": 900s
+        "[gen_ai.client.operation]": 300s
+        "[db.vector.client.operation]": 300s
     enable:
       all: true
 
