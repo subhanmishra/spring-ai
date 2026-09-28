@@ -223,11 +223,10 @@ services:
       - ./docker-volume/tempo-data:/var/tempo
     ports:
       - "3200:3200"   # tempo
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:3200/ready || exit 1" ]
-      interval: 5s
-      timeout: 1s
-      retries: 10
+    # No healthcheck, for the same reason as Loki: current grafana/tempo:latest images ship without
+    # /bin/sh, so a CMD-SHELL check can never run, the container reports unhealthy, and `docker compose
+    # up --wait` - which Spring Boot runs on a cold start - fails and aborts startup. Nothing waits on
+    # Tempo being healthy - the collector's and grafana's depends_on are plain ordering.
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
