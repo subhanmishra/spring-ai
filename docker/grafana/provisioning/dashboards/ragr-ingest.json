@@ -24,6 +24,14 @@
       "asDropdown": true,
       "includeVars": false,
       "keepTime": true
+    },
+    {
+      "title": "Swagger UI",
+      "type": "link",
+      "url": "http://localhost:8081/swagger-ui/index.html",
+      "icon": "external link",
+      "tooltip": "ragr-ingest's API: document upload, status, history and delete",
+      "targetBlank": true
     }
   ],
   "description": "Document ingestion: every upload with its parse and embed-and-write time, embedding calls to nomic-embed-text, and chunks written to vector_store. The two upload panels read Postgres (document_metadata_history), because uploads are rare and Prometheus never counts the first observation of a metric after the application starts; everything else is Prometheus, application=\"ragr-ingest\". Runtime health (JVM, HTTP, Hikari) is on the overview.",

@@ -186,4 +186,4 @@ exactly as poorly as it does there.
 errors; token usage and generation throughput; ChatClient end-to-end latency and the time spent in each
 advisor; and the vector store's query rate, latency and index-versus-sequential scans. JVM, HTTP and
 connection-pool panels for this application are on **ragr — overview**, under `application =
-spring-ai-ragr`.
+spring-ai-ragr`. A **Swagger UI** link in the top bar opens this application's API docs.

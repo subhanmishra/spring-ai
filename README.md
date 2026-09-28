@@ -243,7 +243,7 @@ dashboard panel selects on:
 | `ragr-ingest` | `9097` | `ragr-ingest` | `ragr-ingest` |
 | `ragr-eval` | `9096` | `ragr-eval` | `ragr-eval` |
 
-Grafana has four dashboards, linked to each other from the "ragr dashboards" menu top right, each
+Grafana has four dashboards, linked to each other from the "ragr dashboards" menu top left, each
 answering a different question:
 
 * **ragr — overview** — *are the applications and the infrastructure healthy?* JVM runtime, HTTP / Spring MVC and HikariCP for all three applications, split by an `application` selector; Kafka from the client side (turns published vs dropped, evaluation consumer lag), with links into the Kafka console; Redis; and Postgres, including row counts per schema and table.

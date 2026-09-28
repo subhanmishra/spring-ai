@@ -147,4 +147,5 @@ again - see the [root README](../README.md#changing-the-pipeline-means-re-ingest
 **ragr-ingest — ingestion** in Grafana answers *is indexing healthy?*: one row per upload with its
 outcome, chunk count and time split into parsing and embedding-plus-writing, read from
 `document_metadata_history` through the Postgres datasource; document API requests; embedding calls, latency and throughput; vector-store write
-latency; and the live row count of `vector_store`.
+latency; and the live row count of `vector_store`. A **Swagger UI** link in the top bar opens this
+application's API docs.

@@ -556,6 +556,14 @@
       "asDropdown": true,
       "includeVars": false,
       "keepTime": true
+    },
+    {
+      "title": "Swagger UI",
+      "type": "link",
+      "url": "http://localhost:8080/swagger-ui/index.html",
+      "icon": "external link",
+      "tooltip": "ragr-app's API: chat, conversations and admin diagnostics",
+      "targetBlank": true
     }
   ]
 }
