@@ -71,8 +71,10 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # SpringAiConfig, RedisConfig, OpenApiConfig, RagProperties (top-k,
-│       │   │   │               # threshold), SpringAiProperties, KafkaConfig, EventsProperties
-│       │   │   ├── controller  # ChatController, AdminDiagnosticsController, ConversationIdAdvice
+│       │   │   │               # threshold), SpringAiProperties, KafkaConfig, EventsProperties,
+│       │   │   │               # WebConfig
+│       │   │   ├── controller  # ChatController, AdminDiagnosticsController,
+│       │   │   │               # ConversationIdInterceptor
 │       │   │   ├── dto
 │       │   │   ├── exception   # ChatExceptionHandler
 │       │   │   └── service     # ChatService, RetrievalDiagnosticsService, ChatTurnPublisher

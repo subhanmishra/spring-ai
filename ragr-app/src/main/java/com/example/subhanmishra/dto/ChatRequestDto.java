@@ -5,7 +5,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * A chat turn: the prompt to answer, and optionally the conversation to continue.
+ * A chat turn: the prompt to answer, and nothing else. The conversation it continues travels in the
+ * {@code X-Conversation-Id} header - see {@code ConversationIdInterceptor}.
  *
  * <p>The prompt travels in a request body rather than a query parameter so it stays out of access
  * logs, browser history and proxy logs - for a RAG assistant the questions people ask about their own
@@ -25,9 +26,5 @@ public record ChatRequestDto(
         @Size(max = 4000, message = "prompt must be at most 4000 characters")
         @Schema(description = "The question or instruction to send to the model",
                 example = "what is a spring boot starter")
-        String prompt,
-
-        @Schema(description = "Conversation to continue. Omit to start a new one - the id that was "
-                + "used is returned in the X-Conversation-Id response header either way.")
-        String conversationId) {
+        String prompt) {
 }

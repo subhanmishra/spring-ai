@@ -249,8 +249,9 @@ public class GoldenEvalService {
             chat.post()
                 .uri("/ai/generate")
                 .header(TurnOrigin.HEADER, TurnOrigin.GOLDEN.name())
+                .header("X-Conversation-Id", conversationId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("prompt", goldenCase.query(), "conversationId", conversationId))
+                .body(Map.of("prompt", goldenCase.query()))
                 .retrieve()
                 .toBodilessEntity();
             long millis = (System.nanoTime() - startedAt) / 1_000_000;

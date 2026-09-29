@@ -57,8 +57,8 @@ None of these change what is stored, so none of them need a re-ingest.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), `conversationId` (optional). Optional header `X-Eval-Origin: GOLDEN` (upper case; anything else but `LIVE` is a 400) marks the turn as the golden evaluation suite's, which online evaluation leaves out of the live metrics |
-| POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body as above |
+| POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), and nothing else. Optional header `X-Conversation-Id` continues that conversation. Optional header `X-Eval-Origin: GOLDEN` (upper case; anything else but `LIVE` is a 400) marks the turn as the golden evaluation suite's, which online evaluation leaves out of the live metrics |
+| POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body and headers as above |
 | GET | `/ai/conversations` | List all active conversation IDs |
 | GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
 | DELETE | `/ai/conversations/{id}` | Delete a single conversation |
@@ -72,7 +72,7 @@ curl -X POST http://localhost:8080/ai/generate \
 # Capture the conversation ID, then continue that conversation
 curl -i -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' -d '{"prompt":"Hello"}' | grep -i x-conversation-id
 curl -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/json' \
-  -d '{"prompt":"And what did I just ask?","conversationId":"<id>"}'
+  -H 'X-Conversation-Id: <id>' -d '{"prompt":"And what did I just ask?"}'
 
 curl -N -X POST http://localhost:8080/ai/generateStream \
   -H 'Content-Type: application/json' \
@@ -85,9 +85,11 @@ curl -X DELETE "http://localhost:8080/ai/conversations/<id>"
 
 OpenAPI docs: `http://localhost:8080/swagger-ui.html`.
 
-Both generate endpoints return the conversation ID in an **`X-Conversation-Id`** response header, a
-freshly generated UUID when `conversationId` was not supplied. Pass it back on the next call to
-continue the same conversation.
+The conversation travels in the **`X-Conversation-Id`** header, in both directions, so the body holds
+only the prompt. Send it to continue a conversation; leave it out to start one. Both generate endpoints
+return the ID that was used in the response header of the same name - a freshly generated UUID when
+none was sent. Pass it back on the next call to continue the same conversation. An id sent in the body
+is ignored, and the call starts a new conversation.
 
 The prompt travels in a **JSON request body, not a query parameter**: a `GET` with `?prompt=` would put
 every question anyone asks into access logs, browser history and proxy logs, and would cap the prompt at

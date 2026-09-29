@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -29,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(controllers = ChatController.class)
 class ChatControllerOriginTest {
 
-    private static final String BODY = "{\"prompt\":\"How do I change the port?\",\"conversationId\":\"conv-1\"}";
+    private static final String BODY = "{\"prompt\":\"How do I change the port?\"}";
 
     @Autowired
     private MockMvc mvc;
@@ -42,10 +44,37 @@ class ChatControllerOriginTest {
     void absentIsLive() throws Exception {
         when(chatService.generate(anyString(), anyString(), any())).thenReturn(answer());
 
-        mvc.perform(post("/ai/generate").contentType(MediaType.APPLICATION_JSON).content(BODY))
+        mvc.perform(post("/ai/generate").contentType(MediaType.APPLICATION_JSON).content(BODY)
+                                        .header(ConversationIdInterceptor.HEADER, "conv-1"))
            .andExpect(status().isOk());
 
         verify(chatService).generate("How do I change the port?", "conv-1", TurnOrigin.LIVE);
+    }
+
+    @Test
+    @DisplayName("a supplied conversation id is used and echoed back")
+    void suppliedConversationIdEchoed() throws Exception {
+        when(chatService.generate(anyString(), anyString(), any())).thenReturn(answer());
+
+        mvc.perform(post("/ai/generate").contentType(MediaType.APPLICATION_JSON).content(BODY)
+                                        .header(ConversationIdInterceptor.HEADER, "conv-1"))
+           .andExpect(status().isOk())
+           .andExpect(header().string(ConversationIdInterceptor.HEADER, "conv-1"));
+
+        verify(chatService).generate(anyString(), eq("conv-1"), any());
+    }
+
+    @Test
+    @DisplayName("without a conversation id one is generated, used and returned")
+    void missingConversationIdGenerated() throws Exception {
+        when(chatService.generate(anyString(), anyString(), any())).thenReturn(answer());
+
+        String returned = mvc.perform(post("/ai/generate").contentType(MediaType.APPLICATION_JSON).content(BODY))
+                             .andExpect(status().isOk())
+                             .andReturn().getResponse().getHeader(ConversationIdInterceptor.HEADER);
+
+        assertThat(returned).isNotBlank();
+        verify(chatService).generate(anyString(), eq(returned), any());
     }
 
     @Test
@@ -54,6 +83,7 @@ class ChatControllerOriginTest {
         when(chatService.generate(anyString(), anyString(), any())).thenReturn(answer());
 
         mvc.perform(post("/ai/generate").contentType(MediaType.APPLICATION_JSON).content(BODY)
+                                        .header(ConversationIdInterceptor.HEADER, "conv-1")
                                         .header(TurnOrigin.HEADER, "GOLDEN"))
            .andExpect(status().isOk());
 

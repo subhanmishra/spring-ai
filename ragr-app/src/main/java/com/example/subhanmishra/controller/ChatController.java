@@ -6,6 +6,8 @@ import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -21,6 +23,11 @@ import java.util.List;
 @Tag(name = "Chat API", description = "Endpoints for interacting with the AI chat functionality")
 public class ChatController {
 
+    // Documents the header ConversationIdInterceptor reads; the controller itself receives the settled id
+    // as a request attribute, which springdoc cannot see.
+    private static final String CONVERSATION_ID_DOC = "Conversation to continue. Omit to start a new one - "
+            + "the id that was used is returned in the X-Conversation-Id response header either way.";
+
     private final ChatService chatService;
 
     public ChatController(ChatService chatService) {
@@ -35,14 +42,16 @@ public class ChatController {
                     "carries no inline citations; the evidence is reported beside it instead - every retrieved " +
                     "source with its full text, each citation the model made checked against those sources " +
                     "(VERIFIED, REPAIRED or UNVERIFIED), whether the answer was grounded at all, and token usage. " +
-                    "The conversation ID used (newly generated if none was supplied) is returned in the " +
-                    "X-Conversation-Id header so it can be passed back in on subsequent calls to continue the " +
-                    "same conversation. The prompt travels in the request body rather than a query parameter so " +
-                    "it stays out of access logs, browser history and proxy logs, and is not bounded by URL " +
-                    "length limits.")
+                    "The conversation to continue is named in the X-Conversation-Id request header; the ID used " +
+                    "(newly generated if none was supplied) is returned in the X-Conversation-Id response " +
+                    "header so it can be passed back in on subsequent calls to continue the same conversation. " +
+                    "The prompt travels in the request body rather than a query parameter so it stays out of " +
+                    "access logs, browser history and proxy logs, and is not bounded by URL length limits.")
+    @Parameter(in = ParameterIn.HEADER, name = ConversationIdInterceptor.HEADER, description = CONVERSATION_ID_DOC)
     public ChatAnswerDto generate(@Valid @RequestBody ChatRequestDto request,
+                                  @Parameter(hidden = true) @RequestAttribute(ConversationIdInterceptor.ATTRIBUTE) String conversationId,
                                   @RequestHeader(name = TurnOrigin.HEADER, defaultValue = "LIVE") TurnOrigin origin) {
-        return chatService.generate(request.prompt(), request.conversationId(), origin);
+        return chatService.generate(request.prompt(), conversationId, origin);
     }
 
     @PostMapping(value = "/generateStream",
@@ -52,14 +61,16 @@ public class ChatController {
             description = "Sends a prompt to the AI and gets a streaming response, suitable for UI updates. The " +
                     "answer text arrives as unnamed events with its inline citations removed. Two named events " +
                     "follow the last of it: 'sources' ({grounded, sources}) and then 'done' ({citations, usage}), " +
-                    "in the same shapes as /generate returns. The " +
-                    "conversation ID used (newly generated if none was supplied) is returned in the X-Conversation-Id " +
-                    "header so it can be passed back in on subsequent calls to continue the same conversation. Note " +
+                    "in the same shapes as /generate returns. The conversation is named in the X-Conversation-Id " +
+                    "request header, and the ID used (newly generated if none was supplied) is returned in the " +
+                    "X-Conversation-Id response header, exactly as for /generate. Note " +
                     "that because this is a POST, a browser client cannot consume it with the native EventSource API, " +
                     "which only issues GET requests - use fetch with a ReadableStream instead.")
+    @Parameter(in = ParameterIn.HEADER, name = ConversationIdInterceptor.HEADER, description = CONVERSATION_ID_DOC)
     public Flux<ServerSentEvent<?>> generateStream(@Valid @RequestBody ChatRequestDto request,
+                                                   @Parameter(hidden = true) @RequestAttribute(ConversationIdInterceptor.ATTRIBUTE) String conversationId,
                                                    @RequestHeader(name = TurnOrigin.HEADER, defaultValue = "LIVE") TurnOrigin origin) {
-        return chatService.generateStream(request.prompt(), request.conversationId(), origin);
+        return chatService.generateStream(request.prompt(), conversationId, origin);
     }
 
     @GetMapping("/conversations")
