@@ -110,7 +110,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │   └── src
 │       ├── main
 │       │   ├── java/.../subhanmishra/
-│       │   │   ├── config      # EvalConfig, EvalProperties
+│       │   │   ├── config      # EvalConfig, EvalProperties, ObservationConfig
 │       │   │   ├── entity      # EvalRun, EvalCaseResult, EvalRunStatus
 │       │   │   ├── repository
 │       │   │   └── service     # OnlineEvalService (the Kafka listener), EvalScoringService,

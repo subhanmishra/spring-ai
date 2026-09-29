@@ -63,9 +63,16 @@ management:
       application: ${spring.application.name}
   server:
     port: 9097
-  otlp:
+  # The Boot 4 key. Its predecessor, management.otlp.tracing.endpoint, is still accepted without a
+  # warning but ignored, and under it this application exported no traces at all: spans were
+  # recorded, trace ids reached the logs and the Prometheus exemplars, and Tempo never saw one, so
+  # every exemplar's "Query with Tempo" link opened a trace that did not exist. ragr-app hid the
+  # problem by getting the collector's address from its Docker Compose service connection instead.
+  opentelemetry:
     tracing:
-      endpoint: "http://localhost:4318/v1/traces"
+      export:
+        otlp:
+          endpoint: "http://localhost:4318/v1/traces"
   tracing:
     sampling:
       probability: 1.0

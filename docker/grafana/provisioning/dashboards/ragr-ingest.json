@@ -152,6 +152,7 @@
             "uid": "prometheus"
           },
           "expr": "sum(rate(http_server_requests_seconds_count{application=\"ragr-ingest\", uri=~\"^/api/v1/documents(/.*)?$\"}[5m])) by (method, uri, status)",
+          "exemplar": true,
           "legendFormat": "{{method}} {{uri}} [{{status}}]",
           "refId": "A"
         }
@@ -198,6 +199,7 @@
             "uid": "prometheus"
           },
           "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"ragr-ingest\"}[5m])) by (gen_ai_operation_name, gen_ai_response_model)",
+          "exemplar": true,
           "legendFormat": "{{gen_ai_operation_name}} ({{gen_ai_response_model}})",
           "refId": "A"
         }
@@ -231,6 +233,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le))",
+          "exemplar": true,
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -273,6 +276,7 @@
             "uid": "prometheus"
           },
           "expr": "sum(rate(gen_ai_client_operation_seconds_count{application=\"ragr-ingest\", error!=\"none\"}[5m])) by (error)",
+          "exemplar": true,
           "legendFormat": "{{error}}",
           "refId": "A"
         }
@@ -426,6 +430,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, sum(rate(db_vector_client_operation_seconds_bucket{application=\"ragr-ingest\"}[1h])) by (le, db_operation_name))",
+          "exemplar": true,
           "legendFormat": "p50 {{db_operation_name}}",
           "refId": "A"
         },

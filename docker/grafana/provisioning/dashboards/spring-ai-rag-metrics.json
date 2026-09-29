@@ -88,6 +88,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[1h])) by (le, gen_ai_operation_name))",
+          "exemplar": true,
           "legendFormat": "p50 {{gen_ai_operation_name}}",
           "refId": "A"
         },
@@ -350,6 +351,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, sum(rate(spring_ai_chat_client_seconds_bucket{application=\"spring-ai-ragr\"}[1h])) by (le))",
+          "exemplar": true,
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -410,6 +412,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.95, sum(rate(spring_ai_advisor_seconds_bucket{application=\"spring-ai-ragr\"}[1h])) by (le, spring_ai_advisor_name))",
+          "exemplar": true,
           "legendFormat": "p95 {{spring_ai_advisor_name}}",
           "refId": "B"
         }
@@ -488,6 +491,7 @@
             "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, sum(rate(db_vector_client_operation_seconds_bucket{application=\"spring-ai-ragr\"}[1h])) by (le, db_operation_name))",
+          "exemplar": true,
           "legendFormat": "p50 {{db_operation_name}}",
           "refId": "A"
         },

@@ -8,9 +8,15 @@ management:
       application: ${spring.application.name}
   server:
     port: 9095
-  otlp:
+  # The Boot 4 key. Its predecessor, management.otlp.tracing.endpoint, is still accepted without a
+  # warning but ignored. This application kept exporting under it only because the Docker Compose
+  # service connection supplies the collector's address; ragr-ingest and ragr-eval, which do not use
+  # compose, exported nothing. Set explicitly so tracing does not depend on how the stack was started.
+  opentelemetry:
     tracing:
-      endpoint: "http://localhost:4318/v1/traces"
+      export:
+        otlp:
+          endpoint: "http://localhost:4318/v1/traces"
   tracing:
     sampling:
       probability: 1.0

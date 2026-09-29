@@ -255,8 +255,11 @@ The Postgres datasource reads what only the database knows: per-document upload 
 `document_metadata_history`, and the golden suite's per-case results from the `eval` schema.
 
 Grafana is wired so you can move between signals: logs ↔ traces, metrics → traces (via exemplars on
-the `http_server_requests_*` panels), and metrics → logs (via a correlation on the `job` field, shown
-in Table view).
+the overview's HTTP panels and the chat and ingestion dashboards' latency and call-rate panels -
+hover a dot, then **Query with Tempo**), traces → logs (a span's **Links → Related logs**), and
+metrics → logs (via a correlation on the `job` field, shown in Table view). All three applications
+export their traces to Tempo; a request that logs nothing, such as listing conversations, has no
+related logs to show.
 
 ## Technologies
 

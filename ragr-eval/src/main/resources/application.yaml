@@ -56,9 +56,15 @@ management:
   observations:
     key-values:
       application: ${spring.application.name}
-  otlp:
+  # The Boot 4 key. Its predecessor, management.otlp.tracing.endpoint, is still accepted without a
+  # warning but ignored, and under it this application exported no traces at all - the consumer and
+  # the judge calls were missing from Tempo. ragr-app hid the problem by getting the collector's
+  # address from its Docker Compose service connection instead, which this application does not use.
+  opentelemetry:
     tracing:
-      endpoint: "http://localhost:4318/v1/traces"
+      export:
+        otlp:
+          endpoint: "http://localhost:4318/v1/traces"
   tracing:
     sampling:
       probability: 1.0
