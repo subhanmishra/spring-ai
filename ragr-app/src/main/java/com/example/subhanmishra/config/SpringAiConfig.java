@@ -33,11 +33,22 @@ public class SpringAiConfig {
      * answer") is deliberately softened here, because it contradicts the system prompt's Hybrid Synthesis
      * and General Knowledge capabilities - the stock wording would forbid answers this assistant is
      * explicitly meant to give.
+     *
+     * <p>The passages are said to come from the library, not the user, because the advisor appends them
+     * to the <em>user</em> message. Introduced as plain "context information", the model took them for
+     * text the user had pasted and opened answers with "Thank you for providing the specific context ...
+     * based only on the text you supplied" - four of five turns in one stored conversation, each
+     * imitating the last through chat memory. With no passages retrieved it asked the user to "provide
+     * the context" instead of answering. The no-preamble rule is repeated here, beside the passages, for
+     * the same reason as the citation rule.
      */
     private static final PromptTemplate QA_PROMPT_TEMPLATE = new PromptTemplate("""
             {query}
 
-            Context information is below, surrounded by ---------------------
+            Passages retrieved automatically from the document library are below, surrounded by
+            ---------------------. The user did not write or see them, so never thank the user for
+            them or refer to "the context you provided". If there are none, answer from general
+            knowledge.
 
             ---------------------
             {question_answer_context}
@@ -55,8 +66,11 @@ public class SpringAiConfig {
             never a page - do not write (filename, p. 5.3). Cite the page from the source line
             of the passage the heading appears in.
 
-            Prefer the context over prior knowledge; if you go beyond it, say which part is not
-            from the documents.
+            Prefer the passages over prior knowledge. If part of the answer goes beyond them,
+            say so at that point in the answer, not as an opening disclaimer.
+
+            Start directly with the answer: no greeting, no restating the question, no
+            acknowledgement, and no closing offer of further help.
             """);
 
     @Bean
@@ -69,12 +83,12 @@ public class SpringAiConfig {
                                              .promptTemplate(QA_PROMPT_TEMPLATE)
                                              .build();
         return builder.defaultSystem("""
-                                        You are DocAI, an intelligent, versatile, and friendly AI document intelligence assistant.
+                                        You are DocAI, an intelligent, versatile AI document intelligence assistant.
                                         Your Capabilities:
                                         1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line. A page number is always a whole number; a dotted heading number inside a passage, such as "5.3", is a section and must never be cited as a page.
                                         2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
                                         3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
-                                        4. Tone & Format: Always be warm, professional, clear, and structured. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
+                                        4. Tone & Format: Be polite but direct - lead with the answer. No greetings, no restating the question, no thanking the user, no closing offers of further help. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
 
                 """).defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                     .defaultAdvisors(qaAdvisor)
