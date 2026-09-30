@@ -123,9 +123,14 @@
                     <!-- Measured over a grounded chat turn: heap peaked at 242 MB uncapped (with a 4 GB
                          default max, so largely uncollected garbage) and 150 MB under this cap, 471 MB
                          private against 726 MB uncapped. The host has a few hundred MB to spare once
-                         both Ollama models are loaded. The IntelliJ run configuration needs the same
-                         VM option. -->
-                    <jvmArguments>-Xmx384m</jvmArguments>
+                         both Ollama models are loaded.
+                         SerialGC rather than the default G1, measured over three grounded turns: peak
+                         private 448 MB under G1, 333 MB under Serial. Native memory tracking puts G1's own
+                         bookkeeping at 63 MB against 0 for Serial, and Serial also keeps the committed
+                         heap smaller (128 MB against 181). Four collections took 81 ms in total, so no
+                         pause a chat turn could notice. The IntelliJ run configuration needs the same VM
+                         options. -->
+                    <jvmArguments>-Xmx384m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>
             <plugin>
@@ -134,7 +139,7 @@
                 <configuration>
                     <!-- The same cap for the test JVM, which loads the full context beside the running
                          applications. Merged with the parent's surefire configuration. -->
-                    <argLine>-Xmx384m</argLine>
+                    <argLine>-Xmx384m -XX:+UseSerialGC</argLine>
                 </configuration>
             </plugin>
         </plugins>

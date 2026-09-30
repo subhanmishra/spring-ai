@@ -67,12 +67,12 @@
           "refId": "B"
         }
       ],
-      "description": "Heap in use per application, against its -Xmx cap. All three run capped (ragr-app 384m, ragr-ingest 512m, ragr-eval 256m) because the host has a few hundred MB to spare once both Ollama models are loaded; a used line pressing against its max line is the one to watch."
+      "description": "Heap in use per application, against its -Xmx cap. All three run capped (ragr-app 384m, ragr-ingest 512m, ragr-eval 256m) because the host has a few hundred MB to spare once both Ollama models are loaded; a used line pressing against its max line is the one to watch. All three also run SerialGC, which keeps committed heap close to what is in use rather than growing it ahead of need as G1 did - see the GC pause panel for the measurements."
     },
     {
       "id": 2,
       "title": "JVM GC pause time (5m rate)",
-      "description": "Seconds of stop-the-world pause per second, split by cause. The legend must include {{cause}}: jvm_gc_pause_seconds carries both action and cause, and every series this app produces has action=\"end of minor GC\", so a legend of {{action}} alone rendered three different series under three identical labels. G1 Evacuation Pause is the normal young collection and should dominate. CodeCache GC Threshold is JIT code-cache pressure rather than heap pressure, and is normal during warm-up. G1 Humongous Allocation is the one worth watching: heap max is ~4 GiB so the G1 region size is 2 MiB, which makes any allocation of 1 MiB or more humongous - it skips the normal fast path and lands directly in contiguous old-gen regions. Document upload is the obvious source, since the test corpus arrives as a 13.6 MB byte[], so this series is a proxy for ingestion allocating large objects.",
+      "description": "Seconds of stop-the-world pause per second, per application and collector. The collector is read from the data, not written here: Micrometer names each GC's generations in the gc label (Serial reports Copy for young collections and MarkSweepCompact for full ones, G1 reports G1 Young Generation and so on), and the query maps those to one collector name, so the legend follows any change to the VM options.\n\nAll three applications run SerialGC (-XX:+UseSerialGC in each module's pom and IntelliJ run configuration). On heaps of 256-512 MB, G1's own structures cost 63-68 MB per JVM and it committed more heap than it used; measured on 30 Sep 2026, Serial cut peak private memory from 448 to 333 MB for ragr-app and from 688 to 516 MB for ragr-ingest. The cost is pause time, and it lands on ragr-ingest: 0.97 s of GC over a full upload of the reference manual against 0.55 s, longest pause 132 ms. The pom comments carry the rest.\n\nSerial stops every application thread for every collection, so a spike here is time a request stood still. Allocation Failure on a young collection is the normal case; MarkSweepCompact means a full collection of the whole heap, expected during a large upload and worth a look anywhere else.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -96,8 +96,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (application) (rate(jvm_gc_pause_seconds_sum{application=~\"$application\"}[5m]))",
-          "legendFormat": "{{application}}",
+          "expr": "sum by (application, collector) (label_replace(label_replace(label_replace(label_replace(label_replace(rate(jvm_gc_pause_seconds_sum{application=~\"$application\"}[5m]), \"collector\", \"$1\", \"gc\", \"(.*)\"), \"collector\", \"Serial\", \"gc\", \"Copy|MarkSweepCompact\"), \"collector\", \"G1\", \"gc\", \"G1 .*\"), \"collector\", \"Parallel\", \"gc\", \"PS .*\"), \"collector\", \"ZGC\", \"gc\", \"ZGC .*\"))",
+          "legendFormat": "{{application}} · {{collector}}",
           "refId": "A"
         }
       ]

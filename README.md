@@ -198,14 +198,18 @@ support; the other two expect the stack it started and never start or stop conta
 runs the `public` schema's Flyway migration, so on an empty database chat has no `vector_store` to
 search until ingestion has started once.
 
-Every JVM runs with a capped heap on this memory-constrained host, set in each module's `pom.xml` for
-`spring-boot:run` and for its tests. An IntelliJ run configuration needs the same VM options:
+Every JVM runs with a capped heap and SerialGC on this memory-constrained host, set in each module's
+`pom.xml` for `spring-boot:run` and for its tests. An IntelliJ run configuration needs the same VM
+options:
 
-| Application | Cap | Measured |
+| Application | VM options | Measured |
 |---|---|---|
-| `ragr-app` | `-Xmx384m` | 150 MB heap, 471 MB private over a chat turn |
-| `ragr-ingest` | `-Xmx512m` | 354 MB heap, 651 MB private indexing the 645-page reference manual |
+| `ragr-app` | `-Xmx384m -XX:+UseSerialGC` | 104 MB heap, 333 MB private over three chat turns |
+| `ragr-ingest` | `-Xmx512m -XX:+UseSerialGC` | 210 MB heap, 516 MB private indexing the 645-page reference manual |
 | `ragr-eval` | `-Xmx256m -XX:+UseSerialGC` | 63 MB heap, 265 MB private |
+
+On heaps this size G1's own structures cost 63-68 MB per JVM; moving ragr-app and ragr-ingest to
+Serial saved about 290 MB at peak between them. Their pom comments carry the G1 comparison.
 
 ```bash
 ./mvnw test            # every module's tests; the golden suite is excluded, see ragr-eval

@@ -130,9 +130,13 @@
                          384 MB uncapped and 354 MB under this cap, 651 MB private, with 0.24s of GC in
                          total and the upload 245s against 231s uncapped. Uncapped, the JVM sized its
                          heap to 4 GB on a host with a few hundred MB to spare once both Ollama models
-                         are loaded, and available RAM fell to 144 MB mid-upload. The IntelliJ run
-                         configuration needs the same VM option. -->
-                    <jvmArguments>-Xmx512m</jvmArguments>
+                         are loaded, and available RAM fell to 144 MB mid-upload.
+                         SerialGC rather than the default G1, measured over the same upload: peak private
+                         688 MB under G1, 516 MB under Serial, with G1's own bookkeeping at 68 MB against
+                         1 MB. The cost is GC time - 0.97s in total against 0.55s, longest pause 132 ms -
+                         and the upload took 185s against 180s. Nothing here is latency-sensitive enough
+                         for that to matter. The IntelliJ run configuration needs the same VM options. -->
+                    <jvmArguments>-Xmx512m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>
             <plugin>
@@ -141,7 +145,7 @@
                 <configuration>
                     <!-- The same cap for the test JVM, which loads the full context beside the running
                          applications. Merged with the parent's surefire configuration. -->
-                    <argLine>-Xmx512m</argLine>
+                    <argLine>-Xmx512m -XX:+UseSerialGC</argLine>
                 </configuration>
             </plugin>
         </plugins>
