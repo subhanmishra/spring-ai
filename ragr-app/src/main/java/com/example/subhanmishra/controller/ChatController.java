@@ -65,7 +65,10 @@ public class ChatController {
                     "request header, and the ID used (newly generated if none was supplied) is returned in the " +
                     "X-Conversation-Id response header, exactly as for /generate. Note " +
                     "that because this is a POST, a browser client cannot consume it with the native EventSource API, " +
-                    "which only issues GET requests - use fetch with a ReadableStream instead.")
+                    "which only issues GET requests - use fetch with a ReadableStream instead. Swagger UI cannot " +
+                    "show the stream either: it reads the whole response body before rendering, so everything " +
+                    "appears at once after the 'done' event. To watch the events arrive, use " +
+                    "'curl -N' (which disables curl's output buffering) or a client with SSE support such as Postman.")
     @Parameter(in = ParameterIn.HEADER, name = ConversationIdInterceptor.HEADER, description = CONVERSATION_ID_DOC)
     public Flux<ServerSentEvent<?>> generateStream(@Valid @RequestBody ChatRequestDto request,
                                                    @Parameter(hidden = true) @RequestAttribute(ConversationIdInterceptor.ATTRIBUTE) String conversationId,

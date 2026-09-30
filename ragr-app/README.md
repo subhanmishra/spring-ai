@@ -131,6 +131,10 @@ gets neither.
 Because it is a `POST`, a browser client **cannot** consume it with the native `EventSource` API,
 which only issues `GET` requests. Use `fetch` with a `ReadableStream` instead.
 
+**Swagger UI does not stream it either.** It reads the whole response body before rendering, so every
+event appears at once after `done`. To watch events arrive, use `curl -N` (above) or an SSE-aware
+client such as Postman.
+
 ### Conversations
 
 **Reading a conversation back does not give you the whole transcript.** Chat memory keeps a rolling
