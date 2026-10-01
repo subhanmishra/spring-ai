@@ -182,8 +182,8 @@
     },
     {
       "id": 4,
-      "title": "HTTP request rate by status — other endpoints",
-      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.)",
+      "title": "HTTP requests by status, cumulative — other endpoints",
+      "description": "Requests outside the applications' own controllers: Swagger UI, /v3/api-docs, /error and unmatched paths. A cumulative count since each application started, not a rate: this traffic is a handful of requests a day, and rate() never shows a URI's first request at all, because Micrometer creates the counter on that request already at 1. A step up is a request; a line dropping to zero is a restart. Actuator traffic - Prometheus scrapes, Docker healthchecks - never appears: ragr-app and ragr-ingest serve it on separate management ports, which are not instrumented, and ragr-eval's ObservationConfig excludes it.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -197,7 +197,12 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "lineInterpolation": "stepAfter"
+          }
         },
         "overrides": []
       },
@@ -207,8 +212,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_requests_seconds_count{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[5m])) by (application, uri, status)",
-          "exemplar": true,
+          "expr": "sum(http_server_requests_seconds_count{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}) by (application, uri, status)",
+          "exemplar": false,
           "legendFormat": "{{application}} {{uri}} [{{status}}]",
           "refId": "A"
         }
