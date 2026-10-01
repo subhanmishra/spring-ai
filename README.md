@@ -156,7 +156,8 @@ ollama pull gemma4:e2b
 ```
 
 No API key is needed. All three applications call Ollama at `http://localhost:11434`
-(`spring.ai.ollama.base-url`); override it in each if Ollama runs elsewhere.
+(`spring.ai.ollama.base-url`), or `http://host.docker.internal:11434` when they run as containers;
+override it in each if Ollama runs elsewhere.
 
 ### Ollama: enable the integrated GPU
 
@@ -178,8 +179,77 @@ the chat model and the evaluation judges share one runner too.
 
 ## Running
 
+Each application runs either **on the host** (IntelliJ or Maven) or **as a container** from
+`compose.yaml`, chosen per application and per run. Both publish the same ports, so everything else -
+Swagger, the curl examples, Prometheus, Grafana, the golden suite - works the same either way. An
+application can only be up in one mode at a time: the second instance cannot bind its ports.
+
+Ollama stays native on the host in both modes, for the integrated GPU; containers reach it at
+`host.docker.internal:11434`.
+
+### As containers
+
+```bash
+./ragr.ps1 docker up                # all three; or name some: app, ingest, eval
+```
+
+```bash
+./ragr.ps1 docker restart ingest    # re-package and recreate one
+```
+
+```bash
+./ragr.ps1 docker stop app
+```
+
+```bash
+./ragr.ps1 status                   # mode, health and container per application, and resident Ollama models
+```
+
+```bash
+./ragr.ps1 logs ingest              # follow a container's log; Ctrl+C stops following, not the app
+```
+
+```bash
+./ragr.ps1 intellij ingest          # stop the container so an IntelliJ run can take the ports
+```
+
+`up` packages the jars with Maven on the host, starts the infrastructure, builds the images and starts
+the containers detached, returning once each one's healthcheck passes. It refuses to start an
+application that is already running on the host, rather than killing a process the IDE owns. Logs
+also reach Loki, so Grafana shows them in either mode.
+
+The images are built by the root `Dockerfile` from the jar already in each module's `target/`, on
+`eclipse-temurin:26-jre-noble`, split into Spring Boot's layers so a code change rebuilds only the
+application layer (~14 MB for ragr-app, most of it the reference manual in its resources) while the
+~90 MB dependencies layer comes from cache. Only the connection addresses differ from a host run, as
+environment variables in `compose.yaml` over the `localhost` defaults in each application's YAML.
+
+The three services sit behind the `apps` compose profile, so plain `docker compose` commands still mean
+the infrastructure only:
+
+| Command | Effect |
+|---|---|
+| `docker compose up -d` | infrastructure only - also what ragr-app's Docker Compose support runs |
+| `docker compose --profile apps up -d --build` | infrastructure and all three applications, from whatever jars are in `target/` (`ragr.ps1` packages them first) |
+| `docker compose stop` / `down` | the infrastructure only; the application containers keep running, and `down` then fails to remove the network |
+| `docker compose --profile apps down` | everything |
+
+Do not set `COMPOSE_PROFILES=apps` in a `.env` file or the environment: compose reads it, and an
+IntelliJ-launched ragr-app would then start its own container.
+
+Each container has a memory limit above its JVM's worst case - heap cap plus what the JVM uses outside
+the heap - so a full heap ends in an `OutOfMemoryError` rather than a silent kill:
+
+| Container | Heap cap | Limit | Measured |
+|---|---|---|---|
+| `ai_ragr-app` | 384 MB | 650 MB | 367 MiB after a grounded turn, 218 MiB of it outside the heap |
+| `ai_ragr-ingest` | 512 MB | 850 MB | 631 MiB peak indexing the 645-page reference manual |
+| `ai_ragr-eval` | 256 MB | 480 MB | 276 MiB consuming turns |
+
+### On the host
+
 Ensure Docker and Ollama are running, then start the applications **in this order**, each in its own
-terminal:
+terminal (or with the IntelliJ run configurations):
 
 ```bash
 ./mvnw spring-boot:run -pl ragr-app -am
@@ -199,8 +269,8 @@ runs the `public` schema's Flyway migration, so on an empty database chat has no
 search until ingestion has started once.
 
 Every JVM runs with a capped heap and SerialGC on this memory-constrained host, set in each module's
-`pom.xml` for `spring-boot:run` and for its tests. An IntelliJ run configuration needs the same VM
-options:
+`pom.xml` for `spring-boot:run` and for its tests, and in `JDK_JAVA_OPTIONS` for its container. An
+IntelliJ run configuration needs the same VM options:
 
 | Application | VM options | Measured |
 |---|---|---|
@@ -234,6 +304,7 @@ for documents. ragr-eval has no API.
 * **grafana** — Dashboards, with Prometheus, Loki, Tempo and Postgres datasources provisioned. Port `3000`, anonymous access with the Admin role (no login).
 * **tempo** — Distributed tracing backend. Port `3200`.
 * **loki** — Log aggregation. Port `3100`.
+* **ragr-app**, **ragr-ingest**, **ragr-eval** — the applications themselves, behind the `apps` profile, so none of the above starts them. Same ports as a host run. See [As containers](#as-containers).
 
 ## Observability
 

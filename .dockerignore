@@ -1,0 +1,7 @@
+# The images are built from jars packaged on the host, so the build context is those three jars
+# and nothing else. Above all it keeps out docker-volume/, the containers' own data - gigabytes of
+# Postgres, Prometheus and Tempo files that would otherwise be sent to the daemon on every build.
+**
+!ragr-app/target/ragr-app-*.jar
+!ragr-ingest/target/ragr-ingest-*.jar
+!ragr-eval/target/ragr-eval-*.jar

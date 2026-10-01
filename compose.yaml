@@ -1,3 +1,18 @@
+# Shared by the three application services at the end of the file. Anchors must precede their use.
+x-ragr-common-env: &ragr-common-env
+  SPRING_AI_OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://otel-collector:4318/v1/traces"
+  LOKI_URL: "http://loki:3100/loki/api/v1/push"
+
+x-ragr-healthcheck: &ragr-healthcheck
+  interval: 10s
+  timeout: 3s
+  retries: 3
+  # Failures inside this window do not count, and start_interval polls fast within it, so
+  # `up --wait` returns soon after the application is actually ready.
+  start_period: 120s
+  start_interval: 2s
+
 services:
   pgvector:
     container_name: ai_pgvector
@@ -241,6 +256,119 @@ services:
     # No healthcheck: current grafana/loki:latest images ship without /bin/sh, so a CMD-SHELL check can
     # never run, the container reports unhealthy, and Spring Boot's compose integration aborts startup.
     # Nothing waits on Loki being healthy - grafana's depends_on is plain ordering.
+    labels:
+      - "org.springframework.boot.readiness-check.skip=true"
+
+  # The three applications, for the Docker run mode. Behind the `apps` profile, so a plain
+  # `docker compose up` - including the one ragr-app's own Docker Compose integration runs when it is
+  # started from IntelliJ - still starts the infrastructure only. Start them with ./ragr.ps1, which
+  # packages the jars on the host first; `docker compose --profile apps up --build` on its own builds
+  # from whatever is already in target/. Never set COMPOSE_PROFILES=apps in a .env file: compose reads
+  # it, and an IntelliJ-launched ragr-app would then start its own container and clash on its ports.
+  #
+  # Each publishes the same host ports as its IntelliJ run, so Prometheus's host.docker.internal
+  # targets, the Swagger links and the golden suite work unchanged in either mode, and an application
+  # cannot be up in both at once - the second fails to bind.
+  #
+  # Only the addresses differ from an IntelliJ run, as environment variables over the localhost
+  # defaults in each application's YAML. Ollama stays native on Windows for the iGPU, reached through
+  # host.docker.internal; Kafka through the INTERNAL listener.
+  #
+  # depends_on is the infrastructure each one cannot start without, never another application, so
+  # each can be started and restarted alone. No restart policy: Docker Desktop starting at login must
+  # not bring the applications up behind an IntelliJ session.
+  ragr-app:
+    profiles: [ "apps" ]
+    image: ragr-app:local
+    container_name: ai_ragr-app
+    build:
+      context: .
+      args:
+        MODULE: ragr-app
+    # The limits sit above each JVM's worst case - heap cap plus what it uses outside the heap - so a
+    # full heap still ends in an OutOfMemoryError the log explains, never a silent OOM kill; they are
+    # there to stop a native leak taking memory from the Ollama models. Measured 1 Oct 2026 after a
+    # grounded turn, as cgroup anon minus committed heap: 218 MiB outside the heap for ragr-app,
+    # 245 for ragr-ingest, 184 for ragr-eval. A limit reserves nothing, so it costs no memory.
+    mem_limit: 650m
+    environment:
+      <<: *ragr-common-env
+      JDK_JAVA_OPTIONS: "-Xmx384m -XX:+UseSerialGC"
+      # The compose integration is IntelliJ's way of starting the stack; inside the network it has no
+      # compose.yaml and no docker CLI.
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://pgvector:5432/ragdatabase"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      APP_REDIS_HOST: "redis"
+    ports:
+      - "8080:8080"
+      - "9095:9095"
+    healthcheck:
+      <<: *ragr-healthcheck
+      test: [ "CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:9095/actuator/health" ]
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+    labels:
+      - "org.springframework.boot.readiness-check.skip=true"
+
+  ragr-ingest:
+    profiles: [ "apps" ]
+    image: ragr-ingest:local
+    container_name: ai_ragr-ingest
+    build:
+      context: .
+      args:
+        MODULE: ragr-ingest
+    # 512 MB heap cap plus ~245 MiB outside it, with room for upload threads - see ragr-app above.
+    mem_limit: 850m
+    environment:
+      <<: *ragr-common-env
+      JDK_JAVA_OPTIONS: "-Xmx512m -XX:+UseSerialGC"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://pgvector:5432/ragdatabase"
+    ports:
+      - "8081:8081"
+      - "9097:9097"
+    healthcheck:
+      <<: *ragr-healthcheck
+      test: [ "CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:9097/actuator/health" ]
+    # An upload in flight is one long request; Boot's graceful shutdown gives it 30 s to finish.
+    stop_grace_period: 40s
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    labels:
+      - "org.springframework.boot.readiness-check.skip=true"
+
+  ragr-eval:
+    profiles: [ "apps" ]
+    image: ragr-eval:local
+    container_name: ai_ragr-eval
+    build:
+      context: .
+      args:
+        MODULE: ragr-eval
+    # 256 MB heap cap plus ~184 MiB outside it - see ragr-app above.
+    mem_limit: 480m
+    environment:
+      <<: *ragr-common-env
+      JDK_JAVA_OPTIONS: "-Xmx256m -XX:+UseSerialGC"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://pgvector:5432/ragdatabase?currentSchema=eval"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+    ports:
+      - "9096:9096"
+    healthcheck:
+      <<: *ragr-healthcheck
+      test: [ "CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:9096/actuator/health" ]
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 

@@ -44,8 +44,20 @@ vector store and a Kafka topic, never by calling each other, except the golden s
 ./mvnw clean package
 ```
 
-Those `spring-boot:run` lines are for people. A Claude session launches all three applications through
-IntelliJ's run configurations instead, killing any running instance first - the `restart-app` skill.
+Those `spring-boot:run` lines are for people. Each application also runs as a container
+(`./ragr.ps1 docker up [app|ingest|eval]`, the `apps` compose profile, same ports), one mode per
+application at a time. A Claude session launches them only as containers through `ragr.ps1` or through
+IntelliJ's run configurations, killing any running instance first - the `ragr-run` skill, whose default
+mode is in `.claude/run-mode`. Connection addresses stay `localhost` in the YAML; containers override
+them with environment variables in `compose.yaml`, so a change must keep working in both modes.
+
+```
+/ragr-run                      start/restart what the current change needs, in the default mode
+/ragr-run docker ingest        this run only, as a container (ragr.ps1); names: app, ingest, eval
+/ragr-run intellij app eval    this run only, from IntelliJ's run configurations
+/ragr-run mode docker          change the default (.claude/run-mode)
+/ragr-run status | stop [apps]
+```
 
 ```bash
 ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
@@ -126,7 +138,10 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 ├── docker-volume/   # gitignored runtime volume data, not source
 ├── .claude/         # gitignored; context documents + hooks (see below)
 ├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
-├── compose.yaml     # stays at the root; ragr-app runs from the root to find it, and owns it
+├── compose.yaml     # stays at the root; ragr-app runs from the root to find it, and owns it.
+│                    # The three applications' containers sit behind the `apps` profile
+├── Dockerfile       # one layered image per application, from the jar packaged on the host
+├── ragr.ps1         # docker | intellij | status | logs - picks each application's run mode
 ├── CLAUDE.md        # this file
 └── README.md        # the system as a whole; each module has its own README (see below)
 ```

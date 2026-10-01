@@ -50,8 +50,13 @@ dimensions (`nomic-embed-text`, 768) must match ragr-ingest's - see the
 | `app.events.chat-turns.enabled` | `true` | Publish completed turns to Kafka for evaluation |
 | `app.events.chat-turns.topic` | `rag.chat.turn.completed` | The topic, created at startup |
 | `app.events.chat-turns.retention` | `3d` | How long the topic keeps turns |
+| `app.redis.host`, `app.redis.port` | `localhost`, `6379` | The chat memory's Redis; the container sets `APP_REDIS_HOST=redis` |
 
 None of these change what is stored, so none of them need a re-ingest.
+
+Run from IntelliJ, Postgres comes from the Docker Compose service connection; as a container, where
+that integration is switched off, `compose.yaml` sets every address - see
+[Running](../README.md#running).
 
 ## Chat API (`/ai`)
 

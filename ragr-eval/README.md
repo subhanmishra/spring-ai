@@ -80,7 +80,8 @@ sequenceDiagram
 ```
 
 It runs as a tagged test against the **running** chat service, so ragr-app must be up with the corpus
-indexed. On the reference machine stop ragr-eval first: the test JVM, ragr-app and ragr-eval together
+indexed - from IntelliJ or as a container, it makes no difference. On the reference machine stop
+ragr-eval first (`./ragr.ps1 docker stop eval` if it is a container): the test JVM, ragr-app and ragr-eval together
 leave almost no memory beside the two Ollama models, and the suite does not need ragr-eval. A run takes
 several minutes.
 
