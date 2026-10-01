@@ -135,6 +135,20 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <!-- docs/ holds the golden corpus, the 13.6 MB reference manual, kept here only to be
+                         uploaded to ragr-ingest from disk; nothing reads it from the classpath. Packaged,
+                         it was nearly all of the application layer in the Docker image, re-sent on every
+                         code change. Excluded from the jar only, not from resources, so it still lands in
+                         target/classes and the parent's resource filtering is left alone. -->
+                    <excludes>
+                        <exclude>docs/**</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- The same cap for the test JVM, which loads the full context beside the running

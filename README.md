@@ -220,8 +220,9 @@ also reach Loki, so Grafana shows them in either mode.
 
 The images are built by the root `Dockerfile` from the jar already in each module's `target/`, on
 `eclipse-temurin:26-jre-noble`, split into Spring Boot's layers so a code change rebuilds only the
-application layer (~14 MB for ragr-app, most of it the reference manual in its resources) while the
-~90 MB dependencies layer comes from cache. Only the connection addresses differ from a host run, as
+application layer (~190 kB for ragr-app) while the ~90 MB dependencies layer comes from cache. The
+reference manual under ragr-app's `resources/docs` is kept out of the jar, since nothing reads it from
+the classpath. Only the connection addresses differ from a host run, as
 environment variables in `compose.yaml` over the `localhost` defaults in each application's YAML.
 
 The three services sit behind the `apps` compose profile, so plain `docker compose` commands still mean
