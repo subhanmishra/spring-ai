@@ -282,8 +282,8 @@
     },
     {
       "id": 6,
-      "title": "HTTP request latency (p50/p80/p95/p99) — other endpoints",
-      "description": "Everything outside the application's own controllers (actuator, swagger-ui, api-docs, error, etc.) Quantiles and averages use a 1h window: with a handful of requests an hour, a 5m window is NaN (drawn as nothing, not as zero) except in the five minutes after a request. A value here therefore describes the last hour of requests, and a line holding flat means no new ones.",
+      "title": "HTTP request latency since start (p50/p80/p95/p99) — other endpoints",
+      "description": "Requests outside the applications' own controllers: Swagger UI, /v3/api-docs, /error and unmatched paths (actuator traffic is never recorded - see the panel above). Quantiles over every request since each application started, from the cumulative histogram rather than a rate window. Any rate() window, even 1h, was NaN for this traffic and drew nothing, not even an axis: a URI's histogram is created by its first request with that request already counted, so rate() never sees it, and most of these URIs are requested once per visit to Swagger UI. A line holding flat means no new requests; a gap means the application restarted.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -307,8 +307,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
-          "exemplar": true,
+          "expr": "histogram_quantile(0.50, sum(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}) by (le, application, uri))",
+          "exemplar": false,
           "legendFormat": "{{application}} {{uri}} p50",
           "refId": "A"
         },
@@ -317,7 +317,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.80, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "expr": "histogram_quantile(0.80, sum(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}) by (le, application, uri))",
           "legendFormat": "{{application}} {{uri}} p80",
           "refId": "B"
         },
@@ -326,7 +326,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "expr": "histogram_quantile(0.95, sum(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}) by (le, application, uri))",
           "legendFormat": "{{application}} {{uri}} p95",
           "refId": "C"
         },
@@ -335,7 +335,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}[1h])) by (le, application, uri))",
+          "expr": "histogram_quantile(0.99, sum(http_server_requests_seconds_bucket{application=~\"$application\", uri!~\"^/(ai|api/v1)(/.*)?$\"}) by (le, application, uri))",
           "legendFormat": "{{application}} {{uri}} p99",
           "refId": "D"
         }
