@@ -42,6 +42,8 @@ public record EvalRun(@Id @Nullable UUID id,
                       @Nullable Double precisionAtK,
                       @Nullable Double judgedContextPrecision,
                       @Nullable Double judgedPrecisionAtK,
+                      @Nullable Double citedContextPrecision,
+                      @Nullable Double citedPrecisionAtK,
                       @Nullable Double citationValidity,
                       @Nullable Double citationFabrication,
                       @Nullable Double relevancyRate,
@@ -59,7 +61,7 @@ public record EvalRun(@Id @Nullable UUID id,
                                    boolean judged) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
                            null, judgeModel, judged, null, null,
-                           null, null, null, null, null, null, null, null, null, null, null, null);
+                           null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -70,8 +72,9 @@ public record EvalRun(@Id @Nullable UUID id,
         return new EvalRun(id, suite, status, startedAt, finishedAt, caseCount, passedCount,
                            chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
-                           judgedContextPrecision, judgedPrecisionAtK, citationValidity,
-                           citationFabrication, relevancyRate, groundednessRate, durationMillis, errorMessage);
+                           judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
+                           citedPrecisionAtK, citationValidity, citationFabrication, relevancyRate,
+                           groundednessRate, durationMillis, errorMessage);
     }
 
     /**
@@ -80,6 +83,9 @@ public record EvalRun(@Id @Nullable UUID id,
      * @param judgedContextPrecision reference-free, from the per-chunk LLM judge. Null on an unjudged
      *                               run, which is the default - and null rather than zero, for the same
      *                               reason {@code relevancyRate} is.
+     * @param citedContextPrecision  attribution-based, a chunk counted as used when the answer cites its
+     *                               page. Free and deterministic, so measured on every run; null only
+     *                               when no case retrieved anything.
      */
     public EvalRun completed(int passedCount,
                              double hitRate,
@@ -88,6 +94,8 @@ public record EvalRun(@Id @Nullable UUID id,
                              @Nullable Double precisionAtK,
                              @Nullable Double judgedContextPrecision,
                              @Nullable Double judgedPrecisionAtK,
+                             @Nullable Double citedContextPrecision,
+                             @Nullable Double citedPrecisionAtK,
                              double citationValidity,
                              double citationFabrication,
                              @Nullable Double relevancyRate,
@@ -96,9 +104,9 @@ public record EvalRun(@Id @Nullable UUID id,
         return new EvalRun(id, suite, EvalRunStatus.COMPLETED, startedAt, finished, caseCount,
                            passedCount, chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
-                           judgedContextPrecision, judgedPrecisionAtK, citationValidity,
-                           citationFabrication, relevancyRate, groundednessRate,
-                           finished.toEpochMilli() - startedAt.toEpochMilli(), null);
+                           judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
+                           citedPrecisionAtK, citationValidity, citationFabrication, relevancyRate,
+                           groundednessRate, finished.toEpochMilli() - startedAt.toEpochMilli(), null);
     }
 
     public EvalRun failed(String message) {
@@ -107,6 +115,7 @@ public record EvalRun(@Id @Nullable UUID id,
                            chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK,
+                           citedContextPrecision, citedPrecisionAtK,
                            citationValidity, citationFabrication,
                            relevancyRate, groundednessRate,
                            finished.toEpochMilli() - startedAt.toEpochMilli(), message);

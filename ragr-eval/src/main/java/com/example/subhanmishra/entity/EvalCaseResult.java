@@ -38,6 +38,9 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              @Nullable Double judgedContextPrecision,
                              @Nullable Double judgedPrecisionAtK,
                              @Nullable String judgedRelevance,
+                             @Nullable Double citedContextPrecision,
+                             @Nullable Double citedPrecisionAtK,
+                             @Nullable String citedRelevance,
                              int citationsEmitted,
                              int citationsValid,
                              int citationsFabricated,
@@ -59,6 +62,10 @@ public record EvalCaseResult(@Id @Nullable UUID id,
      *                               expected-page list is too narrow, and it is the one thing here that
      *                               cannot be reconstructed later from the dataset and the other
      *                               columns.
+     * @param citedContextPrecision  a chunk counted as used when the answer cites its page, or null when
+     *                               nothing was retrieved. Its vector is stored for the same comparison:
+     *                               where it and the judge's disagree, the citations are the model's own
+     *                               account of what it used and the judge is the likelier one wrong.
      */
     public static EvalCaseResult from(UUID runId,
                                       String caseId,
@@ -68,6 +75,7 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                       int firstRelevantRank,
                                       @Nullable ContextPrecisionScores contextPrecision,
                                       @Nullable ContextPrecisionScores judgedContextPrecision,
+                                      @Nullable ContextPrecisionScores citedContextPrecision,
                                       long latencyMillis) {
         List<String> reasons = scores.failureReasons();
         return new EvalCaseResult(null,
@@ -88,6 +96,9 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                           ? judgedContextPrecision.precisionAtK() : null,
                                   judgedContextPrecision != null
                                           ? judgedContextPrecision.relevanceAsString() : null,
+                                  citedContextPrecision != null ? citedContextPrecision.averagePrecision() : null,
+                                  citedContextPrecision != null ? citedContextPrecision.precisionAtK() : null,
+                                  citedContextPrecision != null ? citedContextPrecision.relevanceAsString() : null,
                                   scores.citations().emitted(),
                                   scores.citations().valid(),
                                   scores.citations().fabricated(),

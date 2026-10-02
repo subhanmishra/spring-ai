@@ -62,6 +62,14 @@ A fixed set of 9 questions (`src/main/resources/eval/golden-dataset.yaml`), each
 to hold its answer, verified by reading the retrieved chunks rather than guessed. It is the only way to
 measure retrieval recall.
 
+**Context precision is scored three ways**, because each relevance source is wrong in its own
+direction. *Expected pages* counts a chunk as useful if it is on a page the dataset lists - a floor,
+since the lists hold the pages containing the answer, not every useful page. *Cited* counts a chunk as
+used if the answer cites its page - free and deterministic on every run, but a passage used without a
+citation counts as unused. *LLM judged* asks the judge per chunk - only on a judged run, and unreliable
+per case with this judge (one borderline verdict at rank 1 has moved a case from 0.700 to 0.200), so
+read only its run average, as a trend.
+
 ```mermaid
 sequenceDiagram
     participant T as EvalSuiteIT (test JVM)
@@ -131,7 +139,7 @@ under `app.eval.*`:
   zero-hit rate, citation outcomes, the retrieval score distribution, sampled judge verdicts, and the
   judges' throughput, drops and errors.
 - **Golden suite** - the age of the last run, hit rate, mean reciprocal rank, case pass rate, context
-  precision and precision@k, scores over time, and per-case tables for the latest run and its history,
+  precision and precision@k (by expected pages, citations and the judge), scores over time, and per-case tables for the latest run and its history,
   read from the `eval` schema.
 
 Counters are shown cumulatively rather than as rates: at a handful of chat turns an hour a per-second

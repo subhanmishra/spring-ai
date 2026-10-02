@@ -180,6 +180,7 @@ public class GoldenEvalService {
             persist(persisted.completed(result.passedCount(), result.hitRate(), result.meanReciprocalRank(),
                                         result.contextPrecision(), result.precisionAtK(),
                                         result.judgedContextPrecision(), result.judgedPrecisionAtK(),
+                                        result.citedContextPrecision(), result.citedPrecisionAtK(),
                                         result.citationValidity(), result.citationFabrication(),
                                         result.relevancyRate(), result.groundednessRate()));
 
@@ -187,16 +188,18 @@ public class GoldenEvalService {
                                            result.hitRate(), result.meanReciprocalRank(),
                                            result.contextPrecision(), result.precisionAtK(),
                                            result.judgedContextPrecision(), result.judgedPrecisionAtK(),
+                                           result.citedContextPrecision(), result.citedPrecisionAtK(),
                                            result.citationValidity(), result.citationFabrication(),
                                            result.relevancyRate(), result.groundednessRate(),
                                            result.durationMillis());
 
             log.info("Golden eval run finished [suite={}, passed={}/{}, hitRate={}, contextPrecision={}, "
-                     + "precisionAtK={}, citationValidity={}, fabrication={}, took={}ms]",
+                     + "precisionAtK={}, citedPrecision={}, citationValidity={}, fabrication={}, took={}ms]",
                      dataset.suite(), result.passedCount(), result.caseCount(),
                      format(result.hitRate()), format(result.contextPrecision()),
-                     format(result.precisionAtK()), format(result.citationValidity()),
-                     format(result.citationFabrication()), result.durationMillis());
+                     format(result.precisionAtK()), format(result.citedContextPrecision()),
+                     format(result.citationValidity()), format(result.citationFabrication()),
+                     result.durationMillis());
             return result;
 
         } catch (RuntimeException e) {
@@ -271,15 +274,18 @@ public class GoldenEvalService {
             // Free - no LLM call, no embedding, just the citation headers the rank above already
             // parsed - so it runs on every case whether or not the run is judged.
             ContextPrecisionScores precision = scoringService.contextPrecision(retrieved, goldenCase);
+            // Free as well - the answer's own citations against the retrieved headers.
+            ContextPrecisionScores cited = scoringService.citedPrecision(answer, retrieved);
 
             log.info("Eval case [{}] answered in {}ms: {} chunk(s), {} citation(s), {} fabricated, "
-                     + "{} section number(s) resolved, {} left unresolved, context precision {}",
+                     + "{} section number(s) resolved, {} left unresolved, context precision {}, cited {}",
                      goldenCase.id(), millis, scores.retrieval().retrievedCount(),
                      scores.citations().emitted(), scores.citations().fabricated(),
                      turn.citationsRepaired(), turn.citationsAbstained(),
-                     precision != null ? format(precision.averagePrecision()) : "n/a");
+                     precision != null ? format(precision.averagePrecision()) : "n/a",
+                     cited != null ? cited.relevanceAsString() : "n/a");
 
-            return new CaseOutcome(goldenCase, turn, answer, retrieved, scores, rank, precision, millis);
+            return new CaseOutcome(goldenCase, turn, answer, retrieved, scores, rank, precision, cited, millis);
 
         } finally {
             deleteConversation(conversationId);
@@ -417,6 +423,10 @@ public class GoldenEvalService {
         int judgedPrecisionCases = 0;
         double judgedPrecisionTotal = 0;
         double judgedPrecisionAtKTotal = 0;
+        // Cited applies where judged does - any case that retrieved something - but on every run.
+        int citedPrecisionCases = 0;
+        double citedPrecisionTotal = 0;
+        double citedPrecisionAtKTotal = 0;
 
         for (CaseOutcome outcome : outcomes) {
             EvalScores scores = outcome.scores();
@@ -447,6 +457,12 @@ public class GoldenEvalService {
                 judgedPrecisionCases++;
                 judgedPrecisionTotal += judgedPrecision.averagePrecision();
                 judgedPrecisionAtKTotal += judgedPrecision.precisionAtK();
+            }
+            ContextPrecisionScores citedPrecision = outcome.citedContextPrecision();
+            if (citedPrecision != null) {
+                citedPrecisionCases++;
+                citedPrecisionTotal += citedPrecision.averagePrecision();
+                citedPrecisionAtKTotal += citedPrecision.precisionAtK();
             }
 
             citationsEmitted += scores.citations().emitted();
@@ -483,6 +499,10 @@ public class GoldenEvalService {
                                            ? judgedPrecisionTotal / judgedPrecisionCases : null,
                                    judgedPrecisionCases > 0
                                            ? judgedPrecisionAtKTotal / judgedPrecisionCases : null,
+                                   citedPrecisionCases > 0
+                                           ? citedPrecisionTotal / citedPrecisionCases : null,
+                                   citedPrecisionCases > 0
+                                           ? citedPrecisionAtKTotal / citedPrecisionCases : null,
                                    citationsEmitted > 0 ? (double) citationsValid / citationsEmitted : 1.0,
                                    citationsEmitted > 0 ? (double) citationsFabricated / citationsEmitted : 0.0,
                                    citationsEmitted,
@@ -511,6 +531,7 @@ public class GoldenEvalService {
                                                       outcome.firstRelevantRank(),
                                                       outcome.contextPrecision(),
                                                       outcome.judgedContextPrecision(),
+                                                      outcome.citedContextPrecision(),
                                                       outcome.latencyMillis()));
     }
 
@@ -537,13 +558,15 @@ public class GoldenEvalService {
         private final List<Document> retrieved;
         private final int firstRelevantRank;
         private final @Nullable ContextPrecisionScores contextPrecision;
+        private final @Nullable ContextPrecisionScores citedContextPrecision;
         private final long latencyMillis;
         private EvalScores scores;
         private @Nullable ContextPrecisionScores judgedContextPrecision;
 
         CaseOutcome(GoldenCase goldenCase, ChatTurnCompleted turn, String answer, List<Document> retrieved,
                     EvalScores scores, int firstRelevantRank,
-                    @Nullable ContextPrecisionScores contextPrecision, long latencyMillis) {
+                    @Nullable ContextPrecisionScores contextPrecision,
+                    @Nullable ContextPrecisionScores citedContextPrecision, long latencyMillis) {
             this.goldenCase = goldenCase;
             this.turn = turn;
             this.answer = answer;
@@ -551,6 +574,7 @@ public class GoldenEvalService {
             this.scores = scores;
             this.firstRelevantRank = firstRelevantRank;
             this.contextPrecision = contextPrecision;
+            this.citedContextPrecision = citedContextPrecision;
             this.latencyMillis = latencyMillis;
         }
 
@@ -595,6 +619,10 @@ public class GoldenEvalService {
             return judgedContextPrecision;
         }
 
+        public @Nullable ContextPrecisionScores citedContextPrecision() {
+            return citedContextPrecision;
+        }
+
         public long latencyMillis() {
             return latencyMillis;
         }
@@ -620,6 +648,11 @@ public class GoldenEvalService {
      *                            self-judging bias {@code EvalConfig} documents, and null unless the
      *                            run judged. Where the two disagree on a chunk, the dataset is the more
      *                            likely thing to be wrong.
+     * @param citedContextPrecision the same two numbers with a chunk counted as used when the answer
+     *                            cites its page - free, deterministic and measured on every run, so the
+     *                            steadier cross-check on the judge. Under-counts by construction: a
+     *                            passage used but not cited scores as unused. Null only when no case
+     *                            retrieved anything.
      * @param citationValidity    1.0 when no citations were emitted at all, which is why
      *                            {@code citationsEmitted} sits beside it. An assistant that stopped
      *                            citing entirely would otherwise show perfect validity.
@@ -642,6 +675,8 @@ public class GoldenEvalService {
                                   @Nullable Double precisionAtK,
                                   @Nullable Double judgedContextPrecision,
                                   @Nullable Double judgedPrecisionAtK,
+                                  @Nullable Double citedContextPrecision,
+                                  @Nullable Double citedPrecisionAtK,
                                   double citationValidity,
                                   double citationFabrication,
                                   int citationsEmitted,

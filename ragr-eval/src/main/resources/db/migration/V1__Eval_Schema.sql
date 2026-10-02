@@ -51,10 +51,15 @@ CREATE TABLE IF NOT EXISTS eval_run
     -- rather than by the dataset's expected pages. Nullable and normally null: judging is off by
     -- default because precision costs top-k judge calls per case rather than one. Null here means
     -- "not measured" and must never be averaged as a zero.
+    --
+    -- The cited_* pair counts a chunk as used when the answer cites its page: free, deterministic and
+    -- measured on every run, the steadier cross-check on the judge. Null on runs from before it existed.
     context_precision        DOUBLE PRECISION,
     precision_at_k           DOUBLE PRECISION,
     judged_context_precision DOUBLE PRECISION,
     judged_precision_at_k    DOUBLE PRECISION,
+    cited_context_precision  DOUBLE PRECISION,
+    cited_precision_at_k     DOUBLE PRECISION,
 
     citation_validity    DOUBLE PRECISION,
     citation_fabrication DOUBLE PRECISION,
@@ -84,12 +89,16 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     -- in this table that cannot be reconstructed afterwards from the dataset and the other columns,
     -- and because the comparison it enables is the point of running both precisions: a chunk the judge
     -- called useful from a page expectedPages omits means the DATASET is too narrow, not that
-    -- retrieval erred.
+    -- retrieval erred. cited_relevance is the same vector from the answer's own citations; where it
+    -- and judged_relevance disagree, the judge is the likelier one wrong.
     context_precision        DOUBLE PRECISION,
     precision_at_k           DOUBLE PRECISION,
     judged_context_precision DOUBLE PRECISION,
     judged_precision_at_k    DOUBLE PRECISION,
     judged_relevance         TEXT,
+    cited_context_precision  DOUBLE PRECISION,
+    cited_precision_at_k     DOUBLE PRECISION,
+    cited_relevance          TEXT,
 
 
     -- Citations

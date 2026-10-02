@@ -383,4 +383,69 @@ class EvalScoringServiceTest {
             assertThat(service.firstRelevantRank(retrieved, goldenCase)).isEqualTo(1);
         }
     }
+
+    @Nested
+    @DisplayName("context precision from the answer's own citations")
+    class CitedPrecision {
+
+        /** The retrieved set executable-jar-maven-plugin gets on every run, in rank order. */
+        private final List<Document> retrieved = List.of(chunk("spring-boot-reference.pdf", 343, "extra script", 0.70),
+                                                         chunk("spring-boot-reference.pdf", 26, "starters", 0.68),
+                                                         chunk("spring-boot-reference.pdf", 428, "<build>", 0.66),
+                                                         chunk("spring-boot-reference.pdf", 51, "mvn package", 0.65),
+                                                         chunk("spring-boot-reference.pdf", 36, "nested jars", 0.62));
+
+        @Test
+        @DisplayName("the chunks whose pages the answer cites are the used ones")
+        void citedPagesAreUsed() {
+            // The 15:13 answer the LLM judge scored [0,0,0,0,1]: it cites 343 three times and 428 once,
+            // and never 36 - the one chunk the judge called useful.
+            String answer = "Configure the plugin (spring-boot-reference.pdf, p. 343). Run mvn package "
+                            + "(spring-boot-reference.pdf, p. 428). It embeds a script "
+                            + "(spring-boot-reference.pdf, p. 343).";
+
+            ContextPrecisionScores scores = service.citedPrecision(answer, retrieved);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.relevanceAsString()).isEqualTo("1,0,1,0,0");
+            assertThat(scores.averagePrecision()).isCloseTo((1.0 + 2.0 / 3) / 2, within(1e-9));
+            assertThat(scores.precisionAtK()).isCloseTo(2.0 / 5, within(1e-9));
+        }
+
+        @Test
+        @DisplayName("a fabricated citation marks nothing")
+        void fabricatedCitationMarksNothing() {
+            ContextPrecisionScores scores = service.citedPrecision(
+                    "See (spring-boot-reference.pdf, p. 926).", retrieved);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.relevantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("an uncited grounded answer scores zero - nothing is attributed")
+        void uncitedAnswerScoresZero() {
+            ContextPrecisionScores scores = service.citedPrecision("Add the plugin and run mvn package.", retrieved);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.averagePrecision()).isZero();
+            assertThat(scores.retrievedCount()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("a page cited for another file does not count")
+        void otherFileDoesNotCount() {
+            ContextPrecisionScores scores = service.citedPrecision("See (other.pdf, p. 343).", retrieved);
+
+            assertThat(scores).isNotNull();
+            assertThat(scores.relevantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("nothing retrieved is not scored")
+        void notScoredWithoutRetrieval() {
+            assertThat(service.citedPrecision("General knowledge answer.", List.of())).isNull();
+            assertThat(service.citedPrecision("General knowledge answer.", null)).isNull();
+        }
+    }
 }

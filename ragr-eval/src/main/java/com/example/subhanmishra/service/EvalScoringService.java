@@ -250,6 +250,49 @@ public class EvalScoringService {
     }
 
     /**
+     * Context precision with a chunk counted as used when the answer cites its page.
+     *
+     * <p>The third relevance source, beside {@link #contextPrecision} (the dataset's expected pages)
+     * and {@code ContextPrecisionEvaluator} (an LLM judge per chunk), and the only one that is both free
+     * and deterministic. It exists because the judge proved unreliable at exactly this question:
+     * replayed on {@code executable-jar-maven-plugin} on 2 Oct 2026, it called the rank-1 chunk - cited
+     * three times, its wording reused - anywhere from YES 86% to NO 88% depending on the answer's
+     * phrasing, and called a chunk the answer never touched useful at 100% on every answer. A citation
+     * is the model's own statement of where a claim came from, already resolved by
+     * {@code CitationResolver} and checked against the retrieved headers, so it answers "was this
+     * passage used" without a second model's opinion.
+     *
+     * <p>Two limits, both in the direction of under-counting. A passage the answer used without citing
+     * counts as unused, so an uncited answer scores 0.0 - which is the uncited-answer defect showing up
+     * here too, not a separate one. And attribution is per page, so two retrieved chunks from the same
+     * cited page both count as used, whichever one the sentence came from.
+     *
+     * <p>Needs only the answer and the retrieved chunks, so like everything in this class it could
+     * score live traffic; for now only the golden path records it.
+     *
+     * @return null when nothing was retrieved - an ungrounded answer has no ranked list to score
+     */
+    public @Nullable ContextPrecisionScores citedPrecision(@Nullable String answer,
+                                                           @Nullable List<Document> retrieved) {
+        if (retrieved == null || retrieved.isEmpty()) {
+            return null;
+        }
+        Set<String> availableNames = CitationParser.availableFileNames(retrieved);
+        // Only what AnswerCitations accepts as a citation, so this agrees with the validity rate and
+        // with what the chat API reports - a fabricated citation matches no header and so marks nothing.
+        List<Citation> cited = CitationParser.parseAnswerCandidates(answer).stream()
+                .filter(candidate -> AnswerCitations.isCitation(candidate, availableNames))
+                .toList();
+
+        List<Boolean> relevance = new ArrayList<>(retrieved.size());
+        for (Document document : retrieved) {
+            Citation header = CitationParser.parseHeader(document.getText());
+            relevance.add(header != null && cited.stream().anyMatch(header::matches));
+        }
+        return ContextPrecisionScores.of(relevance);
+    }
+
+    /**
      * Per-rank relevance against the case's expected pages, in rank order.
      *
      * <p>The single definition of "relevant" on the reference-based path. Rank and precision both read

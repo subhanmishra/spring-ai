@@ -170,6 +170,7 @@ class EvalSuiteIT {
                         MRR                : {}
                         context precision  : {}  (precision@k {})
                         judged precision   : {}  (precision@k {})
+                        cited precision    : {}  (precision@k {})
                         citations emitted  : {}
                         citation validity  : {}
                         fabrication rate   : {}
@@ -181,6 +182,7 @@ class EvalSuiteIT {
                  Math.round(result.passRate() * 100), fmt(result.hitRate()), fmt(result.meanReciprocalRank()),
                  fmt(result.contextPrecision()), fmt(result.precisionAtK()),
                  fmt(result.judgedContextPrecision()), fmt(result.judgedPrecisionAtK()),
+                 fmt(result.citedContextPrecision()), fmt(result.citedPrecisionAtK()),
                  result.citationsEmitted(), fmt(result.citationValidity()), fmt(result.citationFabrication()),
                  result.inventedPageCount(), result.durationMillis(), result.failures());
 

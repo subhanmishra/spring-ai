@@ -121,6 +121,12 @@ public class EvalMetricsService {
     private final AtomicBoolean contextPrecisionEverJudged = new AtomicBoolean();
 
     /**
+     * Cited precision is measured on every run, but every run persisted before it existed carries null,
+     * so it too has to stay NaN until a run has actually produced one rather than read 0.0.
+     */
+    private final AtomicBoolean citedPrecisionEverMeasured = new AtomicBoolean();
+
+    /**
      * Gauge backing state for the golden path. Micrometer holds only a weak reference to whatever a
      * gauge reads, so these have to be strong fields on a singleton - a locally created holder is
      * collected and the gauge silently starts reporting NaN.
@@ -131,6 +137,8 @@ public class EvalMetricsService {
     private final DoubleAdder goldenPrecisionAtK = new DoubleAdder();
     private final DoubleAdder goldenJudgedContextPrecision = new DoubleAdder();
     private final DoubleAdder goldenJudgedPrecisionAtK = new DoubleAdder();
+    private final DoubleAdder goldenCitedContextPrecision = new DoubleAdder();
+    private final DoubleAdder goldenCitedPrecisionAtK = new DoubleAdder();
     private final DoubleAdder goldenCitationValidity = new DoubleAdder();
     private final DoubleAdder goldenCitationFabrication = new DoubleAdder();
     private final DoubleAdder goldenRelevancy = new DoubleAdder();
@@ -237,6 +245,11 @@ public class EvalMetricsService {
             set(goldenJudgedContextPrecision, run.judgedContextPrecision());
             setIfPresent(goldenJudgedPrecisionAtK, run.judgedPrecisionAtK());
             contextPrecisionEverJudged.set(true);
+        }
+        if (run.citedContextPrecision() != null) {
+            set(goldenCitedContextPrecision, run.citedContextPrecision());
+            setIfPresent(goldenCitedPrecisionAtK, run.citedPrecisionAtK());
+            citedPrecisionEverMeasured.set(true);
         }
         setIfPresent(goldenCitationValidity, run.citationValidity());
         setIfPresent(goldenCitationFabrication, run.citationFabrication());
@@ -358,6 +371,8 @@ public class EvalMetricsService {
                                 @Nullable Double precisionAtK,
                                 @Nullable Double judgedContextPrecision,
                                 @Nullable Double judgedPrecisionAtK,
+                                @Nullable Double citedContextPrecision,
+                                @Nullable Double citedPrecisionAtK,
                                 double citationValidity,
                                 double citationFabrication,
                                 @Nullable Double relevancyRate,
@@ -371,6 +386,11 @@ public class EvalMetricsService {
             set(goldenJudgedContextPrecision, judgedContextPrecision);
             setIfPresent(goldenJudgedPrecisionAtK, judgedPrecisionAtK);
             contextPrecisionEverJudged.set(true);
+        }
+        if (citedContextPrecision != null) {
+            set(goldenCitedContextPrecision, citedContextPrecision);
+            setIfPresent(goldenCitedPrecisionAtK, citedPrecisionAtK);
+            citedPrecisionEverMeasured.set(true);
         }
         set(goldenCitationValidity, citationValidity);
         set(goldenCitationFabrication, citationFabrication);
@@ -424,6 +444,11 @@ public class EvalMetricsService {
                     + "NaN until some run has judged.");
         judgedGauge("judged.precision.at.k", goldenJudgedPrecisionAtK, contextPrecisionEverJudged,
                     "Fraction of the retrieved context the judge called useful. NaN until some run has judged.");
+        judgedGauge("cited.context.precision", goldenCitedContextPrecision, citedPrecisionEverMeasured,
+                    "Rank-weighted context precision with a chunk counted as used when the answer cites its "
+                    + "page. Deterministic; under-counts passages used without a citation.");
+        judgedGauge("cited.precision.at.k", goldenCitedPrecisionAtK, citedPrecisionEverMeasured,
+                    "Fraction of the retrieved context the answer cites.");
         gauge("citation.validity.rate", goldenCitationValidity,
               "Fraction of emitted citations that matched a retrieved chunk");
         gauge("citation.fabrication.rate", goldenCitationFabrication,
