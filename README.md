@@ -189,6 +189,27 @@ Ollama stays native on the host in both modes, for the integrated GPU; container
 
 ### As containers
 
+The whole stack - the infrastructure and all three applications:
+
+```bash
+./ragr.ps1 stack up                 # package, start the infrastructure, build and start the applications
+```
+
+```bash
+./ragr.ps1 stack stop               # stop every container and keep it, for a quick restart
+```
+
+```bash
+./ragr.ps1 stack down               # stop and remove every container and the network; docker-volume/ is kept
+```
+
+`stack stop` and `stack down` stop the applications first, while Kafka, Loki and the OTel collector are
+still up to take their last turns, logs and spans. An application running from IntelliJ is left
+alone, with a warning that it has lost its infrastructure.
+
+The `docker` commands act on the applications only, all three or the ones named, and leave the
+infrastructure running:
+
 ```bash
 ./ragr.ps1 docker up                # all three; or name some: app, ingest, eval
 ```
@@ -233,7 +254,7 @@ the infrastructure only:
 | `docker compose up -d` | infrastructure only - also what ragr-app's Docker Compose support runs |
 | `docker compose --profile apps up -d --build` | infrastructure and all three applications, from whatever jars are in `target/` (`ragr.ps1` packages them first) |
 | `docker compose stop` / `down` | the infrastructure only; the application containers keep running, and `down` then fails to remove the network |
-| `docker compose --profile apps down` | everything |
+| `docker compose --profile apps down` | everything - `./ragr.ps1 stack down` does the same, applications first |
 
 Do not set `COMPOSE_PROFILES=apps` in a `.env` file or the environment: compose reads it, and an
 IntelliJ-launched ragr-app would then start its own container.

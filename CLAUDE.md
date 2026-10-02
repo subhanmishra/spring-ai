@@ -57,6 +57,7 @@ them with environment variables in `compose.yaml`, so a change must keep working
 /ragr-run intellij app eval    this run only, from IntelliJ's run configurations
 /ragr-run mode docker          change the default (.claude/run-mode)
 /ragr-run status | stop [apps]
+/ragr-run stack up|stop|down   the whole compose stack: the infrastructure and all three containers
 ```
 
 ```bash

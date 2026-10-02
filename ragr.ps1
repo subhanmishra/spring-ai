@@ -16,6 +16,13 @@
     Application names: app (ragr-app), ingest (ragr-ingest), eval (ragr-eval); the full names work too.
     No names means all three.
 
+    `stack` acts on the whole of compose.yaml - the infrastructure and the three applications - where
+    `docker` acts on the applications only and leaves the infrastructure running.
+
+.EXAMPLE
+    ./ragr.ps1 stack up                  # infrastructure and all three applications
+.EXAMPLE
+    ./ragr.ps1 stack down                # stop and remove every container; docker-volume/ is kept
 .EXAMPLE
     ./ragr.ps1 docker up                 # package on the host, build images, start, wait for healthy
 .EXAMPLE
@@ -152,6 +159,29 @@ function Invoke-DockerStop($Apps) {
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose stop failed.' }
 }
 
+# The applications go first, while Kafka, Loki and the OTel collector are still up to take their last
+# turns, logs and spans; a single compose stop would order only by depends_on, which does not cover
+# the observability stack. The data lives in bind mounts under docker-volume/, which down never
+# touches; no -v all the same, so nothing a later compose change puts in a volume is lost with it.
+function Invoke-StackStop([switch]$Remove) {
+    Assert-Docker
+    $running = @($AllApps | Where-Object { (Get-ContainerState $_) -like 'running*' })
+    if ($running.Count -gt 0) { Invoke-DockerStop $running }
+
+    $verb = if ($Remove) { 'down' } else { 'stop' }
+    Write-Step "Running docker compose $verb on the infrastructure"
+    docker compose --profile apps $verb
+    if ($LASTEXITCODE -ne 0) { Stop-WithError "docker compose $verb failed." }
+
+    foreach ($app in $AllApps) {
+        $hostPid = Get-HostPid $app
+        if ($hostPid) {
+            Write-Host ("ragr: warning - $($app.Name) is still running from IntelliJ (PID $hostPid) and has " +
+                "lost its infrastructure; stop it in IntelliJ.") -ForegroundColor Yellow
+        }
+    }
+}
+
 function Invoke-ToIntelliJ($Apps) {
     Assert-Docker
     $running = @($Apps | Where-Object { (Get-ContainerState $_) -like 'running*' })
@@ -195,6 +225,9 @@ function Show-Status($Apps) {
 function Show-Usage {
     Write-Host @'
 Usage:
+  ./ragr.ps1 stack up                               the infrastructure and all three applications
+  ./ragr.ps1 stack stop                             stop every container, applications first; keep them
+  ./ragr.ps1 stack down                             stop and remove every container and the network; data in docker-volume/ is kept
   ./ragr.ps1 docker up      [app|ingest|eval ...]   package on the host, build, start, wait for healthy
   ./ragr.ps1 docker restart [app|ingest|eval ...]   the same, recreating the containers even if unchanged
   ./ragr.ps1 docker stop    [app|ingest|eval ...]   stop the containers (the infrastructure keeps running)
@@ -216,6 +249,15 @@ switch ($Command) {
             'restart' { Invoke-DockerUp $apps -Recreate }
             'stop'    { Invoke-DockerStop $apps }
             default   { Show-Usage; exit 1 }
+        }
+    }
+    'stack' {
+        if (-not $Rest -or $Rest.Count -ne 1) { Show-Usage; exit 1 }
+        switch ($Rest[0]) {
+            'up'    { Invoke-DockerUp $AllApps }
+            'stop'  { Invoke-StackStop }
+            'down'  { Invoke-StackStop -Remove }
+            default { Show-Usage; exit 1 }
         }
     }
     'intellij' { Invoke-ToIntelliJ (Resolve-Apps $Rest) }
