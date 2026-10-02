@@ -106,6 +106,18 @@ services:
       # Persisted so the topic's retention window survives a restart: replaying retained turns
       # through a new judge or metric is one of the reasons for putting a log here at all.
       - ./docker-volume/kafka:/var/lib/kafka/data
+    # Without a healthcheck `up --wait` counts the broker ready the moment its process starts, while
+    # it is still recovering its log - measured at 62s after a restart and ~75s on a cold start, during
+    # which ragr-app and ragr-eval start and cannot connect. The native image has no Kafka CLI tools,
+    # only BusyBox, so this probes the port: the broker listeners open on the same millisecond the log
+    # reports "Enabling request processing", measured, so an open port means it is serving.
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "29092" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 120s
+      start_interval: 2s
 
   # A browser view of the broker: topics, the retained chat turns decoded as JSON with their traceparent
   # header, and the ragr-eval consumer group's offsets. The Grafana Kafka row shows rates and lag; this
@@ -117,9 +129,9 @@ services:
     image: redpandadata/console:v3.12.0
     container_name: ai_kafka-console
     mem_limit: 128m
-    # depends_on only orders the start. The console gives up after ~31s of retries and exits, and the
-    # broker has been measured taking 31s to recover its log after a recreate, so it is restarted until
-    # the broker answers.
+    # It waits for the broker's healthcheck, but gives up after ~31s of retries and exits if the broker
+    # goes away later - a restart of Kafka alone takes about a minute - so it is restarted until the
+    # broker answers again.
     restart: on-failure
     environment:
       KAFKA_BROKERS: 'kafka:29092'
@@ -127,7 +139,8 @@ services:
     ports:
       - "8082:8082"
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
@@ -312,7 +325,7 @@ services:
       redis:
         condition: service_started
       kafka:
-        condition: service_started
+        condition: service_healthy
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
@@ -368,7 +381,7 @@ services:
       pgvector:
         condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
