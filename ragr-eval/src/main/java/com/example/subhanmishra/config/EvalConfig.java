@@ -75,7 +75,10 @@ public class EvalConfig {
     }
 
     /**
-     * A builder carrying only the judge's options - no advisors, no system prompt, no memory.
+     * A builder carrying only the judge's options and {@link JudgeLineEndingAdvisor} - no retrieval, no
+     * system prompt, no memory. That advisor is the one exception to "no advisors" and is safe for the
+     * reason the others are not: it adds nothing to the prompt, only rewrites its line endings, so the
+     * same judgement passes or fails alike on Windows and in the container.
      *
      * <p>Taken from the provider on each call so that a prototype instance is created per judge. Two
      * judges sharing one builder would be harmless today but is exactly the kind of thing that stops
@@ -83,7 +86,9 @@ public class EvalConfig {
      */
     private ChatClient.Builder judgeClientBuilder(ObjectProvider<ChatClient.Builder> builders,
                                                   EvalProperties properties) {
-        return builders.getObject().defaultOptions(judgeOptions(properties));
+        return builders.getObject()
+                       .defaultOptions(judgeOptions(properties))
+                       .defaultAdvisors(new JudgeLineEndingAdvisor());
     }
 
     /**
