@@ -508,7 +508,7 @@
       "type": "timeseries",
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 23
       },
@@ -571,6 +571,69 @@
           "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"ragr-eval\"})",
           "legendFormat": "retrieved chunks without citation header",
           "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Cited context precision, cumulative (live)",
+      "description": "The golden suite's cited precision, on every grounded live turn: a retrieved chunk counts as used when the answer cites its page. 'ranking' is RAGAS's average precision, normalised by the cited chunks found, so it measures whether what the answer leaned on was ranked at the top; 'precision @ k' is cited chunks / chunks retrieved, so it measures how much of the context went unused. Same definition as the golden row's 'cited', so the two can be compared directly — but live questions are not the curated ones, so a gap between them is expected and a change in either is what to read. A grounded answer that cites nothing scores 0 on both, which drags the mean down by design; the 'Uncited answers' stat above says how much of a drop that accounts for. Turns that retrieved nothing are not scored. Shown as a mean over every turn since ragr-eval started (_sum / _count) rather than over a window: at a handful of turns an hour a windowed mean is blank most of the time. Under-counts a passage the answer used without citing it. No colours, for the same reason as the golden precision panels: compare it over time, do not read its level as a grade.",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "graphMode": "area",
+        "colorMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_cited_context_precision_sum{application=\"ragr-eval\"}) / sum(rag_eval_online_cited_context_precision_count{application=\"ragr-eval\"})",
+          "legendFormat": "ranking",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rag_eval_online_cited_precision_at_k_sum{application=\"ragr-eval\"}) / sum(rag_eval_online_cited_precision_at_k_count{application=\"ragr-eval\"})",
+          "legendFormat": "precision @ k",
+          "refId": "B"
         }
       ]
     },

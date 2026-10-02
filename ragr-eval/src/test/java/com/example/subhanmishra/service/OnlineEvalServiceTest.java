@@ -3,6 +3,7 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.config.EvalProperties;
 import com.example.subhanmishra.repository.EvalRunRepository;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -30,7 +31,8 @@ import static org.mockito.Mockito.when;
 /**
  * The bounds on online judging that only show up when a judge stops answering: the per-verdict timeout
  * and the shutdown wait. The judges are stubbed - one that never answers stands in for a wedged Ollama,
- * which is the case these bounds exist for and the one a live run almost never produces.
+ * which is the case these bounds exist for and the one a live run almost never produces. Also the
+ * deterministic cited precision recorded beside them, which needs no judge at all.
  */
 class OnlineEvalServiceTest {
 
@@ -90,6 +92,31 @@ class OnlineEvalServiceTest {
             assertThat(System.nanoTime()).as("condition not met within 10s").isLessThan(deadline);
             Thread.sleep(20);
         }
+    }
+
+    private DistributionSummary summary(String name) {
+        DistributionSummary summary = registry.find(name).summary();
+        assertThat(summary).as("%s is pre-registered", name).isNotNull();
+        return summary;
+    }
+
+    @Test
+    @DisplayName("cited precision is recorded on a grounded turn, as 0 when the answer cites nothing, and not without retrieval")
+    void citedPrecisionRecorded() {
+        when(relevancy.evaluate(any())).thenReturn(PASS);
+        when(groundedness.evaluate(any())).thenReturn(PASS);
+        OnlineEvalService service = service(5, 5);
+
+        service.evaluate("How does graceful shutdown work?", "It waits for requests (manual.pdf, p. 1).", RETRIEVED);
+        service.evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
+        service.evaluate("Hello", "Hi there.", List.of());
+
+        DistributionSummary precision = summary("rag.eval.online.cited.context.precision");
+        DistributionSummary atK = summary("rag.eval.online.cited.precision.at.k");
+        assertThat(precision.count()).as("the ungrounded turn is not scored").isEqualTo(2);
+        assertThat(precision.totalAmount()).as("1.0 for the cited turn, 0.0 for the uncited one").isEqualTo(1.0);
+        assertThat(atK.count()).isEqualTo(2);
+        assertThat(atK.totalAmount()).isEqualTo(1.0);
     }
 
     @Test

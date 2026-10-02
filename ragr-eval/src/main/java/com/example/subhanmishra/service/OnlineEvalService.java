@@ -5,6 +5,7 @@ import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.TurnOrigin;
+import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -166,6 +167,14 @@ public class OnlineEvalService {
         try {
             EvalScores scores = scoringService.score(answer, retrieved);
             metricsService.recordOnline(scores);
+            // The golden suite's cited precision, on the same definition so the two can be compared:
+            // a grounded answer citing nothing scores 0, since chunks were retrieved and none were used.
+            // uncited.answers.total says how much of a drop that accounts for. Null when nothing was
+            // retrieved - there is no context to be precise about.
+            ContextPrecisionScores cited = scoringService.citedPrecision(answer, retrieved);
+            if (cited != null) {
+                metricsService.recordOnlineCitedPrecision(cited);
+            }
 
             if (shouldJudge(answer, retrieved)) {
                 submitJudgements(query, answer, retrieved);

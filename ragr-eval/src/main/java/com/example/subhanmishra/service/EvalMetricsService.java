@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -206,6 +207,8 @@ public class EvalMetricsService {
         registry.summary(ONLINE + "top.score");
         registry.summary(ONLINE + "score.spread");
         registry.summary(ONLINE + "answer.chars");
+        registry.summary(ONLINE + "cited.context.precision");
+        registry.summary(ONLINE + "cited.precision.at.k");
     }
 
     /**
@@ -314,6 +317,16 @@ public class EvalMetricsService {
             counter(ONLINE + "instruction.echoes.total", Tags.empty()).increment();
         }
         registry.summary(ONLINE + "answer.chars").record(scores.answer().answerChars());
+    }
+
+    /**
+     * Records one grounded live turn's cited context precision - a chunk counts as used when the answer
+     * cites its page. Summaries rather than counters because the score is a fraction per turn; the
+     * dashboard reads the mean as {@code _sum / _count}.
+     */
+    public void recordOnlineCitedPrecision(ContextPrecisionScores cited) {
+        registry.summary(ONLINE + "cited.context.precision").record(cited.averagePrecision());
+        registry.summary(ONLINE + "cited.precision.at.k").record(cited.precisionAtK());
     }
 
     /**

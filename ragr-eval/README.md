@@ -13,8 +13,9 @@ are simply not scored.
 
 **Does the metric need to know what the right answer was?** Most do not. Citation validity and
 fabrication, zero-hit rate, refusals and the LLM judges compare the answer against the context it was
-given, which every real turn carries - so they run **online**, on live traffic. Only recall (hit rate,
-mean reciprocal rank), context precision and expected-phrase coverage need known-correct pages, and
+given, which every real turn carries - so they run **online**, on live traffic. So does context
+precision scored from the answer's own citations. Only recall (hit rate, mean reciprocal rank),
+context precision against expected pages and expected-phrase coverage need known-correct pages, and
 those are what the **golden suite** adds.
 
 ## Online evaluation
@@ -24,7 +25,7 @@ flowchart TD
     k{{rag.chat.turn.completed}} --> l[OnlineEvalService<br/>consumer group ragr-eval]
     l --> g{golden turn?}
     g -- yes --> skip[skipped: left out of live metrics]
-    g -- no --> det[deterministic scores, every turn<br/>citations emitted, valid, fabricated, resolved<br/>retrieval hits and score spread, refusals]
+    g -- no --> det[deterministic scores, every turn<br/>citations emitted, valid, fabricated, resolved<br/>retrieval hits and score spread, refusals,<br/>cited context precision]
     det --> m[Micrometer meters<br/>scraped from :9096]
     det --> s{sampled?<br/>every turn by default}
     s -- yes --> free{judge free?}
@@ -35,8 +36,10 @@ flowchart TD
 
 **Live traffic is scored automatically.** Every turn is checked against the context it was actually
 given: how many citations it emitted, how many of those pointed at a page that was really retrieved,
-whether anything was retrieved at all, whether the assistant refused. This is string comparison over
-data carried in the event, so it runs on 100% of turns, seconds after they happen.
+whether anything was retrieved at all, whether the assistant refused, and how many of the retrieved
+chunks the answer cited (cited context precision, on the golden suite's definition - an answer citing
+nothing scores 0). This is string comparison over data carried in the event, so it runs on 100% of
+turns, seconds after they happen.
 
 **Every grounded turn is judged, and judging drops rather than queues.** Each turn is also sent to two
 LLM judges, in this process, after the answer has already been returned. It is not free: Ollama runs
@@ -65,8 +68,8 @@ measure retrieval recall.
 **Context precision is scored three ways**, because each relevance source is wrong in its own
 direction. *Expected pages* counts a chunk as useful if it is on a page the dataset lists - a floor,
 since the lists hold the pages containing the answer, not every useful page. *Cited* counts a chunk as
-used if the answer cites its page - free and deterministic on every run, but a passage used without a
-citation counts as unused. *LLM judged* asks the judge per chunk - only on a judged run, and unreliable
+used if the answer cites its page - free and deterministic on every run, and the one also recorded on
+live traffic, but a passage used without a citation counts as unused. *LLM judged* asks the judge per chunk - only on a judged run, and unreliable
 per case with this judge (one borderline verdict at rank 1 has moved a case from 0.700 to 0.200), so
 read only its run average, as a trend.
 
@@ -136,8 +139,8 @@ under `app.eval.*`:
 **ragr-eval — evaluation** in Grafana answers *are the answers any good?*
 
 - **Live traffic** - every real chat turn: citation fabrication and validity, uncited answers,
-  zero-hit rate, citation outcomes, the retrieval score distribution, sampled judge verdicts, and the
-  judges' throughput, drops and errors.
+  zero-hit rate, citation outcomes, the retrieval score distribution, judge verdicts, the judges'
+  throughput, drops and errors, and cited context precision.
 - **Golden suite** - the age of the last run, hit rate, mean reciprocal rank, case pass rate, context
   precision and precision@k (by expected pages, citations and the judge), scores over time, and per-case tables for the latest run and its history,
   read from the `eval` schema.
