@@ -159,7 +159,7 @@ retrieves from pgvector → Ollama generates → history to Redis → `ChatTurnP
 Kafka (`rag.chat.turn.completed`) without holding up the response.
 
 **Evaluation** (`ragr-eval`, a separate process): `OnlineEvalService` consumes each turn → deterministic
-scores on every turn, LLM judges on a sample → Micrometer, scraped by Prometheus from port 9096. The
+scores on every turn, LLM judges on every grounded turn (a configurable sample) → Micrometer, scraped by Prometheus from port 9096. The
 golden suite drives ragr-app's real `/ai/generate` and reads its own turns back off the same topic.
 
 Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake

@@ -122,7 +122,10 @@ app:
       # it is NOT free to the system: Ollama serialises on one runner slot, so a judge call occupies
       # the chat model and the NEXT user's generation queues behind it. Set 0.0 to keep the free
       # metrics and switch the model calls off entirely.
-      judge-sample-rate: 0.1
+      # Every turn: at this deployment's traffic - a handful of turns an hour - a 1-in-10 sample left
+      # the judged rates resting on one or two verdicts. Lower it if judgements start being dropped or
+      # chat latency rises behind them; the two move together, since both mean the slot is contended.
+      judge-sample-rate: 1.0
       # One in flight at a time, so the worst case is a single queued generation rather than a pile-up.
       # Admission is non-blocking - over this bound a judgement is DROPPED and counted, never queued.
       # A rising rag_eval_online_judgements_dropped_total means the sample rate is too high for the
@@ -137,7 +140,8 @@ app:
     golden:
       dataset-location: classpath:eval/golden-dataset.yaml
       # Judging roughly triples a run's wall clock. Off by default so the tagged test stays a quick
-      # retrieval-and-citation regression check; the test can switch it on explicitly.
+      # retrieval-and-citation regression check. EvalSuiteIT reads it, so a judged run is
+      # -Dapp.eval.golden.judged=true on the command line.
       judged: false
       persist: true
       # The running ragr-app the golden suite drives. The suite goes through its real HTTP endpoint -

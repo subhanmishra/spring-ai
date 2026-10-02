@@ -392,8 +392,8 @@
     },
     {
       "id": 7,
-      "title": "LLM judge verdicts (live, sampled)",
-      "description": "Relevancy and groundedness pass rates from the LLM judges, over whatever fraction of traffic app.eval.online.judge-sample-rate selects (default 0.1). IMPORTANT: the judge is gemma4:e2b — the same model that produced the answer. Self-judging is measurably more generous than an independent judge, so treat these as a TREND rather than an absolute quality score; the bias is roughly a constant offset, so a drop after a prompt or model change is real even though the level is flattering. A dedicated judge was rejected on memory grounds: the smallest purpose-built one, bespoke-minicheck, needs 4.39 GiB and does not fit on this host even after evicting both resident models.",
+      "title": "LLM judge verdicts (live)",
+      "description": "Relevancy and groundedness pass rates from the LLM judges, over whatever fraction of traffic app.eval.online.judge-sample-rate selects (default 1.0, every grounded turn). IMPORTANT: the judge is gemma4:e2b — the same model that produced the answer. Self-judging is measurably more generous than an independent judge, so treat these as a TREND rather than an absolute quality score; the bias is roughly a constant offset, so a drop after a prompt or model change is real even though the level is flattering. A dedicated judge was rejected on memory grounds: the smallest purpose-built one, bespoke-minicheck, needs 4.39 GiB and does not fit on this host even after evicting both resident models.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -431,7 +431,7 @@
     {
       "id": 8,
       "title": "Judge throughput, drops and errors — cumulative (live)",
-      "description": "Running totals, not rates: judging is sampled at 10% of a handful of turns an hour, so a per-second rate is indistinguishable from zero and the panel reads as broken. Judgements are fired off the response path onto a virtual thread and NEVER block the caller — but they are not free to the system, because Ollama serialises on a single runner slot, so a judge call occupies the chat model and the next user's generation queues behind it. Admission is bounded by app.eval.online.max-concurrent-judgements (default 1) and is non-blocking: over that bound a judgement is DROPPED, not queued. Climbing drops are not a fault — they mean the sample rate is set higher than the traffic can absorb, and the fix is to lower it. Errors, by contrast, are judge calls that started and broke. All three series exist at zero from startup, so a flat zero line here means 'nothing has happened', not 'no data'.",
+      "description": "Running totals, not rates: judging covers only a handful of turns an hour, so a per-second rate is indistinguishable from zero and the panel reads as broken. Judgements are fired off the response path onto a virtual thread and NEVER block the caller — but they are not free to the system, because Ollama serialises on a single runner slot, so a judge call occupies the chat model and the next user's generation queues behind it. Admission is bounded by app.eval.online.max-concurrent-judgements (default 1) and is non-blocking: over that bound a judgement is DROPPED, not queued. Climbing drops are not a fault — they mean the sample rate (default 1.0) is set higher than the traffic can absorb, and the fix is to lower it. Errors, by contrast, are judge calls that started and broke. All three series exist at zero from startup, so a flat zero line here means 'nothing has happened', not 'no data'.",
       "type": "timeseries",
       "gridPos": {
         "h": 8,

@@ -26,7 +26,7 @@ flowchart TD
     g -- yes --> skip[skipped: left out of live metrics]
     g -- no --> det[deterministic scores, every turn<br/>citations emitted, valid, fabricated, resolved<br/>retrieval hits and score spread, refusals]
     det --> m[Micrometer meters<br/>scraped from :9096]
-    det --> s{sampled 1 in 10?}
+    det --> s{sampled?<br/>every turn by default}
     s -- yes --> free{judge free?}
     free -- yes --> j[virtual thread: relevancy and groundedness judges<br/>gemma4:e2b]
     free -- no --> drop[dropped and counted]
@@ -38,12 +38,13 @@ given: how many citations it emitted, how many of those pointed at a page that w
 whether anything was retrieved at all, whether the assistant refused. This is string comparison over
 data carried in the event, so it runs on 100% of turns, seconds after they happen.
 
-**Judging is sampled, and drops rather than queues.** A fraction of turns is also sent to two LLM
-judges. It runs in this process after the answer has already been returned, but it is still sampled:
-Ollama runs the chat model on one slot, so a judge call occupies it and the next user's generation
-waits behind it. Over the concurrency bound a judgement is dropped and counted, never queued, so
-judging never drifts behind the traffic it describes. A rising drop count means the sample rate is too
-high.
+**Every grounded turn is judged, and judging drops rather than queues.** Each turn is also sent to two
+LLM judges, in this process, after the answer has already been returned. It is not free: Ollama runs
+the chat model on one slot, so a judge call occupies it and the next user's generation waits behind
+it. At a handful of turns an hour that costs little, and a 1-in-10 sample left the judged rates resting
+on one or two verdicts. Over the concurrency bound a judgement is dropped and counted, never queued,
+so judging never drifts behind the traffic it describes. A rising drop count means traffic has
+outgrown judging everything - lower `online.judge-sample-rate`.
 
 **The judge is the chat model grading its own answers**, which makes the judged rates optimistic. A
 dedicated judge would be better, but the smallest purpose-built one (`bespoke-minicheck`) needs
@@ -89,6 +90,9 @@ several minutes.
 ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
 
+Add `-Dapp.eval.golden.judged=true` to have the LLM judges score the run as well, including one call
+per retrieved chunk for the dashboard's LLM-judged context precision. It roughly triples the run time.
+
 `-Dgroups=eval` on its own will **not** run it: a JUnit tag exclusion beats an inclusion, so the
 exclusion itself has to be cleared. `-pl ragr-eval -am` builds only what the suite needs and leaves the
 running chat service's compiled classes alone.
@@ -110,11 +114,11 @@ under `app.eval.*`:
 | `enabled` | `true` | Master switch for all evaluation |
 | `topic` | `rag.chat.turn.completed` | The topic the chat service publishes turns to |
 | `judge-model` | `gemma4:e2b` | Model used by the LLM judges - the chat model itself, see above |
-| `online.judge-sample-rate` | `0.1` | Fraction of live answers sent to the judges. `0.0` keeps the free deterministic metrics and switches off the model calls |
+| `online.judge-sample-rate` | `1.0` | Fraction of live answers sent to the judges - every one, since at a handful of turns an hour a sample left too few verdicts to read. `0.0` keeps the free deterministic metrics and switches off the model calls |
 | `online.max-concurrent-judgements` | `1` | Judgements in flight. Over this bound a judgement is **dropped and counted**, never queued |
 | `online.judge-timeout-seconds` | `120` | How long one judge call may take; past it the call is interrupted and the rest of that judgement skipped |
 | `online.judge-shutdown-wait-seconds` | `20` | How long shutdown waits for a judgement in flight before interrupting it; must fit inside the container's 40 s `stop_grace_period` |
-| `golden.judged` | `false` | Whether a suite run also asks the judges, including one call per retrieved chunk for context precision. Roughly triples the run time |
+| `golden.judged` | `false` | Whether a suite run also asks the judges, including one call per retrieved chunk for context precision. Roughly triples the run time; `-Dapp.eval.golden.judged=true` turns it on for one run |
 | `golden.persist` | `true` | Write run and per-case rows to Postgres. Required for the dashboard's per-case tables **and** for its golden score panels |
 | `golden.chat-url` | `http://localhost:8080` | The running chat service a suite run drives |
 | `golden.turn-timeout` | `30s` | How long the suite waits for a turn to appear on Kafka after the answer returns |

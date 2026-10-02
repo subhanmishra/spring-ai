@@ -126,7 +126,7 @@ sequenceDiagram
     C-)K: ChatTurnCompleted
     K->>E: consume
     E->>E: deterministic scores, every turn
-    opt 1 turn in 10, if the judge is free
+    opt every grounded turn, if the judge is free
         E->>O: relevancy and groundedness judges
     end
     M->>E: scrape /actuator/prometheus

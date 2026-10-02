@@ -1,5 +1,6 @@
 package com.example.subhanmishra;
 
+import com.example.subhanmishra.config.EvalProperties;
 import com.example.subhanmishra.service.GoldenEvalService;
 import com.example.subhanmishra.service.GoldenEvalService.GoldenRunResult;
 import com.example.subhanmishra.service.eval.GoldenDataset;
@@ -35,10 +36,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * are the ones on the Grafana dashboard over time; what this test catches is a pipeline that has
  * broken outright - retrieval returning nothing, or the model inventing citations.
  *
- * <p>Judging is left off. It roughly triples the wall clock and its verdicts come from the chat model
- * grading its own output, which is too soft a signal to gate a build on. Enable it deliberately when
- * investigating a quality change, by passing {@code true} to
- * {@link GoldenEvalService#run(GoldenDataset, boolean)}.
+ * <p>Judging follows {@code app.eval.golden.judged}, off by default. It roughly triples the wall clock
+ * and its verdicts come from the chat model grading its own output, which is too soft a signal to gate
+ * a build on - so nothing below asserts on it. Switch it on deliberately when investigating a quality
+ * change, or to fill the dashboard's LLM-judged precision:
+ *
+ * <pre>{@code ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT -Dapp.eval.golden.judged=true}</pre>
  */
 // The online listener is left stopped: this JVM runs the golden suite, and a second member of the
 // ragr-eval consumer group would take the partition away from the running ragr-eval application.
@@ -145,6 +148,9 @@ class EvalSuiteIT {
     @Autowired
     private GoldenEvalService goldenEvalService;
 
+    @Autowired
+    private EvalProperties evalProperties;
+
     @Test
     @DisplayName("the golden suite runs and the pipeline has not regressed")
     void goldenSuiteHasNotRegressed() {
@@ -153,7 +159,7 @@ class EvalSuiteIT {
                 .as("the dataset should not be empty - check %s", dataset.suite())
                 .isNotEmpty();
 
-        GoldenRunResult result = goldenEvalService.run(dataset, false);
+        GoldenRunResult result = goldenEvalService.run(dataset, evalProperties.golden().judged());
 
         log.info("""
 
