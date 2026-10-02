@@ -287,6 +287,16 @@ services:
   # defaults in each application's YAML. Ollama stays native on Windows for the iGPU, reached through
   # host.docker.internal; Kafka through the INTERNAL listener.
   #
+  # Ollama is not containerised, nor replaced by Docker Model Runner. In a container it would run in the
+  # WSL2 VM, which cannot reach the Iris Xe through Vulkan - CPU only. Model Runner runs llama.cpp on
+  # the host and does use the iGPU (Docker Desktop 4.93, Vulkan, every layer offloaded), but measured
+  # 2 Oct 2026 on gemma4 e2b Q4_K_M with a 2.5k-token RAG prompt, one engine loaded at a time:
+  # prompt ingestion 143 tok/s against Ollama's 205, generation level (12.0 vs 12.3 tok/s). It also
+  # defaults to thinking on (off only via chat_template_kwargs.enable_thinking), a 131072-token context
+  # on 4 slots plus the vision projector - 5.5 GB resident against Ollama's 1.7 - and its weights
+  # differ from Ollama's (4.09 GB file vs 7.2), so a switch means a new golden baseline and a full
+  # re-ingest. Worth revisiting only if its prompt ingestion catches up.
+  #
   # depends_on is the infrastructure each one cannot start without, never another application, so
   # each can be started and restarted alone. No restart policy: Docker Desktop starting at login must
   # not bring the applications up behind an IntelliJ session.
