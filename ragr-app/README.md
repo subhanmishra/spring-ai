@@ -26,8 +26,9 @@ flowchart TD
   written, so a follow-up that only makes sense in context retrieves poorly.
 - **Citations are resolved, then removed from the text.** The model is asked to cite inline as
   `(filename, p. N)`, taking the page from each chunk's citation line. It sometimes writes a section
-  number where a page belongs - `(spring-boot-reference.pdf, p. 5.3)` - and `CitationResolver` rewrites
-  that to the page the heading sits on, using only the chunks it retrieved. The inline citations are
+  number where a page belongs - `(spring-boot-reference.pdf, p. 5.3)`, or with the dots dropped,
+  `p. 926` for section 9.2.6 - and `CitationResolver` rewrites that to the page the heading sits on,
+  using only the chunks it retrieved. A page the model was actually shown is never rewritten. The inline citations are
   then stripped from the answer the caller reads and reported beside it instead.
 - **Publishing never holds up the answer.** A turn that cannot be sent to Kafka is counted as dropped
   and lost; chat keeps answering whether or not Kafka or ragr-eval is up.
@@ -122,7 +123,7 @@ the evidence is reported beside it:
 ```
 
 - `sources` — every chunk retrieved for the answer, in rank order, with its full text. `grounded: false` and an empty list mean the answer came from general knowledge.
-- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model referred to a section number rather than a page — `(file.pdf, p. 5.3)`, or just `(5.3)` — and it was resolved to that heading's page (`writtenPage: "5.3"`); `UNVERIFIED` points at nothing the answer was given.
+- `citations` — each source the answer cites. `VERIFIED` points at a retrieved source; `REPAIRED` means the model referred to a section number rather than a page — `(file.pdf, p. 5.3)`, just `(5.3)`, or `(file.pdf, p. 926)` for section 9.2.6 — and it was resolved to that heading's page (`writtenPage` is what the model wrote: `"5.3"`, `"926"`); `UNVERIFIED` points at nothing the answer was given.
 
 A grounded answer takes tens of seconds on the reference machine, dominated by the ~3,000-token prompt
 the retrieved chunks make.

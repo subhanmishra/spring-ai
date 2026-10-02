@@ -63,6 +63,92 @@ class CitationResolverTest {
 
     private static final List<Document> ACTUATOR_CONTEXT = List.of(PAGE_277, PAGE_283, PAGE_299);
 
+    /** Page 372, which heads 9.2.6. Retrieved by {@code profiles-activation}, the case that cited "p. 926". */
+    private static final Document PAGE_372 = new Document("""
+            [spring-boot-reference.pdf, p. 372]
+
+            9.2.6. Set the Active Spring Profiles
+
+            The Spring Environment has an API for this, but you would normally set a System property
+            (spring.profiles.active) or an OS environment variable (SPRING_PROFILES_ACTIVE).""");
+
+    /** Page 107, retrieved alongside 372 and cited correctly in the same answer. */
+    private static final Document PAGE_107 = new Document("""
+            [spring-boot-reference.pdf, p. 107]
+
+            You can use a spring.profiles.active Environment property to specify which profiles are
+            active.""");
+
+    @Nested
+    @DisplayName("resolving a section number written without its dots")
+    class Collapsed {
+
+        @Test
+        @DisplayName("the page the suite caught: p. 926 for section 9.2.6")
+        void resolvesTheObservedCollapsedLabel() {
+            // Trimmed from the real answer. 926 is past the end of a 645-page manual.
+            String answer = "Use spring.profiles.active (spring-boot-reference.pdf, p. 107). Launch with "
+                            + "-Dspring.profiles.active=production (spring-boot-reference.pdf, p. 926).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_107, PAGE_372));
+
+            assertThat(resolution.answer()).isEqualTo(
+                    "Use spring.profiles.active (spring-boot-reference.pdf, p. 107). Launch with "
+                    + "-Dspring.profiles.active=production (spring-boot-reference.pdf, p. 372).");
+            assertThat(resolution.repaired()).isEqualTo(1);
+            assertThat(resolution.abstained()).isZero();
+            assertThat(resolution.repairs())
+                    .containsExactly(new CitationResolver.Repair("spring-boot-reference.pdf", "926", 372));
+        }
+
+        @Test
+        @DisplayName("a page the model was shown is never rewritten, even if it collapses to a heading")
+        void leavesARetrievedPageAlone() {
+            // 372 is retrieved, so it is a real citation - even with a chunk heading "3.7.2" beside it.
+            Document heads372 = new Document("""
+                    [spring-boot-reference.pdf, p. 88]
+
+                    3.7.2. A Heading Whose Digits Are a Retrieved Page
+
+                    body""");
+            String answer = "See (spring-boot-reference.pdf, p. 372).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_372, heads372));
+
+            assertThat(resolution.answer()).isEqualTo(answer);
+            assertThat(resolution.changed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("digits more than one retrieved heading collapses to are ambiguous, so left alone")
+        void leavesAnAmbiguousCollapseAlone() {
+            Document heads926 = new Document("""
+                    [spring-boot-reference.pdf, p. 500]
+
+                    92.6. Another Heading With The Same Digits
+
+                    body""");
+            String answer = "See (spring-boot-reference.pdf, p. 926).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_372, heads926));
+
+            assertThat(resolution.answer()).isEqualTo(answer);
+            assertThat(resolution.repaired()).isZero();
+            assertThat(resolution.abstained()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a plain page matching no heading is not counted as abstained - it is just a page")
+        void leavesAnUnmatchedPlainPageUncounted() {
+            String answer = "See (spring-boot-reference.pdf, p. 931).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_107, PAGE_372));
+
+            assertThat(resolution.answer()).isEqualTo(answer);
+            assertThat(resolution.abstained()).isZero();
+        }
+    }
+
     @Nested
     @DisplayName("resolving a section number to its page")
     class Resolving {
@@ -220,10 +306,10 @@ class CitationResolverTest {
     class LeavesAlone {
 
         @Test
-        @DisplayName("a plain page number is not this class's business")
+        @DisplayName("a plain page number is not this class's business unless it is a collapsed heading")
         void ignoresPlainPageNumbers() {
-            // Whether 999 is real or fabricated is for EvalScoringService to decide. Resolving has
-            // nothing to say about a citation that is already the right shape.
+            // Whether 999 is real or fabricated is for EvalScoringService to decide: no retrieved heading
+            // collapses to it, so resolving has nothing to say. See Collapsed for the one exception.
             String answer = "Right (spring-boot-reference.pdf, p. 277). Wrong (spring-boot-reference.pdf, p. 999).";
 
             Resolution resolution = CitationResolver.resolve(answer, ACTUATOR_CONTEXT);

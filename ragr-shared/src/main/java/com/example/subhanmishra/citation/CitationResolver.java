@@ -45,6 +45,18 @@ import java.util.regex.Pattern;
  * metric honest: this class cannot quietly absorb a model that has started guessing, because a guess
  * does not resolve.
  *
+ * <p><strong>The same mistake with the dots dropped.</strong> On 2 Oct 2026 the golden suite caught
+ * the first invented page since the parser strippers landed: {@code profiles-activation} cited "p. 926"
+ * of a 645-page manual. 926 appears in no retrieved chunk; the sentence came from page 372, under the
+ * heading "9.2.6. Set the Active Spring Profiles", and the run before cited "(9.2.6)" for the same
+ * sentence. So a plain page number is also resolved, under two extra conditions: it must name no page
+ * the model was shown - a retrieved page is a real citation and is never touched - and its digits must
+ * be exactly one retrieved heading with the dots removed. "926" can also be 92.6 or 9.26; if more than
+ * one retrieved heading collapses to it, it is left alone and counted as abstained. The residual risk
+ * is a genuinely invented page whose digits happen to match a retrieved heading being repaired rather
+ * than counted. It is narrow - the guess must collapse onto a heading among five chunks - and the
+ * repair still lands on a page the model was given, which is the property this class exists to keep.
+ *
  * <p>One limitation worth stating, since it affects a citation's precision rather than its
  * correctness. The page a section number resolves to is the page the <em>heading</em> sits on, which
  * for a section spanning several pages is its opening page rather than the page carrying the specific
@@ -135,6 +147,7 @@ public final class CitationResolver {
             return Resolution.unchanged(answer == null ? "" : answer);
         }
         Map<String, Citation> sectionSources = sectionSources(retrieved);
+        Set<Integer> retrievedPages = retrievedPages(retrieved);
 
         StringBuilder rewritten = new StringBuilder(answer.length());
         Map<String, Citation> unresolved = new LinkedHashMap<>();
@@ -148,12 +161,25 @@ public final class CitationResolver {
             Matcher inner = CitationParser.CITATION_IN_SPAN.matcher(spans.group(1));
             while (inner.find()) {
                 String pageRef = inner.group(2);
-                // Only a dotted reference is a candidate. A plain page number is either right or
-                // fabricated, and neither is this class's business.
-                if (pageRef == null || pageRef.indexOf('.') < 0) {
+                if (pageRef == null) {
                     continue;
                 }
-                Citation source = sectionSources.get(pageRef);
+                Citation source;
+                if (pageRef.indexOf('.') >= 0) {
+                    source = sectionSources.get(pageRef);
+                } else {
+                    // A plain page number is a candidate only when it names no retrieved page - a page
+                    // the model was shown is a real citation and is never touched - and its digits are
+                    // a retrieved heading with the dots taken out. Anything else is either right or
+                    // fabricated, and neither is this class's business.
+                    if (retrievedPages.contains(Integer.valueOf(pageRef))) {
+                        continue;
+                    }
+                    source = collapsedSection(pageRef, sectionSources);
+                    if (source == null) {
+                        continue;
+                    }
+                }
                 if (source == null || source == AMBIGUOUS) {
                     abstained++;
                     String fileName = inner.group(1).strip();
@@ -177,6 +203,38 @@ public final class CitationResolver {
         rewritten.append(answer, copiedTo, answer.length());
         return new Resolution(rewritten.toString(), repaired, abstained, List.copyOf(unresolved.values()),
                               List.copyOf(repairs.values()));
+    }
+
+    /**
+     * The retrieved heading whose number, dots removed, is {@code digits}: "926" for "9.2.6". Null when
+     * no heading collapses to it; {@link #AMBIGUOUS} when more than one does - "926" is also 92.6 and
+     * 9.26 - or the one that does is itself ambiguous.
+     */
+    private static @Nullable Citation collapsedSection(String digits, Map<String, Citation> sectionSources) {
+        Citation found = null;
+        for (Map.Entry<String, Citation> section : sectionSources.entrySet()) {
+            if (section.getKey().replace(".", "").equals(digits)) {
+                if (found != null) {
+                    return AMBIGUOUS;
+                }
+                found = section.getValue();
+            }
+        }
+        return found;
+    }
+
+    /** Every page a retrieved chunk's citation header names, whichever file it is from. */
+    private static Set<Integer> retrievedPages(@Nullable List<Document> retrieved) {
+        Set<Integer> pages = new HashSet<>();
+        if (retrieved != null) {
+            for (Document document : retrieved) {
+                Citation header = CitationParser.parseHeader(document.getText());
+                if (header != null && header.pageNumber() != null) {
+                    pages.add(header.pageNumber());
+                }
+            }
+        }
+        return pages;
     }
 
     /**
