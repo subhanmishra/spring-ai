@@ -112,7 +112,8 @@ under `app.eval.*`:
 | `judge-model` | `gemma4:e2b` | Model used by the LLM judges - the chat model itself, see above |
 | `online.judge-sample-rate` | `0.1` | Fraction of live answers sent to the judges. `0.0` keeps the free deterministic metrics and switches off the model calls |
 | `online.max-concurrent-judgements` | `1` | Judgements in flight. Over this bound a judgement is **dropped and counted**, never queued |
-| `online.judge-timeout-seconds` | `120` | How long one judge call may take |
+| `online.judge-timeout-seconds` | `120` | How long one judge call may take; past it the call is interrupted and the rest of that judgement skipped |
+| `online.judge-shutdown-wait-seconds` | `20` | How long shutdown waits for a judgement in flight before interrupting it; must fit inside the container's 40 s `stop_grace_period` |
 | `golden.judged` | `false` | Whether a suite run also asks the judges, including one call per retrieved chunk for context precision. Roughly triples the run time |
 | `golden.persist` | `true` | Write run and per-case rows to Postgres. Required for the dashboard's per-case tables **and** for its golden score panels |
 | `golden.chat-url` | `http://localhost:8080` | The running chat service a suite run drives |

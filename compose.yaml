@@ -304,6 +304,11 @@ services:
     # grounded turn, as cgroup anon minus committed heap: 218 MiB outside the heap for ragr-app,
     # 245 for ragr-ingest, 184 for ragr-eval. A limit reserves nothing, so it costs no memory.
     mem_limit: 650m
+    # Without one, Docker (29.8 here) waits only 3 s after SIGTERM before SIGKILL - measured, not the
+    # 10 s often quoted. A chat turn in flight takes far longer, and Boot's graceful shutdown waits up to
+    # 30 s for it, so every stop mid-turn ended in exit 137, the turn cut off and the last logs and
+    # spans never flushed. 40 s covers the 30 s phase and what comes after it.
+    stop_grace_period: 40s
     environment:
       <<: *ragr-common-env
       JDK_JAVA_OPTIONS: "-Xmx384m -XX:+UseSerialGC"
@@ -367,6 +372,10 @@ services:
         MODULE: ragr-eval
     # 256 MB heap cap plus ~184 MiB outside it - see ragr-app above.
     mem_limit: 480m
+    # Docker's 3 s default - see ragr-app - does not cover a judgement in flight: shutdown waits up to
+    # app.eval.online.judge-shutdown-wait-seconds (20) for it before interrupting, after the Kafka
+    # consumer has left its group. Raising that wait means raising this too.
+    stop_grace_period: 40s
     environment:
       <<: *ragr-common-env
       JDK_JAVA_OPTIONS: "-Xmx256m -XX:+UseSerialGC"

@@ -268,6 +268,11 @@ the heap - so a full heap ends in an `OutOfMemoryError` rather than a silent kil
 | `ai_ragr-ingest` | 512 MB | 850 MB | 631 MiB peak indexing the 645-page reference manual |
 | `ai_ragr-eval` | 256 MB | 480 MB | 276 MiB consuming turns |
 
+Each also has a 40 s `stop_grace_period`. Without one, Docker here waits only 3 s after SIGTERM before
+killing the JVM, which cut off any request in flight and the last logs and spans with it (exit 137).
+40 s covers Spring Boot's 30 s graceful-shutdown window - long enough for an upload or a judgement to
+finish or be interrupted, though not for a full grounded chat answer, which is abandoned at 30 s.
+
 ### On the host
 
 Ensure Docker and Ollama are running, then start the applications **in this order**, each in its own

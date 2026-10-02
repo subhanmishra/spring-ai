@@ -128,7 +128,12 @@ app:
       # A rising rag_eval_online_judgements_dropped_total means the sample rate is too high for the
       # traffic, not that anything is broken.
       max-concurrent-judgements: 1
+      # Per verdict. A judgement whose verdict is abandoned skips the rest of it - a model that did not
+      # answer one prompt in time will not answer the next promptly either.
       judge-timeout-seconds: 120
+      # How long shutdown waits for a judgement in flight before interrupting it. Must leave the whole
+      # shutdown inside ragr-eval's stop_grace_period in compose.yaml (40s), or Docker kills the JVM.
+      judge-shutdown-wait-seconds: 20
     golden:
       dataset-location: classpath:eval/golden-dataset.yaml
       # Judging roughly triples a run's wall clock. Off by default so the tagged test stays a quick

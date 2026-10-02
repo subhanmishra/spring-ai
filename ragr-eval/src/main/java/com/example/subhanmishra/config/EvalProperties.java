@@ -62,13 +62,19 @@ public record EvalProperties(boolean enabled,
      *                           case is a single queued generation rather than a pile-up. Admission is
      *                           non-blocking: over this bound a judgement is dropped and counted, never
      *                           queued, because a queue on this path would grow without limit under load.
-     * @param judgeTimeout       seconds to wait for a judge verdict before abandoning it. Bounds how long
-     *                           a wedged judge can hold its permit.
+     * @param judgeTimeout       seconds to wait for one judge verdict before abandoning it, and the rest of
+     *                           that judgement with it. Bounds how long a wedged judge can hold its
+     *                           permit: at most two verdicts' worth.
+     * @param judgeShutdownWait  seconds shutdown waits for a judgement in flight before interrupting it.
+     *                           Short on purpose, and separate from the timeout: a judgement is
+     *                           observability, losing one is acceptable, and the whole shutdown has to
+     *                           fit inside the container's {@code stop_grace_period} or Docker kills it.
      */
     public record Online(boolean enabled,
                          double judgeSampleRate,
                          int maxConcurrentJudgements,
-                         int judgeTimeoutSeconds) {
+                         int judgeTimeoutSeconds,
+                         int judgeShutdownWaitSeconds) {
     }
 
     /**

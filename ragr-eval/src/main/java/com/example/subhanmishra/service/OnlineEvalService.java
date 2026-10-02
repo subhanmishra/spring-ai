@@ -22,12 +22,16 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Scores real chat traffic as it happens, from the turns {@code ragr-app} publishes to Kafka.
@@ -57,7 +61,8 @@ import java.util.concurrent.TimeUnit;
  *       enough that submitting first and blocking on the permit inside would happily accumulate
  *       thousands of parked threads under load - the bound has to be enforced at the door.</li>
  *   <li><em>Timeout.</em> A wedged judge would otherwise hold its permit forever and silently disable
- *       judging for the life of the process.</li>
+ *       judging for the life of the process. Each verdict is waited for with a deadline and interrupted
+ *       past it - see {@link #judge}.</li>
  * </ul>
  *
  * <p>Drops are counted rather than logged per occurrence: under load they are expected, and a log line
@@ -227,32 +232,64 @@ public class OnlineEvalService {
      */
     private void runJudgements(String query, String answer, List<Document> retrieved) {
         EvaluationRequest request = new EvaluationRequest(query, retrieved, answer);
-        judge(RELEVANCY, relevancyEvaluator, request);
-        judge(GROUNDEDNESS, factCheckingEvaluator, request);
-    }
-
-    private void judge(String metric, Evaluator evaluator, EvaluationRequest request) {
-        long startedAt = System.nanoTime();
-        try {
-            EvaluationResponse response = evaluator.evaluate(request);
-            long millis = (System.nanoTime() - startedAt) / 1_000_000;
-            metricsService.recordOnlineJudgement(metric, response.isPass(), millis);
-        } catch (RuntimeException e) {
-            metricsService.recordJudgementError(metric);
-            log.debug("Online {} judgement failed", metric, e);
+        if (judge(RELEVANCY, relevancyEvaluator, request)) {
+            judge(GROUNDEDNESS, factCheckingEvaluator, request);
         }
     }
 
     /**
-     * Gives in-flight judgements a bounded chance to finish at shutdown, then abandons them. They are
+     * One verdict, made on a virtual thread of its own so this one can stop waiting for it.
+     *
+     * <p>The judge call has no deadline of its own - Ollama answers a non-streamed request only when it
+     * is done, and the HTTP client has no read timeout - so without this a wedged model would hold the
+     * permit for the life of the process. Cancelling interrupts the call, which the JDK HTTP client
+     * Spring Boot picks here aborts.
+     *
+     * @return false when the verdict was abandoned - timed out, or interrupted by shutdown - and the
+     *         rest of the judgement should be skipped
+     */
+    private boolean judge(String metric, Evaluator evaluator, EvaluationRequest request) {
+        long startedAt = System.nanoTime();
+        int timeout = properties.online().judgeTimeoutSeconds();
+        Future<EvaluationResponse> verdict;
+        try {
+            verdict = judgeExecutor.submit(contextSnapshotFactory.captureAll().wrap(() -> evaluator.evaluate(request)));
+        } catch (RejectedExecutionException e) {
+            // Shutdown began between the two verdicts.
+            return false;
+        }
+        try {
+            EvaluationResponse response = verdict.get(timeout, TimeUnit.SECONDS);
+            long millis = (System.nanoTime() - startedAt) / 1_000_000;
+            metricsService.recordOnlineJudgement(metric, response.isPass(), millis);
+            return true;
+        } catch (TimeoutException e) {
+            verdict.cancel(true);
+            metricsService.recordJudgementError(metric);
+            log.warn("Abandoned the online {} judgement after {}s without a verdict", metric, timeout);
+            return false;
+        } catch (InterruptedException e) {
+            verdict.cancel(true);
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException e) {
+            metricsService.recordJudgementError(metric);
+            log.debug("Online {} judgement failed", metric, e.getCause());
+            return true;
+        }
+    }
+
+    /**
+     * Gives in-flight judgements a bounded chance to finish at shutdown, then interrupts them. They are
      * observability, so losing one on shutdown is acceptable; blocking the shutdown on a model call
-     * that takes the better part of a minute is not.
+     * that takes the better part of a minute is not - Docker kills the JVM once the container's
+     * {@code stop_grace_period} runs out, and the logs and spans still buffered go with it.
      */
     @PreDestroy
     void shutdown() {
         judgeExecutor.shutdown();
         try {
-            if (!judgeExecutor.awaitTermination(properties.online().judgeTimeoutSeconds(), TimeUnit.SECONDS)) {
+            if (!judgeExecutor.awaitTermination(properties.online().judgeShutdownWaitSeconds(), TimeUnit.SECONDS)) {
                 judgeExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {
