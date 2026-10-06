@@ -33,7 +33,8 @@ flowchart TD
 - **Citations are resolved, then removed from the text.** The model is asked to cite inline as
   `(filename, p. N)`, taking the page from each chunk's citation line. It sometimes writes a section
   number where a page belongs - `(spring-boot-reference.pdf, p. 5.3)`, or with the dots dropped,
-  `p. 926` for section 9.2.6 - and `CitationResolver` rewrites that to the page the heading sits on,
+  `p. 926` for section 9.2.6, or only some of them, `p. 913.1` for 9.13.1 - and `CitationResolver`
+  rewrites that to the page the heading sits on,
   using only the chunks it retrieved. A page the model was actually shown is never rewritten. The inline citations are
   then stripped from the answer the caller reads and reported beside it instead.
 - **Publishing never holds up the answer.** A turn that cannot be sent to Kafka is counted as dropped
