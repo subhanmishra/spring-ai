@@ -94,17 +94,38 @@ class TurnJudgeServiceTest {
     }
 
     @Test
-    @DisplayName("an ungrounded turn gets its task classified and nothing else")
-    void ungroundedOnlyClassified() {
+    @DisplayName("an ungrounded turn has its pool graded but its answer never judged")
+    void ungroundedPoolGradedAnswerNot() {
         when(taskClassifier.classify(anyString())).thenReturn(TaskType.GENERAL);
+        when(chunkGrades.grade(anyString(), any())).thenReturn(0, 1);
 
-        TurnVerdicts verdicts = service(5).judge(input(0, "9"));
+        TurnVerdicts verdicts = service(5).judge(input(0, "9", "10"));
 
         assertThat(verdicts.taskType()).isEqualTo(TaskType.GENERAL);
-        verify(chunkGrades, never()).grade(anyString(), any());
+        assertThat(verdicts.grades()).containsExactly(0, 1);
         verify(relevancy, never()).evaluate(any());
-        assertThat(verdicts.ranking()).isNull();
+        verify(groundedness, never()).evaluate(any());
+        verify(claims, never()).extractClaims(anyString());
+        verify(completeness, never()).judge(anyString(), anyString());
+        assertThat(verdicts.ranking().recallAtK()).as("nothing relevant to recall").isNull();
+        assertThat(verdicts.retrievalOk()).as("nothing to retrieve, so not wrong").isNull();
+        assertThat(verdicts.answerOk(0.8, 0)).isNull();
         assertThat(verdicts.anyStageUnmeasured()).isFalse();
+    }
+
+    @Test
+    @DisplayName("an ungrounded turn whose pool held a relevant chunk has recall 0 - the threshold dropped it")
+    void ungroundedRelevantChunkCutOff() {
+        when(taskClassifier.classify(anyString())).thenReturn(TaskType.HOW_TO);
+        when(chunkGrades.grade(anyString(), any())).thenReturn(2, 0);
+
+        TurnVerdicts verdicts = service(5).judge(input(0, "9", "10"));
+
+        assertThat(verdicts.ranking().recallAtK()).isZero();
+        assertThat(verdicts.ranking().relevantCutOff()).isEqualTo(1);
+        assertThat(verdicts.ranking().precisionAtK()).isNull();
+        assertThat(verdicts.retrievalOk()).isFalse();
+        verify(relevancy, never()).evaluate(any());
     }
 
     @Test

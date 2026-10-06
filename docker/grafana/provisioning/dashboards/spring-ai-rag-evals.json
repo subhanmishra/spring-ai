@@ -841,7 +841,7 @@
       "id": 12,
       "type": "stat",
       "title": "Live — judged turns in range",
-      "description": "From the judge grading every chunk of each turn's candidate pool (the top 10 the vector query returned, of which the prompt got the top-k above the similarity threshold): 2 = holds what the answer needs, 1 = on topic only, 0 = not useful. Relevant means grade 2. Recall@K is POOLED: relevant chunks in the prompt over relevant chunks in the pool - an upper bound, since relevant chunks ranked below the pool are invisible to it. Averages exclude turns where a measure is undefined (no relevant chunk in the pool for recall). Self-judged by gemma4:e2b: read as a trend, not a grade.",
+      "description": "From the judge grading every chunk of each turn's candidate pool (the top 10 the vector query returned, of which the prompt got the top-k above the similarity threshold): 2 = holds what the answer needs, 1 = on topic only, 0 = not useful. Relevant means grade 2. Recall@K is POOLED: relevant chunks in the prompt over relevant chunks in the pool - an upper bound, since relevant chunks ranked below the pool are invisible to it. Averages exclude turns where a measure is undefined (no relevant chunk in the pool for recall). Ungrounded turns are included: their pool is graded too, so one whose pool held a relevant chunk scores recall 0; they have no precision, MRR or NDCG, having put nothing in the prompt. Self-judged by gemma4:e2b: read as a trend, not a grade.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -912,7 +912,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(t.recall_at_k) AS \"Recall@K\", AVG(t.precision_at_k) AS \"Precision@K\", AVG(t.mrr) AS \"MRR\", AVG(t.ndcg_at_k) AS \"NDCG@K\", COUNT(t.precision_at_k) AS \"n judged\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') AND t.grounded",
+          "rawSql": "SELECT AVG(t.recall_at_k) AS \"Recall@K\", AVG(t.precision_at_k) AS \"Precision@K\", AVG(t.mrr) AS \"MRR\", AVG(t.ndcg_at_k) AS \"NDCG@K\", COUNT(t.recall_at_k) AS \"n recall\", COUNT(t.precision_at_k) AS \"n precision\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}')",
           "refId": "A"
         }
       ]
@@ -979,7 +979,7 @@
       "id": 14,
       "type": "timeseries",
       "title": "Live — retrieval, hourly",
-      "description": "Hourly averages over judged live turns, placed at when the turn happened, not when it was judged.",
+      "description": "Hourly averages over judged live turns, grounded and ungrounded alike (see the panel above), placed at when the turn happened, not when it was judged.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -1027,7 +1027,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(t.occurred_at, '1h'), AVG(t.recall_at_k) AS \"Recall@K\", AVG(t.precision_at_k) AS \"Precision@K\", AVG(t.mrr) AS \"MRR\", AVG(t.ndcg_at_k) AS \"NDCG@K\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') AND t.grounded GROUP BY 1 ORDER BY 1",
+          "rawSql": "SELECT $__timeGroupAlias(t.occurred_at, '1h'), AVG(t.recall_at_k) AS \"Recall@K\", AVG(t.precision_at_k) AS \"Precision@K\", AVG(t.mrr) AS \"MRR\", AVG(t.ndcg_at_k) AS \"NDCG@K\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') GROUP BY 1 ORDER BY 1",
           "refId": "A"
         }
       ]
@@ -1178,7 +1178,7 @@
       "id": 17,
       "type": "stat",
       "title": "Live — tuning signals",
-      "description": "Left out: share of judged turns where the threshold or top-k cut off a chunk the judge called relevant - a direct signal that one of them is set too tight. Nothing relevant: share where the whole pool of 10 held no relevant chunk - an uncovered question, or a pool too shallow.",
+      "description": "Left out: share of judged turns where the threshold or top-k cut off a chunk the judge called relevant - a direct signal that one of them is set too tight. Nothing relevant: share where the whole pool of 10 held no relevant chunk - an uncovered question (general conversation included), or a pool too shallow. Context dropped entirely: share of ungrounded turns - answered with no context because nothing cleared the similarity threshold - whose pool held a chunk the judge called relevant. The threshold left the model with nothing when there was something to give.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -1249,7 +1249,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(CASE WHEN t.relevant_cut_off IS NOT NULL THEN (CASE WHEN t.relevant_cut_off > 0 THEN 1.0 ELSE 0.0 END) END) AS \"relevant chunk left out\", AVG(CASE WHEN t.relevant_in_pool IS NOT NULL THEN (CASE WHEN t.relevant_in_pool = 0 THEN 1.0 ELSE 0.0 END) END) AS \"nothing relevant in pool\", AVG(t.retrieval_millis) AS \"n retrieval ms\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') AND t.grounded",
+          "rawSql": "SELECT AVG(CASE WHEN t.relevant_cut_off IS NOT NULL THEN (CASE WHEN t.relevant_cut_off > 0 THEN 1.0 ELSE 0.0 END) END) AS \"relevant chunk left out\", AVG(CASE WHEN t.relevant_in_pool IS NOT NULL THEN (CASE WHEN t.relevant_in_pool = 0 THEN 1.0 ELSE 0.0 END) END) AS \"nothing relevant in pool\", AVG(CASE WHEN NOT t.grounded AND t.relevant_in_pool IS NOT NULL THEN (CASE WHEN NOT t.grounded AND t.relevant_in_pool > 0 THEN 1.0 ELSE 0.0 END) END) AS \"relevant context dropped entirely\", AVG(t.retrieval_millis) AS \"n retrieval ms\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}')",
           "refId": "A"
         }
       ]

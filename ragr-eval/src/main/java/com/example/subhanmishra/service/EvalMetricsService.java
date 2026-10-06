@@ -422,10 +422,10 @@ public class EvalMetricsService {
              .register(registry)
              .record(judgeMillis, TimeUnit.MILLISECONDS);
         counter(ONLINE + "judged.turns.total", task.and("grounded", String.valueOf(grounded))).increment();
-        if (!grounded) {
-            return;
-        }
 
+        // Retrieval first, for ungrounded turns too: their pool is graded, and a relevant chunk in it is a
+        // recall of 0. Precision, MRR and NDCG are null for them - the prompt got no chunks - so recording
+        // "if present" keeps them out of those means without a special case.
         RetrievalRanking ranking = verdicts.ranking();
         if (ranking != null) {
             recordIfPresent(ONLINE + "precision.at.k", task, ranking.precisionAtK());
@@ -435,6 +435,9 @@ public class EvalMetricsService {
             if (ranking.relevantInPool() == 0) {
                 counter(ONLINE + "nothing.relevant.total", task).increment();
             }
+        }
+        if (!grounded) {
+            return;
         }
         recordIfPresent(ONLINE + "faithfulness", task, verdicts.faithfulness());
         if (verdicts.relevancyPass() != null) {

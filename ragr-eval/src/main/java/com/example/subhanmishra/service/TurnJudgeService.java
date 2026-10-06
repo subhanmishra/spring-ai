@@ -39,11 +39,15 @@ import java.util.concurrent.TimeoutException;
  * in the order they run:
  *
  * <ol>
- *   <li><b>task</b> - the question's {@code TaskType}. The only stage an ungrounded turn gets: its answer
- *       is not judged (a standing rule - judging general conversation against no context would drag
- *       groundedness down in proportion to how much of it the assistant handles), but what kind of
- *       question it was is still worth knowing.</li>
- *   <li><b>chunk grades</b> - every chunk in the pool, 0/1/2, for precision, pooled recall, MRR and NDCG.</li>
+ *   <li><b>task</b> - the question's {@code TaskType}.</li>
+ *   <li><b>chunk grades</b> - every chunk in the pool, 0/1/2, for precision, pooled recall, MRR and NDCG.
+ *       The last stage an ungrounded turn gets. Its answer is never judged (a standing rule - judging
+ *       general conversation against no context would drag groundedness down in proportion to how much
+ *       of it the assistant handles), but its pool is: every chunk fell below the similarity threshold,
+ *       and a relevant one among them means the threshold left the model with no context at all when
+ *       there was some to give - the most direct sign it is set too tight. Such a turn's recall is 0;
+ *       one whose pool holds nothing relevant has no recall, and is simply a question the corpus does
+ *       not cover.</li>
  *   <li><b>relevancy</b> and <b>groundedness</b> - Spring AI's two judges, kept as they were so their
  *       history stays comparable.</li>
  *   <li><b>claims</b> - extraction, then one batched verification: faithfulness as a fraction.</li>
@@ -113,7 +117,7 @@ public class TurnJudgeService {
         String answer = input.answer();
 
         verdicts.taskType(call("task", () -> taskClassifier.classify(query)));
-        if (answer == null || answer.isBlank() || input.retrievedCount() == 0) {
+        if (answer == null || answer.isBlank()) {
             return verdicts;
         }
 
@@ -123,6 +127,9 @@ public class TurnJudgeService {
             grades.add(call("chunk_grade", () -> chunkGradeEvaluator.grade(query, document)));
         }
         verdicts.grades(grades, input.retrievedCount());
+        if (input.retrievedCount() == 0) {
+            return verdicts;
+        }
 
         List<Document> inContext = input.inContext().stream().map(EvalTurnChunk::toDocument).toList();
         EvaluationRequest request = new EvaluationRequest(query, inContext, answer);

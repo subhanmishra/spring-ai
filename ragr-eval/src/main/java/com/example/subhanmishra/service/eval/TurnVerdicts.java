@@ -130,9 +130,16 @@ public final class TurnVerdicts {
         noteMeasured(pass);
     }
 
-    /** Whether a relevant chunk reached the prompt; null when the pool could not be graded. */
+    /**
+     * Whether a relevant chunk reached the prompt; null when the pool could not be graded, and null for a
+     * turn that got no context from a pool holding nothing relevant - retrieval was not wrong to return
+     * nothing for a question the corpus does not cover.
+     */
     public @Nullable Boolean retrievalOk() {
-        return ranking != null ? ranking.retrievalOk() : null;
+        if (ranking == null || (ranking.precisionAtK() == null && ranking.relevantInPool() == 0)) {
+            return null;
+        }
+        return ranking.retrievalOk();
     }
 
     /**

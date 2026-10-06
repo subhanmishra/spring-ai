@@ -68,7 +68,10 @@ serves one request at a time. Kafka took judging off the chat thread; the idle g
 model: before every judge call the worker reads ragr-app's `rag.chat.generations.active` gauge and waits
 while it is above zero. The most a user can wait is the one judge call already running, which is why
 the judges are many short calls (1-22 s each, measured 6 Oct 2026) rather than a few long ones. A
-grounded turn takes about 40-70 s of judge time; an ungrounded one only has its task classified.
+grounded turn takes about 40-70 s of judge time. An ungrounded one - nothing cleared the similarity
+threshold, so the model answered from general knowledge - has its task classified and its pool graded,
+about 6 s, but its answer is never judged. A relevant chunk in that pool is a recall of 0: the
+threshold dropped context the answer could have used.
 
 **The queue is bounded by age, not by dropping.** A turn not judged within `judge.max-backlog-age` (6h)
 is marked SKIPPED and counted, so the queue never describes traffic from hours ago. A steadily rising

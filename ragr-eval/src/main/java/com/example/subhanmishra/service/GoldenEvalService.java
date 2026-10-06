@@ -371,9 +371,9 @@ public class GoldenEvalService {
 
     /**
      * The same judges, in the same order, that live turns get from {@link TurnJudgeWorker} - so a golden
-     * number and a live one mean the same thing. An ungrounded case gets only its task classified, for
-     * the reason live ungrounded turns do: both answer judges score an answer against its context, and an
-     * out-of-corpus case would fail them for behaving correctly.
+     * number and a live one mean the same thing. An ungrounded case gets only its task classified and its
+     * pool graded, for the reason live ungrounded turns do: the answer judges score an answer against its
+     * context, and an out-of-corpus case would fail them for behaving correctly.
      *
      * <p>Then, for grounded cases only, the answer-use context precision judge, which has no live
      * counterpart. Last, and deliberately: it is top-k calls, so a run interrupted partway through a case
