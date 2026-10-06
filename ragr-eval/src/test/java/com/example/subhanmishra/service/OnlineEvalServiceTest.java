@@ -1,173 +1,156 @@
 package com.example.subhanmishra.service;
 
-import com.example.subhanmishra.config.EvalProperties;
+import com.example.subhanmishra.entity.EvalTurn;
+import com.example.subhanmishra.entity.EvalTurn.JudgeStatus;
+import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.ChatTurnCompleted.RetrievedChunk;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalRunRepository;
-import io.micrometer.core.instrument.Counter;
+import com.example.subhanmishra.repository.EvalTurnRepository;
+import com.example.subhanmishra.repository.EvalTurnRepository.PreviousTurn;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
-import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
-import org.springframework.ai.document.Document;
-import org.mockito.stubbing.Answer;
-import org.springframework.ai.evaluation.EvaluationResponse;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The bounds on online judging that only show up when a judge stops answering: the per-verdict timeout
- * and the shutdown wait. The judges are stubbed - one that never answers stands in for a wedged Ollama,
- * which is the case these bounds exist for and the one a live run almost never produces. Also the
- * deterministic cited precision recorded beside them, which needs no judge at all.
+ * What the listener does with a live turn: score it deterministically, store it with its pool and the
+ * right queue status, and mark the previous turn when this one asks it again. Judging is not here any
+ * more - {@code TurnJudgeWorkerTest} and {@code TurnJudgeServiceTest} cover it.
  */
 class OnlineEvalServiceTest {
 
-    private static final List<Document> RETRIEVED =
-            List.of(Document.builder().text("[manual.pdf, p. 1]\n\nGraceful shutdown waits for requests.").build());
-    private static final EvaluationResponse PASS = new EvaluationResponse(true, "", Map.of());
+    private static final RetrievedChunk IN_CONTEXT = new RetrievedChunk(
+            "chunk-1", "[manual.pdf, p. 1]\n\nGraceful shutdown waits for requests.",
+            Map.of("fileName", "manual.pdf", "pageNumber", 1, "section", "5.1. Shutdown"), 0.81);
+    private static final RetrievedChunk EXCLUDED = new RetrievedChunk(
+            "chunk-2", "[manual.pdf, p. 9]\n\nPorts.", Map.of("fileName", "manual.pdf", "pageNumber", 9), 0.42);
 
     private final MeterRegistry registry = new SimpleMeterRegistry();
-    private final RelevancyEvaluator relevancy = mock(RelevancyEvaluator.class);
-    private final FactCheckingEvaluator groundedness = mock(FactCheckingEvaluator.class);
+    private final EvalTurnRepository turns = mock(EvalTurnRepository.class);
 
-    /** Set once a stubbed judge call has started, and once it has been interrupted. */
-    private final CountDownLatch judgeStarted = new CountDownLatch(1);
-    private final CountDownLatch judgeInterrupted = new CountDownLatch(1);
-
-    private OnlineEvalService service;
-
-    @AfterEach
-    void shutDown() {
-        if (service != null) {
-            service.shutdown();
-        }
+    @BeforeEach
+    void storeEverything() {
+        when(turns.insert(any())).thenReturn(true);
+        when(turns.previousTurn(anyString(), any(), any())).thenReturn(Optional.empty());
     }
 
-    private OnlineEvalService service(int judgeTimeoutSeconds, int judgeShutdownWaitSeconds) {
-        EvalProperties.Online online = new EvalProperties.Online(true, 1.0, 1, judgeTimeoutSeconds,
-                                                                 judgeShutdownWaitSeconds);
-        EvalProperties properties = new EvalProperties(true, "rag.chat.turn.completed", "judge", 0.0, 8, 8192,
-                                                       online, null);
-        EvalMetricsService metrics = new EvalMetricsService(registry, mock(EvalRunRepository.class));
-        service = new OnlineEvalService(new EvalScoringService(), metrics, relevancy, groundedness, properties);
-        return service;
+    private OnlineEvalService service(double judgeSampleRate) {
+        EvalMetricsService metrics = new EvalMetricsService(registry, mock(EvalRunRepository.class), null);
+        return new OnlineEvalService(new EvalScoringService(), metrics, turns,
+                                     EvalPropertiesFixture.properties(judgeSampleRate));
     }
 
-    /** A judge call that never returns on its own - only an interrupt ends it. */
-    private Answer<EvaluationResponse> wedged() {
-        return invocation -> {
-            judgeStarted.countDown();
-            try {
-                Thread.sleep(TimeUnit.MINUTES.toMillis(5));
-            } catch (InterruptedException e) {
-                judgeInterrupted.countDown();
-                throw new IllegalStateException("judge call interrupted", e);
-            }
-            throw new AssertionError("a wedged judge must not return");
-        };
+    private static ChatTurnCompleted turn(String answer, List<RetrievedChunk> retrieved, List<RetrievedChunk> excluded) {
+        return new ChatTurnCompleted(UUID.randomUUID(), TurnOrigin.LIVE, Instant.now(), "conv-1",
+                                     "How does graceful shutdown work?", answer, 0, 0, List.of(), retrieved,
+                                     "gemma4:e2b", 5, 0.6, ChatTurnCompleted.SCHEMA_VERSION, excluded, 10,
+                                     new ChatTurnCompleted.Timings(2L, null, 20_000L, false),
+                                     new ChatTurnCompleted.GenerationUsage(900, 60, "stop"), "abc123");
     }
 
-    private double counter(String name, String... tags) {
-        Counter counter = registry.find(name).tags(tags).counter();
-        return counter == null ? 0.0 : counter.count();
+    private EvalTurn stored() {
+        ArgumentCaptor<EvalTurn> captor = ArgumentCaptor.forClass(EvalTurn.class);
+        verify(turns).insert(captor.capture());
+        return captor.getValue();
     }
 
-    private static void awaitTrue(BooleanSupplier condition) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!condition.getAsBoolean()) {
-            assertThat(System.nanoTime()).as("condition not met within 10s").isLessThan(deadline);
-            Thread.sleep(20);
-        }
+    @Test
+    @DisplayName("a grounded turn is stored with its whole pool, in rank order, and queued for the judges")
+    void storesPoolAndQueues() {
+        service(1.0).record(turn("It waits (manual.pdf, p. 1).", List.of(IN_CONTEXT), List.of(EXCLUDED)));
+
+        EvalTurn turn = stored();
+        assertThat(turn.judgeStatus()).isEqualTo(JudgeStatus.PENDING);
+        assertThat(turn.retrievedCount()).isEqualTo(1);
+        assertThat(turn.chunks()).extracting("rank", "inContext", "cited", "page", "section")
+                                 .containsExactly(tuple(1, true, true, 1, "5.1. Shutdown"),
+                                                  tuple(2, false, false, 9, null));
+        assertThat(turn.totalMillis()).isEqualTo(20_000L);
+        assertThat(turn.finishReason()).isEqualTo("stop");
+        assertThat(turn.promptVersion()).isEqualTo("abc123");
     }
 
-    private DistributionSummary summary(String name) {
-        DistributionSummary summary = registry.find(name).summary();
-        assertThat(summary).as("%s is pre-registered", name).isNotNull();
-        return summary;
+    @Test
+    @DisplayName("a turn the sample rate leaves out is still stored and scored, but not queued")
+    void unsampledNotQueued() {
+        service(0.0).record(turn("It waits.", List.of(IN_CONTEXT), List.of()));
+
+        assertThat(stored().judgeStatus()).isEqualTo(JudgeStatus.NOT_QUEUED);
+        assertThat(registry.get("rag.eval.online.turns.total").counter().count()).isEqualTo(1.0);
     }
 
     @Test
     @DisplayName("cited precision is recorded on a grounded turn, as 0 when the answer cites nothing, and not without retrieval")
     void citedPrecisionRecorded() {
-        when(relevancy.evaluate(any())).thenReturn(PASS);
-        when(groundedness.evaluate(any())).thenReturn(PASS);
-        OnlineEvalService service = service(5, 5);
+        OnlineEvalService service = service(1.0);
 
-        service.evaluate("How does graceful shutdown work?", "It waits for requests (manual.pdf, p. 1).", RETRIEVED);
-        service.evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
-        service.evaluate("Hello", "Hi there.", List.of());
+        service.record(turn("It waits for requests (manual.pdf, p. 1).", List.of(IN_CONTEXT), List.of()));
+        service.record(turn("It waits for requests.", List.of(IN_CONTEXT), List.of()));
+        service.record(turn("Hi there.", List.of(), List.of()));
 
-        DistributionSummary precision = summary("rag.eval.online.cited.context.precision");
-        DistributionSummary atK = summary("rag.eval.online.cited.precision.at.k");
+        DistributionSummary precision = registry.find("rag.eval.online.cited.context.precision").summary();
         assertThat(precision.count()).as("the ungrounded turn is not scored").isEqualTo(2);
         assertThat(precision.totalAmount()).as("1.0 for the cited turn, 0.0 for the uncited one").isEqualTo(1.0);
-        assertThat(atK.count()).isEqualTo(2);
-        assertThat(atK.totalAmount()).isEqualTo(1.0);
     }
 
     @Test
-    @DisplayName("both verdicts are recorded when the judges answer")
-    void bothVerdictsRecorded() throws InterruptedException {
-        when(relevancy.evaluate(any())).thenReturn(PASS);
-        when(groundedness.evaluate(any())).thenReturn(PASS);
+    @DisplayName("a follow-up landing on the same chunks marks the previous turn rephrased")
+    void rephraseMarksPrevious() {
+        UUID previous = UUID.randomUUID();
+        when(turns.previousTurn(anyString(), any(), any()))
+                .thenReturn(Optional.of(new PreviousTurn(previous, List.of("chunk-1", "chunk-2"))));
 
-        service(5, 5).evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
+        service(1.0).record(turn("It waits.", List.of(IN_CONTEXT), List.of(EXCLUDED)));
 
-        awaitTrue(() -> counter("rag.eval.online.judgements.total", "metric", "groundedness", "outcome", "pass") == 1.0);
-        assertThat(counter("rag.eval.online.judgements.total", "metric", "relevancy", "outcome", "pass")).isEqualTo(1.0);
+        verify(turns).markRephrased(previous);
+        assertThat(registry.get("rag.eval.online.rephrases.total").counter().count()).isEqualTo(1.0);
     }
 
     @Test
-    @DisplayName("a wedged verdict is interrupted at the timeout, the rest skipped, and the permit released")
-    void wedgedVerdictTimesOut() throws InterruptedException {
-        when(relevancy.evaluate(any())).thenAnswer(wedged()).thenReturn(PASS);
-        when(groundedness.evaluate(any())).thenReturn(PASS);
-        OnlineEvalService service = service(1, 5);
+    @DisplayName("a follow-up on different chunks is a new question, not a rephrase")
+    void differentChunksNotRephrase() {
+        when(turns.previousTurn(anyString(), any(), any()))
+                .thenReturn(Optional.of(new PreviousTurn(UUID.randomUUID(), List.of("chunk-7", "chunk-8"))));
 
-        service.evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
+        service(1.0).record(turn("It waits.", List.of(IN_CONTEXT), List.of(EXCLUDED)));
 
-        assertThat(judgeInterrupted.await(10, TimeUnit.SECONDS)).as("the wedged call was interrupted").isTrue();
-        awaitTrue(() -> counter("rag.eval.online.judgements.errors.total", "metric", "relevancy") == 1.0);
-        verify(groundedness, never()).evaluate(any());
-
-        // One permit: had the abandoned judgement kept it, every later turn would be dropped and none
-        // judged. The permit is released just after the error is counted, so a turn arriving in between
-        // may still be dropped - retry until one is admitted.
-        awaitTrue(() -> {
-            service.evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
-            return counter("rag.eval.online.judgements.total", "metric", "groundedness", "outcome", "pass") > 0;
-        });
+        verify(turns, never()).markRephrased(any());
     }
 
     @Test
-    @DisplayName("shutdown waits only the shutdown wait, not the judge timeout, before interrupting")
-    void shutdownInterruptsJudgementInFlight() throws InterruptedException {
-        when(relevancy.evaluate(any())).thenAnswer(wedged());
-        OnlineEvalService service = service(120, 1);
+    @DisplayName("a redelivered turn, already stored, is not compared again")
+    void redeliveryIgnored() {
+        when(turns.insert(any())).thenReturn(false);
 
-        service.evaluate("How does graceful shutdown work?", "It waits for requests.", RETRIEVED);
-        assertThat(judgeStarted.await(10, TimeUnit.SECONDS)).as("the judge call started").isTrue();
+        service(1.0).record(turn("It waits.", List.of(IN_CONTEXT), List.of()));
 
-        long startedAt = System.nanoTime();
-        service.shutdown();
-        long seconds = TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - startedAt);
+        verify(turns, never()).previousTurn(anyString(), any(), any());
+    }
 
-        assertThat(seconds).as("shutdown took the 1s wait, not the 120s timeout").isLessThan(5);
-        assertThat(judgeInterrupted.await(5, TimeUnit.SECONDS)).as("the judge call was interrupted").isTrue();
-        verify(groundedness, never()).evaluate(any());
+    @Test
+    @DisplayName("overlap is intersection over union, and two empty pools are not a match")
+    void jaccard() {
+        assertThat(OnlineEvalService.jaccard(Set.of("a", "b", "c"), Set.of("b", "c", "d"))).isEqualTo(0.5);
+        assertThat(OnlineEvalService.jaccard(Set.of(), Set.of())).isZero();
     }
 }

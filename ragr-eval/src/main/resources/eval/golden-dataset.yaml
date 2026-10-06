@@ -18,6 +18,14 @@ description: >-
     - capability cases, which guard the system prompt's promise to handle ordinary conversation
       against a change that makes the assistant refuse everything off-corpus.
 
+  Each case carries a category from the same closed task set live turns are classified into
+  (CONFIG_LOOKUP, HOW_TO, TROUBLESHOOTING, CONCEPTUAL, GENERAL), so golden and live results break down
+  the same way. There is no TROUBLESHOOTING case yet.
+
+  expectedPagesMode says how page recall reads a case with several expected pages: ALL when the answer
+  needs every one, ANY when each answers on its own. Like the pages themselves, it is decided by reading
+  the chunk text.
+
 cases:
 
   - id: actuator-http-exposure
@@ -28,6 +36,10 @@ cases:
       something has broken in embedding or chunking rather than that the question was marginal.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [277, 278]
+    # Verified 6 Oct 2026: p. 277 alone states both the /actuator prefix and the id-to-URL mapping;
+    # 278 continues the endpoint table. Either page answers, so recall does not require both.
+    expectedPagesMode: ANY
+    category: CONCEPTUAL
     mustContain:
       - actuator
 
@@ -40,6 +52,9 @@ cases:
       in different chunks because coalescing never spans a page.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [111, 112]
+    # Both halves are needed - see the description.
+    expectedPagesMode: ALL
+    category: CONFIG_LOOKUP
     mustContain:
       - logging.level
 
@@ -51,6 +66,7 @@ cases:
       not.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [107]
+    category: HOW_TO
     mustContain:
       - spring.profiles.active
 
@@ -60,6 +76,7 @@ cases:
       Page 32 describes the dependency-management section and the Maven defaults. Retrieved at 0.80.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [32]
+    category: CONCEPTUAL
     mustContain:
       - spring-boot-starter-parent
 
@@ -71,6 +88,7 @@ cases:
       returns only the single best-matching chunk starts to show.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [158]
+    category: HOW_TO
     mustContain:
       - spring.datasource
 
@@ -81,6 +99,10 @@ cases:
       from prose and is a common casualty of a chunking change.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [343, 427]
+    # Verified 6 Oct 2026: p. 427 has the plugin XML, p. 343 the fully-executable-jar caveats. Each is a
+    # separate route to an answer, not two halves of one, so either counts as full recall.
+    expectedPagesMode: ANY
+    category: HOW_TO
     mustContain:
       - spring-boot-maven-plugin
 
@@ -93,6 +115,7 @@ cases:
       Asserting the actuator phrasing pins down which of the two the corpus actually supports.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [419]
+    category: HOW_TO
     mustContain:
       - management.server
 
@@ -104,6 +127,7 @@ cases:
       expectGrounded false means any citation emitted here is by definition fabricated. Note this case
       is not judged by the LLM judges: with no usable context there is nothing to judge against.
     expectGrounded: false
+    category: GENERAL
 
   - id: general-knowledge-not-refused
     query: In one sentence, what is the difference between a stack and a queue?
@@ -115,5 +139,6 @@ cases:
       refusal here is a regression even though it looks like caution.
     expectGrounded: false
     expectRefusal: false
+    category: GENERAL
     mustNotContain:
       - I don't have enough information

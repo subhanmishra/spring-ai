@@ -80,6 +80,33 @@ class CitationResolverTest {
             active.""");
 
     @Nested
+    @DisplayName("listing section headings")
+    class SectionHeadings {
+
+        @Test
+        @DisplayName("returns each heading line in order, and nothing that only looks like a number")
+        void headingsInOrder() {
+            String text = """
+                    [manual.pdf, p. 372]
+
+                    9.2.6. Set the Active Spring Profiles
+                    Use spring.profiles.active, available since 3.2.1 of the framework.
+                    9.2.7. Set the Default Profile Name
+                    """;
+
+            assertThat(CitationResolver.sectionHeadings(text))
+                    .containsExactly("9.2.6. Set the Active Spring Profiles", "9.2.7. Set the Default Profile Name");
+        }
+
+        @Test
+        @DisplayName("is empty for text with no heading, or none at all")
+        void none() {
+            assertThat(CitationResolver.sectionHeadings("Set server.port to 8081.")).isEmpty();
+            assertThat(CitationResolver.sectionHeadings(null)).isEmpty();
+        }
+    }
+
+    @Nested
     @DisplayName("resolving a section number written without its dots")
     class Collapsed {
 

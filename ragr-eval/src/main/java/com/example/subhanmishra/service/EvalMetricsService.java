@@ -1,8 +1,13 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.event.ChatFeedbackSubmitted;
+import com.example.subhanmishra.repository.EvalTurnRepository;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
+import com.example.subhanmishra.service.eval.RetrievalRanking;
+import com.example.subhanmishra.service.eval.TurnVerdicts;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
@@ -17,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -148,14 +154,30 @@ public class EvalMetricsService {
     private final AtomicInteger goldenCaseCount = new AtomicInteger();
     private final AtomicLong goldenLastRunEpochSeconds = new AtomicLong();
 
-    /** The two LLM-judged metrics, as they are tagged. */
-    private static final List<String> JUDGE_METRICS = List.of("relevancy", "groundedness");
+    /** The two Spring AI judges, as their verdict counters are tagged. */
+    public static final String RELEVANCY = "relevancy";
+    public static final String GROUNDEDNESS = "groundedness";
+    private static final List<String> JUDGE_METRICS = List.of(RELEVANCY, GROUNDEDNESS);
 
-    public EvalMetricsService(MeterRegistry registry, EvalRunRepository runRepository) {
+    /** How long the judge queue gauges trust one read of {@code eval_turn}. */
+    private static final Duration QUEUE_REFRESH_INTERVAL = Duration.ofSeconds(15);
+
+    private final @Nullable EvalTurnRepository turnRepository;
+    private final AtomicLong queueRefreshedAt = new AtomicLong();
+    private final AtomicLong queuePending = new AtomicLong();
+    private final AtomicLong queueOldestAgeSeconds = new AtomicLong();
+
+    /**
+     * @param turnRepository where the judge queue gauges read from; null in tests that do not need them
+     */
+    public EvalMetricsService(MeterRegistry registry, EvalRunRepository runRepository,
+                              @Nullable EvalTurnRepository turnRepository) {
         this.registry = registry;
         this.runRepository = runRepository;
+        this.turnRepository = turnRepository;
         registerGoldenGauges();
         preRegisterOnlineMeters();
+        registerQueueGauges();
     }
 
     /**
@@ -186,7 +208,16 @@ public class EvalMetricsService {
         counter(ONLINE + "refusals.total", Tags.empty());
         counter(ONLINE + "instruction.echoes.total", Tags.empty());
         counter(ONLINE + "chunks.without.header.total", Tags.empty());
-        counter(ONLINE + "judgements.dropped.total", Tags.empty());
+        counter(ONLINE + "judge.skipped.total", Tags.empty());
+        counter(ONLINE + "rephrases.total", Tags.empty());
+        for (String rating : List.of("up", "down")) {
+            counter(ONLINE + "feedback.total", Tags.of("rating", rating));
+        }
+        for (String retrieval : List.of("right", "wrong")) {
+            for (String answer : List.of("right", "wrong")) {
+                counter(ONLINE + "quadrant.total", Tags.of("retrieval", retrieval, "answer", answer));
+            }
+        }
 
         for (String outcome : List.of("valid", "fabricated")) {
             counter(ONLINE + "citations.total", Tags.of("outcome", outcome));
@@ -349,27 +380,146 @@ public class EvalMetricsService {
         }
     }
 
-    /** Records an LLM judge verdict from the online path. */
-    public void recordOnlineJudgement(String metric, boolean passed, long durationMillis) {
-        counter(ONLINE + "judgements.total", Tags.of("metric", metric, "outcome", passed ? "pass" : "fail"))
-                .increment();
+    /**
+     * One judge call's wall-clock time, per stage - {@code metric} is the stage name, as it was when only
+     * relevancy and groundedness existed. This is the number that sizes the judge budget.
+     */
+    public void recordJudgeCall(String stage, long durationMillis) {
         Timer.builder(ONLINE + "judge.duration")
-             .tag("metric", metric)
+             .tag("metric", stage)
              .register(registry)
              .record(durationMillis, TimeUnit.MILLISECONDS);
     }
 
-    /**
-     * A judgement that never ran. Dropped means admission was refused because the concurrency bound was
-     * already taken; these are expected under load and are the signal that the sample rate is set too
-     * high for the traffic. Errors are judge calls that started and broke.
-     */
-    public void recordJudgementDropped() {
-        counter(ONLINE + "judgements.dropped.total", Tags.empty()).increment();
+    /** A judge call that timed out, threw, or replied with something unreadable. */
+    public void recordJudgementError(String stage) {
+        counter(ONLINE + "judgements.errors.total", Tags.of("metric", stage)).increment();
     }
 
-    public void recordJudgementError(String metric) {
-        counter(ONLINE + "judgements.errors.total", Tags.of("metric", metric)).increment();
+    /**
+     * Turns the backlog outgrew before the worker reached them. A steadily rising count means the sample
+     * rate is too high for the traffic - the role {@code judgements.dropped.total} played when judging
+     * dropped instead of queueing.
+     */
+    public void recordJudgeSkipped(int count) {
+        counter(ONLINE + "judge.skipped.total", Tags.empty()).increment(count);
+    }
+
+    /**
+     * Everything the judges concluded about one turn, tagged by its task type.
+     *
+     * <p>Recorded when judging finishes, which can be minutes after the turn - so these series describe
+     * when turns were <em>judged</em>. The quality panels read {@code eval_turn} by {@code occurred_at}
+     * instead; these exist for alerting and for the per-task rates Prometheus is good at.
+     *
+     * <p>The task tag is a closed set ({@code TaskType}, plus {@code unknown} when classification failed),
+     * so the series count stays fixed however much traffic there is.
+     */
+    public void recordJudgedTurn(TurnVerdicts verdicts, @Nullable Boolean answerOk, boolean grounded,
+                                 long judgeMillis) {
+        Tags task = Tags.of("task", verdicts.taskType() != null ? verdicts.taskType().tag() : "unknown");
+        Timer.builder(ONLINE + "judge.turn.duration")
+             .register(registry)
+             .record(judgeMillis, TimeUnit.MILLISECONDS);
+        counter(ONLINE + "judged.turns.total", task.and("grounded", String.valueOf(grounded))).increment();
+        if (!grounded) {
+            return;
+        }
+
+        RetrievalRanking ranking = verdicts.ranking();
+        if (ranking != null) {
+            recordIfPresent(ONLINE + "precision.at.k", task, ranking.precisionAtK());
+            recordIfPresent(ONLINE + "recall.at.k", task, ranking.recallAtK());
+            recordIfPresent(ONLINE + "mrr", task, ranking.reciprocalRank());
+            recordIfPresent(ONLINE + "ndcg.at.k", task, ranking.ndcgAtK());
+            if (ranking.relevantInPool() == 0) {
+                counter(ONLINE + "nothing.relevant.total", task).increment();
+            }
+        }
+        recordIfPresent(ONLINE + "faithfulness", task, verdicts.faithfulness());
+        if (verdicts.relevancyPass() != null) {
+            counter(ONLINE + "judgements.total",
+                    Tags.of("metric", RELEVANCY, "outcome", outcome(verdicts.relevancyPass()))).increment();
+        }
+        if (verdicts.groundednessPass() != null) {
+            counter(ONLINE + "judgements.total",
+                    Tags.of("metric", GROUNDEDNESS, "outcome", outcome(verdicts.groundednessPass()))).increment();
+        }
+        if (verdicts.completenessPass() != null) {
+            counter(ONLINE + "completeness.total", task.and("outcome", outcome(verdicts.completenessPass())))
+                    .increment();
+        }
+        Integer checked = verdicts.citationsChecked();
+        Integer supported = verdicts.citationsSupported();
+        if (checked != null && supported != null && checked > 0) {
+            counter(ONLINE + "citation.support.total", Tags.of("outcome", "supported")).increment(supported);
+            counter(ONLINE + "citation.support.total", Tags.of("outcome", "unsupported")).increment(checked - supported);
+        }
+        if (answerOk != null) {
+            counter(ONLINE + "e2e.total", task.and("outcome", outcome(answerOk))).increment();
+        }
+        Boolean retrievalOk = verdicts.retrievalOk();
+        if (answerOk != null && retrievalOk != null) {
+            counter(ONLINE + "quadrant.total", Tags.of("retrieval", retrievalOk ? "right" : "wrong",
+                                                       "answer", answerOk ? "right" : "wrong")).increment();
+        }
+    }
+
+    /** A follow-up that asked the previous question again - the implicit thumbs-down. */
+    public void recordRephrase() {
+        counter(ONLINE + "rephrases.total", Tags.empty()).increment();
+    }
+
+    public void recordFeedback(ChatFeedbackSubmitted.Rating rating) {
+        counter(ONLINE + "feedback.total", Tags.of("rating", rating.name().toLowerCase(Locale.ROOT))).increment();
+    }
+
+    private void recordIfPresent(String name, Tags tags, @Nullable Double value) {
+        if (value != null) {
+            DistributionSummary.builder(name).tags(tags).register(registry).record(value);
+        }
+    }
+
+    private static String outcome(boolean passed) {
+        return passed ? "pass" : "fail";
+    }
+
+    /**
+     * The judge queue's depth and the age of its oldest turn, read from {@code eval_turn} on the scrape.
+     * Cached for {@link #QUEUE_REFRESH_INTERVAL} so a 5 s scrape step is not a query every 5 s, and never
+     * thrown from: a failure here would take the whole scrape down with it.
+     */
+    private void registerQueueGauges() {
+        io.micrometer.core.instrument.Gauge
+                .builder(ONLINE + "judge.queue.pending", queuePending, pending -> {
+                    refreshQueueIfStale();
+                    return pending.get();
+                })
+                .description("Turns waiting for the judges")
+                .register(registry);
+        io.micrometer.core.instrument.Gauge
+                .builder(ONLINE + "judge.queue.oldest.age", queueOldestAgeSeconds, age -> {
+                    refreshQueueIfStale();
+                    return age.get();
+                })
+                .description("How long the oldest waiting turn has waited; 0 when none is")
+                .baseUnit("seconds")
+                .register(registry);
+    }
+
+    private void refreshQueueIfStale() {
+        long now = System.currentTimeMillis();
+        long last = queueRefreshedAt.get();
+        if (turnRepository == null || now - last < QUEUE_REFRESH_INTERVAL.toMillis()
+                || !queueRefreshedAt.compareAndSet(last, now)) {
+            return;
+        }
+        try {
+            queuePending.set(turnRepository.pendingCount());
+            queueOldestAgeSeconds.set((long) turnRepository.oldestPendingAgeSeconds());
+        } catch (RuntimeException e) {
+            log.debug("Could not read the judge queue; keeping the previous values", e);
+        }
     }
 
     // ---------------------------------------------------------------- golden

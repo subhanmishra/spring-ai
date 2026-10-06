@@ -28,7 +28,7 @@ class EvalScoringServiceTest {
     }
 
     private static GoldenCase caseOf(String id, String query, List<Integer> pages, List<String> mustContain) {
-        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false);
+        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null);
     }
 
     @Nested
@@ -240,7 +240,7 @@ class EvalScoringServiceTest {
             // Guards the system prompt's General Knowledge capability. This is the case that breaks if
             // anyone restores QuestionAnswerAdvisor's stock "not prior knowledge" closing line.
             GoldenCase goldenCase = new GoldenCase("general", "what is a queue", null, null,
-                                                   List.of(), List.of(), List.of(), false, false);
+                                                   List.of(), List.of(), List.of(), false, false, null, null);
 
             EvalScores scores = service.score(
                     "I don't have enough information to answer that.", List.of(), goldenCase);
@@ -265,7 +265,7 @@ class EvalScoringServiceTest {
         @DisplayName("an out-of-corpus case is not failed for retrieving nothing")
         void outOfCorpusCaseToleratesNoRetrieval() {
             GoldenCase goldenCase = new GoldenCase("out-of-corpus", "Acme revenue 2019", null, null,
-                                                   List.of(), List.of(), List.of(), false, false);
+                                                   List.of(), List.of(), List.of(), false, false, null, null);
 
             EvalScores scores = service.score("I don't have data on Acme Corporation.", List.of(), goldenCase);
 

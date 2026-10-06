@@ -3,9 +3,12 @@ package com.example.subhanmishra.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.List;
+import java.util.UUID;
 
 /** The response to a chat turn: the answer, and the evidence for it as data rather than as text. */
 public record ChatAnswerDto(
+        @Schema(description = "Identifies this turn. Quote it to POST /ai/turns/{turnId}/feedback to rate the answer")
+        UUID turnId,
 
         @Schema(description = "The answer, in Markdown, with its inline citations removed - they are "
                 + "reported in citations instead")

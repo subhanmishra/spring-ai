@@ -43,9 +43,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <pre>{@code ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT -Dapp.eval.golden.judged=true}</pre>
  */
-// The online listener is left stopped: this JVM runs the golden suite, and a second member of the
-// ragr-eval consumer group would take the partition away from the running ragr-eval application.
-@SpringBootTest(properties = "spring.kafka.listener.auto-startup=false")
+// The online listener and the judge worker are left stopped: this JVM runs the golden suite, and a second
+// member of the ragr-eval consumer group would take the partition away from the running ragr-eval
+// application, while a second worker would take its queued live turns.
+@SpringBootTest(properties = {"spring.kafka.listener.auto-startup=false", "app.eval.judge.worker-enabled=false"})
 @Tag("eval")
 class EvalSuiteIT {
 

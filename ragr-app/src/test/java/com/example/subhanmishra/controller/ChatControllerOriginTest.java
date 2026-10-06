@@ -2,6 +2,7 @@ package com.example.subhanmishra.controller;
 
 import com.example.subhanmishra.dto.ChatAnswerDto;
 import com.example.subhanmishra.event.TurnOrigin;
+import com.example.subhanmishra.service.ChatFeedbackPublisher;
 import com.example.subhanmishra.service.ChatService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,6 +40,9 @@ class ChatControllerOriginTest {
 
     @MockitoBean
     private ChatService chatService;
+
+    @MockitoBean
+    private ChatFeedbackPublisher feedbackPublisher;
 
     @Test
     @DisplayName("a request without the header is a live turn")
@@ -101,6 +106,6 @@ class ChatControllerOriginTest {
     }
 
     private static ChatAnswerDto answer() {
-        return new ChatAnswerDto("An answer.", false, List.of(), List.of(), null);
+        return new ChatAnswerDto(UUID.randomUUID(), "An answer.", false, List.of(), List.of(), null);
     }
 }

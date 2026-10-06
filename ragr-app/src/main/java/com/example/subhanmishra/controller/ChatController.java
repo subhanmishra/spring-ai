@@ -3,7 +3,9 @@ package com.example.subhanmishra.controller;
 import com.example.subhanmishra.dto.ChatAnswerDto;
 import com.example.subhanmishra.dto.ChatRequestDto;
 import com.example.subhanmishra.dto.ConversationDto;
+import com.example.subhanmishra.dto.FeedbackRequestDto;
 import com.example.subhanmishra.event.TurnOrigin;
+import com.example.subhanmishra.service.ChatFeedbackPublisher;
 import com.example.subhanmishra.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/ai")
@@ -29,9 +32,11 @@ public class ChatController {
             + "the id that was used is returned in the X-Conversation-Id response header either way.";
 
     private final ChatService chatService;
+    private final ChatFeedbackPublisher feedbackPublisher;
 
-    public ChatController(ChatService chatService) {
+    public ChatController(ChatService chatService, ChatFeedbackPublisher feedbackPublisher) {
         this.chatService = chatService;
+        this.feedbackPublisher = feedbackPublisher;
     }
 
     @PostMapping(value = "/generate",
@@ -60,7 +65,7 @@ public class ChatController {
     @Operation(summary = "Generate a streaming chat response",
             description = "Sends a prompt to the AI and gets a streaming response, suitable for UI updates. The " +
                     "answer text arrives as unnamed events with its inline citations removed. Two named events " +
-                    "follow the last of it: 'sources' ({grounded, sources}) and then 'done' ({citations, usage}), " +
+                    "follow the last of it: 'sources' ({grounded, sources}) and then 'done' ({turnId, citations, usage}), " +
                     "in the same shapes as /generate returns. The conversation is named in the X-Conversation-Id " +
                     "request header, and the ID used (newly generated if none was supplied) is returned in the " +
                     "X-Conversation-Id response header, exactly as for /generate. Note " +
@@ -74,6 +79,19 @@ public class ChatController {
                                                    @Parameter(hidden = true) @RequestAttribute(ConversationIdInterceptor.ATTRIBUTE) String conversationId,
                                                    @RequestHeader(name = TurnOrigin.HEADER, defaultValue = "LIVE") TurnOrigin origin) {
         return chatService.generateStream(request.prompt(), conversationId, origin);
+    }
+
+    @PostMapping(value = "/turns/{turnId}/feedback", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Rate an answer",
+            description = "Records a thumbs up or down, with an optional reason, against the turn whose "
+                    + "turnId /generate returned (or the 'done' event of /generateStream). The rating goes "
+                    + "to evaluation, where it becomes the user-satisfaction metric and puts thumbs-down "
+                    + "answers in the human review queue. 202 always: turns are not stored here, so an "
+                    + "unknown turnId cannot be told apart from a known one, and rating a turn twice keeps "
+                    + "both ratings.")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void submitFeedback(@PathVariable UUID turnId, @Valid @RequestBody FeedbackRequestDto request) {
+        feedbackPublisher.submit(turnId, request);
     }
 
     @GetMapping("/conversations")

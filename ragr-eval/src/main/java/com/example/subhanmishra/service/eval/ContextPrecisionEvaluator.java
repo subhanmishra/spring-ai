@@ -1,6 +1,5 @@
 package com.example.subhanmishra.service.eval;
 
-import com.example.subhanmishra.citation.CitationParser;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,9 +8,6 @@ import org.springframework.ai.document.Document;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Asks the judge, chunk by chunk, whether a retrieved passage actually contributed to the answer.
@@ -77,16 +73,6 @@ public class ContextPrecisionEvaluator {
             Did this passage supply information that appears in the answer?
             Reply with exactly one word: YES or NO.""";
 
-    /**
-     * Comfortably above the chunk-size budget in {@code application-dev.yaml} - chunks average 279
-     * tokens and are capped below 445 - so this truncates nothing in practice and exists only so that
-     * an unsplittable oversized table row cannot blow the judge's context window.
-     */
-    private static final int MAX_PASSAGE_CHARS = 4_000;
-
-    /** The leading word of the verdict. Matched as a whole word so that "not" cannot read as "no". */
-    private static final Pattern FIRST_WORD = Pattern.compile("[a-z]+");
-
     private final ChatClient chatClient;
 
     public ContextPrecisionEvaluator(ChatClient.Builder chatClientBuilder) {
@@ -110,7 +96,7 @@ public class ContextPrecisionEvaluator {
 
         List<Boolean> relevance = new ArrayList<>(retrieved.size());
         for (Document document : retrieved) {
-            Boolean verdict = verdict(question, answer, passageOf(document));
+            Boolean verdict = verdict(question, answer, JudgeText.passage(document));
             if (verdict == null) {
                 log.warn("Context precision abandoned for this case: a chunk verdict could not be obtained");
                 return null;
@@ -142,29 +128,6 @@ public class ContextPrecisionEvaluator {
 
     /** Null for anything that is neither YES nor NO, which is a failed measurement rather than a NO. */
     static @Nullable Boolean parse(@Nullable String response) {
-        if (response == null) {
-            return null;
-        }
-        Matcher matcher = FIRST_WORD.matcher(response.toLowerCase(Locale.ROOT));
-        if (!matcher.find()) {
-            return null;
-        }
-        return switch (matcher.group()) {
-            case "yes" -> Boolean.TRUE;
-            case "no" -> Boolean.FALSE;
-            default -> null;
-        };
-    }
-
-    /**
-     * The chunk as the judge should see it: citation header removed, and truncated so that five
-     * passages plus the answer cannot overrun {@code judge-num-ctx}. Ollama truncates an over-long
-     * prompt from the left, which here would silently drop the instruction and leave the judge
-     * answering a question it was never asked.
-     */
-    private static String passageOf(Document document) {
-        String stripped = CitationParser.stripHeader(document.getText());
-        String text = stripped != null ? stripped : "";
-        return text.length() <= MAX_PASSAGE_CHARS ? text : text.substring(0, MAX_PASSAGE_CHARS);
+        return JudgeText.yesNo(response);
     }
 }

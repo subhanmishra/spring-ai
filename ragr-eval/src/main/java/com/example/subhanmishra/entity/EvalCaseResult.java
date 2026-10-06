@@ -1,5 +1,6 @@
 package com.example.subhanmishra.entity;
 
+import com.example.subhanmishra.service.EvalScoringService.ReferenceScores;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import org.jspecify.annotations.Nullable;
@@ -41,6 +42,10 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              @Nullable Double citedContextPrecision,
                              @Nullable Double citedPrecisionAtK,
                              @Nullable String citedRelevance,
+                             @Nullable Double recallAtK,
+                             @Nullable Double ndcgAtK,
+                             @Nullable String referenceRelevance,
+                             @Nullable UUID turnId,
                              int citationsEmitted,
                              int citationsValid,
                              int citationsFabricated,
@@ -76,6 +81,8 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                       @Nullable ContextPrecisionScores contextPrecision,
                                       @Nullable ContextPrecisionScores judgedContextPrecision,
                                       @Nullable ContextPrecisionScores citedContextPrecision,
+                                      @Nullable ReferenceScores reference,
+                                      @Nullable UUID turnId,
                                       long latencyMillis) {
         List<String> reasons = scores.failureReasons();
         return new EvalCaseResult(null,
@@ -99,6 +106,10 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                   citedContextPrecision != null ? citedContextPrecision.averagePrecision() : null,
                                   citedContextPrecision != null ? citedContextPrecision.precisionAtK() : null,
                                   citedContextPrecision != null ? citedContextPrecision.relevanceAsString() : null,
+                                  reference != null ? reference.pageRecall() : null,
+                                  reference != null ? reference.ranking().ndcgAtK() : null,
+                                  reference != null ? reference.relevance() : null,
+                                  turnId,
                                   scores.citations().emitted(),
                                   scores.citations().valid(),
                                   scores.citations().fabricated(),

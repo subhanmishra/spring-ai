@@ -5,6 +5,7 @@ import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.ChatTurnCompleted.Timings;
 import com.example.subhanmishra.event.TurnOrigin;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -14,15 +15,23 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.document.Document;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
 import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +58,29 @@ class ChatTurnPublisherTest {
                                                          List.of(new Citation("manual.pdf", null, "5.3")),
                                                          List.of());
 
+    private final Document belowThreshold = Document.builder()
+                                                    .id("chunk-2")
+                                                    .text("[manual.pdf, p. 40]\nPorts are integers.")
+                                                    .metadata(Map.of("fileName", "manual.pdf", "pageNumber", 40))
+                                                    .score(0.41)
+                                                    .build();
+
+    /** A finished turn with one chunk in the prompt and one left in the pool. */
+    private ChatTurnPublisher.Turn turn(String query) {
+        ChatResponse response = ChatResponse.builder()
+                .generations(List.of(new Generation(new AssistantMessage(resolution.answer()),
+                                                    ChatGenerationMetadata.builder().finishReason("stop").build())))
+                .metadata(ChatResponseMetadata.builder()
+                                              .model("gemma4:e2b")
+                                              .usage(new DefaultUsage(1200, 85))
+                                              .build())
+                .build();
+        return new ChatTurnPublisher.Turn(UUID.fromString("00000000-0000-0000-0000-000000000042"),
+                                          TurnOrigin.LIVE, "conv-1", query, resolution,
+                                          List.of(chunk), List.of(belowThreshold), response,
+                                          new Timings(3L, null, 21_000L, false));
+    }
+
     private KafkaTemplate<String, ChatTurnCompleted> template;
     private MeterRegistry registry;
 
@@ -61,9 +93,10 @@ class ChatTurnPublisherTest {
 
     private ChatTurnPublisher publisher(boolean enabled) {
         EventsProperties properties = new EventsProperties(
-                new EventsProperties.ChatTurns(enabled, TOPIC, Duration.ofDays(3)));
+                new EventsProperties.ChatTurns(enabled, TOPIC, Duration.ofDays(3)),
+                new EventsProperties.Feedback("rag.chat.feedback", Duration.ofDays(3)));
         // Runs the send on the calling thread so the outcome can be asserted straight away.
-        RagProperties rag = new RagProperties(5, 0.6);
+        RagProperties rag = new RagProperties(5, 0.6, 10, 0.0);
         return new ChatTurnPublisher(template, properties, rag, registry, Runnable::run);
     }
 
@@ -82,7 +115,7 @@ class ChatTurnPublisherTest {
             when(template.send(eq(TOPIC), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
 
-            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
+            publisher(true).publish(turn("How do I change the port?"));
 
             ArgumentCaptor<ChatTurnCompleted> sent = ArgumentCaptor.forClass(ChatTurnCompleted.class);
             verify(template).send(eq(TOPIC), eq("conv-1"), sent.capture());
@@ -96,6 +129,17 @@ class ChatTurnPublisherTest {
             assertThat(event.citationsAbstained()).isEqualTo(1);
             assertThat(event.retrieved()).singleElement()
                                          .satisfies(c -> assertThat(c.text()).startsWith("[manual.pdf, p. 12]"));
+            assertThat(event.turnId()).isEqualTo(UUID.fromString("00000000-0000-0000-0000-000000000042"));
+            assertThat(event.schemaVersion()).isEqualTo(ChatTurnCompleted.SCHEMA_VERSION);
+            assertThat(event.excluded()).singleElement()
+                                        .satisfies(c -> assertThat(c.text()).startsWith("[manual.pdf, p. 40]"));
+            assertThat(event.pool()).extracting(ChatTurnCompleted.RetrievedChunk::id)
+                                    .containsExactly("chunk-1", "chunk-2");
+            assertThat(event.poolSize()).isEqualTo(10);
+            assertThat(event.chatModel()).isEqualTo("gemma4:e2b");
+            assertThat(event.usage()).isEqualTo(new ChatTurnCompleted.GenerationUsage(1200, 85, "stop"));
+            assertThat(event.timings()).isEqualTo(new Timings(3L, null, 21_000L, false));
+            assertThat(event.promptVersion()).hasSize(12);
             assertThat(count("published")).isEqualTo(1);
             assertThat(count("dropped")).isZero();
         }
@@ -103,7 +147,7 @@ class ChatTurnPublisherTest {
         @Test
         @DisplayName("sends nothing when disabled")
         void disabled() {
-            publisher(false).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null);
+            publisher(false).publish(turn("q"));
 
             verify(template, never()).send(anyString(), anyString(), any(ChatTurnCompleted.class));
         }
@@ -120,7 +164,7 @@ class ChatTurnPublisherTest {
                     .thenThrow(new TimeoutException("Topic not present in metadata after 500 ms."));
 
             assertThatNoException().isThrownBy(
-                    () -> publisher(true).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null));
+                    () -> publisher(true).publish(turn("q")));
             assertThat(count("dropped")).isEqualTo(1);
             assertThat(count("published")).isZero();
         }
@@ -131,7 +175,7 @@ class ChatTurnPublisherTest {
             when(template.send(anyString(), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(CompletableFuture.failedFuture(new TimeoutException("Expiring 1 record(s)")));
 
-            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "q", resolution, List.of(chunk), null);
+            publisher(true).publish(turn("q"));
 
             assertThat(count("dropped")).isEqualTo(1);
         }
@@ -146,7 +190,7 @@ class ChatTurnPublisherTest {
         void roundTrips() {
             when(template.send(anyString(), anyString(), any(ChatTurnCompleted.class)))
                     .thenReturn(new CompletableFuture<>());
-            publisher(true).publish(TurnOrigin.LIVE, "conv-1", "How do I change the port?", resolution, List.of(chunk), "gemma4:e2b");
+            publisher(true).publish(turn("How do I change the port?"));
             ArgumentCaptor<ChatTurnCompleted> sent = ArgumentCaptor.forClass(ChatTurnCompleted.class);
             verify(template).send(anyString(), anyString(), sent.capture());
             ChatTurnCompleted original = sent.getValue();
@@ -167,6 +211,27 @@ class ChatTurnPublisherTest {
             assertThat(restored.getText()).isEqualTo(chunk.getText());
             assertThat(restored.getScore()).isEqualTo(chunk.getScore());
             assertThat(restored.getMetadata()).containsEntry("pageNumber", 12);
+        }
+
+        @Test
+        @DisplayName("still reads a version-1 event, which has none of the version-2 fields")
+        void readsVersionOne() {
+            String v1 = """
+                    {"turnId":"00000000-0000-0000-0000-000000000001","origin":"LIVE",
+                     "occurredAt":"2026-10-01T10:00:00Z","conversationId":"conv-1","query":"q","answer":"a",
+                     "citationsRepaired":0,"citationsAbstained":0,"unresolved":[],"retrieved":[],
+                     "chatModel":"gemma4:e2b","topK":5,"similarityThreshold":0.6}
+                    """;
+            ChatTurnCompleted read;
+            try (JacksonJsonDeserializer<ChatTurnCompleted> deserializer =
+                         new JacksonJsonDeserializer<>(ChatTurnCompleted.class, false)) {
+                read = deserializer.deserialize(TOPIC, v1.getBytes(StandardCharsets.UTF_8));
+            }
+
+            assertThat(read.schemaVersion()).isNull();
+            assertThat(read.excluded()).isEmpty();
+            assertThat(read.timings()).isNull();
+            assertThat(read.topK()).isEqualTo(5);
         }
     }
 }

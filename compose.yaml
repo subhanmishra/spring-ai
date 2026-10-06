@@ -383,7 +383,7 @@ services:
     # 256 MB heap cap plus ~184 MiB outside it - see ragr-app above.
     mem_limit: 480m
     # Docker's 3 s default - see ragr-app - does not cover a judgement in flight: shutdown waits up to
-    # app.eval.online.judge-shutdown-wait-seconds (20) for it before interrupting, after the Kafka
+    # app.eval.judge.shutdown-wait-seconds (20) for it before interrupting, after the Kafka
     # consumer has left its group. Raising that wait means raising this too.
     stop_grace_period: 40s
     environment:
@@ -391,6 +391,8 @@ services:
       JDK_JAVA_OPTIONS: "-Xmx256m -XX:+UseSerialGC"
       SPRING_DATASOURCE_URL: "jdbc:postgresql://pgvector:5432/ragdatabase?currentSchema=eval"
       SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      # The idle gate reads ragr-app's active-generations gauge from its management port.
+      APP_EVAL_JUDGE_IDLE_GATE_CHAT_ACTUATOR_URL: "http://ragr-app:9095"
     ports:
       - "9096:9096"
     healthcheck:

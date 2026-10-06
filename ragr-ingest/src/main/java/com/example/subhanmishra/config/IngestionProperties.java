@@ -2,7 +2,11 @@ package com.example.subhanmishra.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 
 /**
  * How documents are parsed, chunked and written to the vector store. The retrieval settings the chat
@@ -24,6 +28,30 @@ public record IngestionProperties(int chunkSize,
                                   int maxAttempts,
                                   Duration retryBackoff,
                                   TableDetection tableDetection) {
+
+    /**
+     * Bump whenever parsing code changes what a chunk contains - a new stripper, a different block
+     * split - since no setting below would change to say so. The pipeline version hashes it with them.
+     */
+    public static final int PARSER_REVISION = 1;
+
+    /**
+     * A short hash of everything that decides a chunk's content and embedding: the chunk-shaping settings,
+     * {@link #PARSER_REVISION} and the embedding model. Batching, concurrency and retry are left out, as
+     * they change only how fast the same chunks are written.
+     */
+    public String pipelineVersion(String embeddingModel) {
+        String inputs = String.join("|", String.valueOf(PARSER_REVISION), String.valueOf(chunkSize),
+                                    String.valueOf(minChunkSizeChars), String.valueOf(minChunkLengthToEmbed),
+                                    String.valueOf(maxEmbedTokens), String.valueOf(tableDetection),
+                                    embeddingModel);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(inputs.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every JVM", e);
+        }
+    }
 
     /**
      * How, if at all, tables are recovered from PDFs. Off by default: it replaces the reader used for

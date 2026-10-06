@@ -9,17 +9,20 @@ import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.ExpectationScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
+import com.example.subhanmishra.service.eval.RetrievalRanking;
 import com.example.subhanmishra.service.eval.RetrievalScores;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Computes every metric that needs neither an LLM nor a known-correct answer.
@@ -290,6 +293,50 @@ public class EvalScoringService {
             relevance.add(header != null && cited.stream().anyMatch(header::matches));
         }
         return ContextPrecisionScores.of(relevance);
+    }
+
+    /**
+     * The reference-based retrieval metrics over a golden case's whole candidate pool: the same
+     * {@link RetrievalRanking} the judge's grades produce on live traffic, with a chunk on an expected
+     * page graded 2 and every other chunk 0, plus page-level recall.
+     *
+     * <p>Page recall is the one that answers "did retrieval find everything the answer needs": expected
+     * pages present in the prompt over expected pages, or, for a case whose pages are alternatives
+     * ({@code expectedPagesMode: ANY}), 1.0 as soon as one is. Chunk-level pooled recall from the ranking
+     * answers a different question - whether the threshold kept what the pool found.
+     *
+     * @param pool      the candidate pool in rank order
+     * @param inContext how many leading pool chunks were in the prompt
+     * @return null when the case declares no expected pages
+     */
+    public @Nullable ReferenceScores referenceScores(List<Document> pool, int inContext, GoldenCase goldenCase) {
+        if (!goldenCase.scoresRecall()) {
+            return null;
+        }
+        List<Boolean> relevance = relevance(pool, goldenCase);
+        RetrievalRanking ranking = RetrievalRanking.of(
+                relevance.stream().map(relevant -> relevant ? RetrievalRanking.RELEVANT : 0).toList(), inContext);
+
+        Set<Integer> found = new HashSet<>();
+        for (int i = 0; i < inContext; i++) {
+            if (relevance.get(i)) {
+                Citation header = CitationParser.parseHeader(pool.get(i).getText());
+                found.add(header.pageNumber());
+            }
+        }
+        double pageRecall = goldenCase.expectedPagesMode() == GoldenCase.ExpectedPagesMode.ANY
+                ? (found.isEmpty() ? 0.0 : 1.0)
+                : (double) found.size() / new HashSet<>(goldenCase.expectedPages()).size();
+        String vector = relevance.stream().map(relevant -> relevant ? "1" : "0").collect(Collectors.joining(","));
+        return new ReferenceScores(ranking, pageRecall, vector);
+    }
+
+    /**
+     * @param ranking    rank metrics with expected-page chunks as the relevant ones
+     * @param pageRecall expected pages found in the prompt, honouring the case's mode
+     * @param relevance  the pool's expected-page vector, "1,0,0,0,1,0,0,1,0,0"
+     */
+    public record ReferenceScores(RetrievalRanking ranking, double pageRecall, String relevance) {
     }
 
     /**

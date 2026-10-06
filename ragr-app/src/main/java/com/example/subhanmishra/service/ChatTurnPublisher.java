@@ -3,8 +3,11 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.config.RagProperties;
+import com.example.subhanmishra.config.SpringAiConfig;
 import com.example.subhanmishra.event.ChatTurnCompleted;
+import com.example.subhanmishra.event.ChatTurnCompleted.GenerationUsage;
 import com.example.subhanmishra.event.ChatTurnCompleted.RetrievedChunk;
+import com.example.subhanmishra.event.ChatTurnCompleted.Timings;
 import com.example.subhanmishra.event.TurnOrigin;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -13,6 +16,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -87,34 +92,76 @@ public class ChatTurnPublisher {
     /**
      * Publishes one turn. Returns immediately and never throws: the answer has already been generated,
      * and nothing that goes wrong here is worth turning a successful response into an error.
-     *
-     * @param resolution the answer after {@code CitationResolver} - the text the evaluation scores
      */
-    public void publish(TurnOrigin origin, String conversationId, String query, Resolution resolution,
-                        List<Document> retrieved, @Nullable String chatModel) {
+    public void publish(Turn turn) {
         if (!properties.enabled()) {
             return;
         }
         try {
-            ChatTurnCompleted event = new ChatTurnCompleted(UUID.randomUUID(),
-                                                            origin,
+            Resolution resolution = turn.resolution();
+            ChatTurnCompleted event = new ChatTurnCompleted(turn.turnId(),
+                                                            turn.origin(),
                                                             Instant.now(),
-                                                            conversationId,
-                                                            query,
+                                                            turn.conversationId(),
+                                                            turn.query(),
                                                             resolution.answer(),
                                                             resolution.repaired(),
                                                             resolution.abstained(),
                                                             resolution.unresolved(),
-                                                            retrieved.stream().map(RetrievedChunk::of).toList(),
-                                                            chatModel,
+                                                            turn.retrieved().stream().map(RetrievedChunk::of).toList(),
+                                                            modelOf(turn.response()),
                                                             ragProperties.topK(),
-                                                            ragProperties.similarityThreshold());
+                                                            ragProperties.similarityThreshold(),
+                                                            ChatTurnCompleted.SCHEMA_VERSION,
+                                                            turn.excluded().stream().map(RetrievedChunk::of).toList(),
+                                                            ragProperties.poolSize(),
+                                                            turn.timings(),
+                                                            usageOf(turn.response()),
+                                                            SpringAiConfig.PROMPT_VERSION);
             ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
             executor.execute(snapshot.wrap(() -> send(event)));
         } catch (RuntimeException e) {
             dropped.increment();
             log.warn("Could not publish a chat turn for evaluation; the answer itself was unaffected", e);
         }
+    }
+
+    private static @Nullable String modelOf(@Nullable ChatResponse response) {
+        return response != null && response.getMetadata() != null ? response.getMetadata().getModel() : null;
+    }
+
+    private static @Nullable GenerationUsage usageOf(@Nullable ChatResponse response) {
+        if (response == null) {
+            return null;
+        }
+        Usage usage = response.getMetadata() != null ? response.getMetadata().getUsage() : null;
+        String finishReason = response.getResult() != null && response.getResult().getMetadata() != null
+                ? response.getResult().getMetadata().getFinishReason()
+                : null;
+        return new GenerationUsage(usage != null ? usage.getPromptTokens() : null,
+                                   usage != null ? usage.getCompletionTokens() : null,
+                                   finishReason);
+    }
+
+    /**
+     * One finished turn, as {@code ChatService} hands it over.
+     *
+     * @param turnId     also returned to the caller, who quotes it back to give feedback
+     * @param resolution the answer after {@code CitationResolver} - the text the evaluation scores
+     * @param retrieved  the chunks in the prompt
+     * @param excluded   the rest of the candidate pool, in rank order after them
+     * @param response   the final model response, for its model, usage and finish reason; null when
+     *                   a stream ended without one
+     */
+    public record Turn(UUID turnId,
+                       TurnOrigin origin,
+                       String conversationId,
+                       String query,
+                       Resolution resolution,
+                       List<Document> retrieved,
+                       List<Document> excluded,
+                       @Nullable ChatResponse response,
+                       Timings timings) {
     }
 
     private void send(ChatTurnCompleted event) {

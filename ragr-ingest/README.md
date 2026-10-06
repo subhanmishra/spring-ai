@@ -53,7 +53,12 @@ re-ranking, re-chunking - must strip it. For formats without pages the line is j
 
 Each chunk's metadata carries the keys defined in `ragr-shared`'s `ChunkMetadata`: `documentId`,
 `fileName`, `contentType`, `pageNumber`, `chunkIndex` and `blockType` (`prose` or `table`), plus
-`tableIndex` and `tableRows` for table chunks.
+`tableIndex` and `tableRows` for table chunks, and two for evaluation: `section`, the numbered heading the
+chunk falls under (the first heading inside it, else the last one before it), and `pipelineVersion`, a
+hash of the chunk-shaping settings, `IngestionProperties.PARSER_REVISION` and the embedding model. Bump
+`PARSER_REVISION` with any parsing change that alters chunk content, so evaluation can tell chunks from
+either side of it apart. The policy is still one pipeline per corpus - re-ingest everything after a
+change; the version records which pipeline that was.
 
 ## Configuration
 

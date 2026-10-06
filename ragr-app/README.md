@@ -13,7 +13,7 @@ for [ragr-eval](../ragr-eval/README.md) to score. For how it fits with the other
 flowchart TD
     req[POST /ai/generate or /ai/generateStream] --> id[resolve the conversation id<br/>X-Conversation-Id header]
     id --> mem[MessageChatMemoryAdvisor<br/>adds the last 10 messages from Redis]
-    mem --> qa[QuestionAnswerAdvisor<br/>embeds the question, top 5 chunks above 0.6]
+    mem --> qa[PooledQuestionAnswerAdvisor<br/>embeds the question, fetches a pool of 10,<br/>prompt gets the top 5 above 0.6]
     qa --> gen[gemma4:e2b generates<br/>citing inline as filename, p. N]
     gen --> save[the turn is saved to Redis]
     save --> res[CitationResolver<br/>section numbers rewritten to pages]
@@ -22,8 +22,14 @@ flowchart TD
     strip --> out[answer + sources + citations]
 ```
 
-- **Retrieval is the chat path's own search.** `QuestionAnswerAdvisor` searches with the question as
-  written, so a follow-up that only makes sense in context retrieves poorly.
+- **Retrieval is the chat path's own search.** `PooledQuestionAnswerAdvisor` searches with the question
+  as written, so a follow-up that only makes sense in context retrieves poorly. Its one vector query
+  fetches a pool of 10 candidates; the prompt gets exactly what the stock `QuestionAnswerAdvisor` would
+  have given it - the top 5 at or above the threshold - and the rest of the pool travels with the turn to
+  ragr-eval, which measures recall against it. A pool of 10 costs the same as 5 (about 0.8 ms warm).
+- **Every turn has an id.** `turnId` comes back in the response (in `done` for a stream) and is what
+  `POST /ai/turns/{turnId}/feedback` rates. ragr-app keeps no record of turns; it publishes the rating
+  for ragr-eval to store.
 - **Citations are resolved, then removed from the text.** The model is asked to cite inline as
   `(filename, p. N)`, taking the page from each chunk's citation line. It sometimes writes a section
   number where a page belongs - `(spring-boot-reference.pdf, p. 5.3)`, or with the dots dropped,
@@ -47,10 +53,13 @@ dimensions (`nomic-embed-text`, 768) must match ragr-ingest's - see the
 |---|---|---|
 | `app.rag.top-k` | `5` | Chunks retrieved per question |
 | `app.rag.similarity-threshold` | `0.6` | Minimum similarity for a chunk to be retrieved |
+| `app.rag.pool-size` | `10` | Candidates the one vector query fetches; the rest beyond the prompt go to evaluation |
+| `app.rag.pool-floor` | `0.0` | Minimum similarity to be in the pool at all |
 | `app.ai.max-chat-messages` | `10` | Messages kept per conversation, and replayed to the model on every turn |
 | `app.events.chat-turns.enabled` | `true` | Publish completed turns to Kafka for evaluation |
 | `app.events.chat-turns.topic` | `rag.chat.turn.completed` | The topic, created at startup |
 | `app.events.chat-turns.retention` | `3d` | How long the topic keeps turns |
+| `app.events.feedback.topic` | `rag.chat.feedback` | Where ratings are published, created at startup |
 | `app.redis.host`, `app.redis.port` | `localhost`, `6379` | The chat memory's Redis; the container sets `APP_REDIS_HOST=redis` |
 
 None of these change what is stored, so none of them need a re-ingest.
@@ -65,6 +74,7 @@ that integration is switched off, `compose.yaml` sets every address - see
 |---|---|---|
 | POST | `/ai/generate` | Single-shot chat response as JSON: the answer, its sources and citations. JSON body: `prompt` (required, max 4000 chars), and nothing else. Optional header `X-Conversation-Id` continues that conversation. Optional header `X-Eval-Origin: GOLDEN` (upper case; anything else but `LIVE` is a 400) marks the turn as the golden evaluation suite's, which online evaluation leaves out of the live metrics |
 | POST | `/ai/generateStream` | Streaming chat response (SSE): answer text, then `sources` and `done` events. Same JSON body and headers as above |
+| POST | `/ai/turns/{turnId}/feedback` | Rate an answer. JSON body: `rating` (`UP` or `DOWN`, required), `reason` (optional, max 1000 chars). 202 always - turns are not stored here, so an unknown id cannot be told apart from a known one |
 | GET | `/ai/conversations` | List all active conversation IDs |
 | GET | `/ai/conversations/{id}` | Read back one conversation's messages, oldest first |
 | DELETE | `/ai/conversations/{id}` | Delete a single conversation |
@@ -83,6 +93,10 @@ curl -X POST http://localhost:8080/ai/generate -H 'Content-Type: application/jso
 curl -N -X POST http://localhost:8080/ai/generateStream \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Tell me a story"}'
+
+# Rate an answer, by the turnId it came back with
+curl -X POST http://localhost:8080/ai/turns/<turnId>/feedback -H 'Content-Type: application/json' \
+  -d '{"rating":"DOWN","reason":"cited the wrong page"}'
 
 # Reload a conversation, then drop just that one
 curl "http://localhost:8080/ai/conversations/<id>"
@@ -109,6 +123,7 @@ the evidence is reported beside it:
 
 ```json
 {
+  "turnId": "c2057d5d-bc55-43bd-bc6d-45e9d4e91a8d",
   "answer": "Starters bundle a curated set of dependencies ...",
   "grounded": true,
   "sources": [
@@ -131,7 +146,7 @@ the retrieved chunks make.
 ### Streaming
 
 `/ai/generateStream` streams the answer text as unnamed `data:` events, citations removed, then sends
-`event:sources` (`{grounded, sources}`) and `event:done` (`{citations, usage}`). A cancelled stream
+`event:sources` (`{grounded, sources}`) and `event:done` (`{turnId, citations, usage}`). A cancelled stream
 gets neither.
 
 Because it is a `POST`, a browser client **cannot** consume it with the native `EventSource` API,

@@ -3,27 +3,29 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.config.EvalProperties;
 import com.example.subhanmishra.entity.EvalCaseResult;
 import com.example.subhanmishra.entity.EvalRun;
+import com.example.subhanmishra.entity.EvalTurn;
+import com.example.subhanmishra.entity.EvalTurn.JudgeStatus;
 import com.example.subhanmishra.event.ChatTurnCompleted;
 import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalCaseResultRepository;
 import com.example.subhanmishra.repository.EvalRunRepository;
+import com.example.subhanmishra.repository.EvalTurnRepository;
+import com.example.subhanmishra.repository.EvalTurnRepository.JudgeInput;
+import com.example.subhanmishra.service.EvalScoringService.ReferenceScores;
 import com.example.subhanmishra.service.eval.ContextPrecisionEvaluator;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
 import com.example.subhanmishra.service.eval.GoldenDataset;
 import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
+import com.example.subhanmishra.service.eval.TurnVerdicts;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
-import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.evaluation.EvaluationRequest;
-import org.springframework.ai.evaluation.Evaluator;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.kafka.core.ConsumerFactory;
@@ -78,9 +80,6 @@ public class GoldenEvalService {
 
     private static final Logger log = LoggerFactory.getLogger(GoldenEvalService.class);
 
-    private static final String RELEVANCY = "relevancy";
-    private static final String GROUNDEDNESS = "groundedness";
-
     /**
      * A grounded answer on this host takes 53-70 seconds and a cold model load adds ~35 more, so the
      * read timeout has to sit well clear of both. It exists at all so that a hung app fails the run
@@ -93,8 +92,8 @@ public class GoldenEvalService {
     private final EvalScoringService scoringService;
     private final EvalMetricsService metricsService;
     private final GoldenDatasetLoader datasetLoader;
-    private final RelevancyEvaluator relevancyEvaluator;
-    private final FactCheckingEvaluator factCheckingEvaluator;
+    private final TurnJudgeService turnJudge;
+    private final EvalTurnRepository turns;
     private final ContextPrecisionEvaluator contextPrecisionEvaluator;
     private final EvalRunRepository runRepository;
     private final EvalCaseResultRepository caseResultRepository;
@@ -105,8 +104,8 @@ public class GoldenEvalService {
                              EvalScoringService scoringService,
                              EvalMetricsService metricsService,
                              GoldenDatasetLoader datasetLoader,
-                             RelevancyEvaluator relevancyEvaluator,
-                             FactCheckingEvaluator factCheckingEvaluator,
+                             TurnJudgeService turnJudge,
+                             EvalTurnRepository turns,
                              ContextPrecisionEvaluator contextPrecisionEvaluator,
                              EvalRunRepository runRepository,
                              EvalCaseResultRepository caseResultRepository,
@@ -120,8 +119,8 @@ public class GoldenEvalService {
         this.scoringService = scoringService;
         this.metricsService = metricsService;
         this.datasetLoader = datasetLoader;
-        this.relevancyEvaluator = relevancyEvaluator;
-        this.factCheckingEvaluator = factCheckingEvaluator;
+        this.turnJudge = turnJudge;
+        this.turns = turns;
         this.contextPrecisionEvaluator = contextPrecisionEvaluator;
         this.runRepository = runRepository;
         this.caseResultRepository = caseResultRepository;
@@ -160,7 +159,7 @@ public class GoldenEvalService {
                  dataset.suite(), dataset.cases().size(), judged, evalProperties.golden().chatUrl());
 
         try {
-            List<CaseOutcome> outcomes = execute(dataset, judged);
+            List<CaseOutcome> outcomes = execute(dataset, judged, runId);
 
             // The chat model and retrieval settings belong to ragr-app, so they are recorded from what
             // its first turn reported rather than from any configuration here.
@@ -181,8 +180,9 @@ public class GoldenEvalService {
                                         result.contextPrecision(), result.precisionAtK(),
                                         result.judgedContextPrecision(), result.judgedPrecisionAtK(),
                                         result.citedContextPrecision(), result.citedPrecisionAtK(),
+                                        result.recallAtK(), result.ndcgAtK(),
                                         result.citationValidity(), result.citationFabrication(),
-                                        result.relevancyRate(), result.groundednessRate()));
+                                        result.relevancyRate(), result.groundednessRate(), result.phraseCoverage()));
 
             metricsService.recordGoldenRun(dataset.suite(), result.caseCount(), result.passRate(),
                                            result.hitRate(), result.meanReciprocalRank(),
@@ -223,14 +223,14 @@ public class GoldenEvalService {
      * <p>Judging is also synchronous here, unlike the online path. There is no caller waiting on a
      * response to protect, and a run's numbers are only meaningful once every case has been judged.
      */
-    private List<CaseOutcome> execute(GoldenDataset dataset, boolean judged) {
+    private List<CaseOutcome> execute(GoldenDataset dataset, boolean judged, @Nullable UUID runId) {
         List<CaseOutcome> outcomes = new ArrayList<>();
 
         // Phase 1 - generate. The feed is positioned at the end of the topic before the first request,
         // so every turn this run produces is read and nothing older is.
         try (TurnFeed feed = new TurnFeed()) {
             for (GoldenCase goldenCase : dataset.cases()) {
-                outcomes.add(generate(goldenCase, feed));
+                outcomes.add(generate(goldenCase, feed, runId));
             }
         }
 
@@ -243,7 +243,7 @@ public class GoldenEvalService {
         return outcomes;
     }
 
-    private CaseOutcome generate(GoldenCase goldenCase, TurnFeed feed) {
+    private CaseOutcome generate(GoldenCase goldenCase, TurnFeed feed, @Nullable UUID runId) {
         // A fresh id per case, so no case can see another's turn through chat memory.
         String conversationId = "eval-" + UUID.randomUUID();
         long startedAt = System.nanoTime();
@@ -276,6 +276,12 @@ public class GoldenEvalService {
             ContextPrecisionScores precision = scoringService.contextPrecision(retrieved, goldenCase);
             // Free as well - the answer's own citations against the retrieved headers.
             ContextPrecisionScores cited = scoringService.citedPrecision(answer, retrieved);
+            // And the same rank metrics live traffic gets from the judge, from expected pages over the
+            // whole candidate pool.
+            List<Document> pool = turn.pool().stream().map(ChatTurnCompleted.RetrievedChunk::toDocument).toList();
+            ReferenceScores reference = scoringService.referenceScores(pool, retrieved.size(), goldenCase);
+            EvalTurn evalTurn = EvalTurn.from(turn, scores, cited, runId, goldenCase.id(), JudgeStatus.NOT_QUEUED,
+                                              false);
 
             log.info("Eval case [{}] answered in {}ms: {} chunk(s), {} citation(s), {} fabricated, "
                      + "{} section number(s) resolved, {} left unresolved, context precision {}, cited {}",
@@ -285,7 +291,8 @@ public class GoldenEvalService {
                      precision != null ? format(precision.averagePrecision()) : "n/a",
                      cited != null ? cited.relevanceAsString() : "n/a");
 
-            return new CaseOutcome(goldenCase, turn, answer, retrieved, scores, rank, precision, cited, millis);
+            return new CaseOutcome(goldenCase, turn, evalTurn, answer, retrieved, scores, rank, precision, cited,
+                                   reference, millis);
 
         } finally {
             deleteConversation(conversationId);
@@ -362,35 +369,25 @@ public class GoldenEvalService {
         }
     }
 
+    /**
+     * The same judges, in the same order, that live turns get from {@link TurnJudgeWorker} - so a golden
+     * number and a live one mean the same thing. An ungrounded case gets only its task classified, for
+     * the reason live ungrounded turns do: both answer judges score an answer against its context, and an
+     * out-of-corpus case would fail them for behaving correctly.
+     *
+     * <p>Then, for grounded cases only, the answer-use context precision judge, which has no live
+     * counterpart. Last, and deliberately: it is top-k calls, so a run interrupted partway through a case
+     * has already recorded everything else.
+     */
     private void judge(CaseOutcome outcome) {
+        TurnVerdicts verdicts = turnJudge.judge(JudgeInput.of(outcome.evalTurn()));
+        outcome.applyVerdicts(verdicts);
         if (outcome.retrieved().isEmpty()) {
-            // Both judges score an answer against its context. With no context there is nothing to
-            // score against, and FactCheckingEvaluator would report "not supported" for an answer that
-            // was never meant to be grounded - an out-of-corpus case would fail for behaving correctly.
             return;
         }
-        EvaluationRequest request =
-                new EvaluationRequest(outcome.goldenCase().query(), outcome.retrieved(), outcome.answer());
-
-        Boolean relevancy = verdict(RELEVANCY, relevancyEvaluator, request);
-        Boolean groundedness = verdict(GROUNDEDNESS, factCheckingEvaluator, request);
-        outcome.applyJudgements(relevancy, groundedness);
-
-        // Last, and deliberately: this is top-k calls rather than one, so a run interrupted partway
-        // through a case has already recorded the two cheap verdicts.
         outcome.applyJudgedPrecision(contextPrecisionEvaluator.judge(outcome.goldenCase().query(),
                                                                      outcome.answer(),
                                                                      outcome.retrieved()));
-    }
-
-    /** A verdict, or null when the judge failed - which must not be recorded as a failed judgement. */
-    private @Nullable Boolean verdict(String metric, Evaluator evaluator, EvaluationRequest request) {
-        try {
-            return evaluator.evaluate(request).isPass();
-        } catch (RuntimeException e) {
-            log.warn("Golden {} judgement failed; recording it as unjudged rather than failed", metric, e);
-            return null;
-        }
     }
 
     private GoldenRunResult aggregate(GoldenDataset dataset,
@@ -427,6 +424,14 @@ public class GoldenEvalService {
         int citedPrecisionCases = 0;
         double citedPrecisionTotal = 0;
         double citedPrecisionAtKTotal = 0;
+        // Reference recall and NDCG over the cases declaring expected pages; phrase coverage over the cases
+        // declaring phrases - a case asserting none has coverage 1.0 by definition and would only dilute it.
+        int referenceCases = 0;
+        double recallTotal = 0;
+        int ndcgCases = 0;
+        double ndcgTotal = 0;
+        int phraseCases = 0;
+        double phraseTotal = 0;
 
         for (CaseOutcome outcome : outcomes) {
             EvalScores scores = outcome.scores();
@@ -457,6 +462,19 @@ public class GoldenEvalService {
                 judgedPrecisionCases++;
                 judgedPrecisionTotal += judgedPrecision.averagePrecision();
                 judgedPrecisionAtKTotal += judgedPrecision.precisionAtK();
+            }
+            ReferenceScores reference = outcome.reference();
+            if (reference != null) {
+                referenceCases++;
+                recallTotal += reference.pageRecall();
+                if (reference.ranking().ndcgAtK() != null) {
+                    ndcgCases++;
+                    ndcgTotal += reference.ranking().ndcgAtK();
+                }
+            }
+            if (!outcome.goldenCase().mustContain().isEmpty()) {
+                phraseCases++;
+                phraseTotal += scores.answer().phraseCoverage();
             }
             ContextPrecisionScores citedPrecision = outcome.citedContextPrecision();
             if (citedPrecision != null) {
@@ -503,6 +521,8 @@ public class GoldenEvalService {
                                            ? citedPrecisionTotal / citedPrecisionCases : null,
                                    citedPrecisionCases > 0
                                            ? citedPrecisionAtKTotal / citedPrecisionCases : null,
+                                   referenceCases > 0 ? recallTotal / referenceCases : null,
+                                   ndcgCases > 0 ? ndcgTotal / ndcgCases : null,
                                    citationsEmitted > 0 ? (double) citationsValid / citationsEmitted : 1.0,
                                    citationsEmitted > 0 ? (double) citationsFabricated / citationsEmitted : 0.0,
                                    citationsEmitted,
@@ -511,6 +531,7 @@ public class GoldenEvalService {
                                            ? (double) relevancyPassed / relevancyJudged : null,
                                    judged && groundednessJudged > 0
                                            ? (double) groundednessPassed / groundednessJudged : null,
+                                   phraseCases > 0 ? phraseTotal / phraseCases : null,
                                    durationMillis,
                                    List.copyOf(failures));
     }
@@ -519,9 +540,23 @@ public class GoldenEvalService {
         return evalProperties.golden().persist() ? runRepository.save(run) : run;
     }
 
+    /**
+     * The case's turn into {@code eval_turn} - with its judged columns when the run judged - and then its
+     * case row pointing at it. The turn row is what puts golden and live results in one table for the
+     * dashboard.
+     */
     private void persistCase(UUID runId, CaseOutcome outcome) {
         if (!evalProperties.golden().persist()) {
             return;
+        }
+        EvalTurn evalTurn = outcome.evalTurn();
+        turns.insert(evalTurn);
+        TurnVerdicts verdicts = outcome.verdicts();
+        if (verdicts != null) {
+            turns.saveVerdicts(evalTurn.turnId(), verdicts,
+                               verdicts.answerOk(evalProperties.judge().faithfulnessThreshold(),
+                                                 evalTurn.citationsFabricated()),
+                               0, evalProperties.judgeModel());
         }
         caseResultRepository.save(EvalCaseResult.from(runId,
                                                       outcome.goldenCase().id(),
@@ -532,6 +567,8 @@ public class GoldenEvalService {
                                                       outcome.contextPrecision(),
                                                       outcome.judgedContextPrecision(),
                                                       outcome.citedContextPrecision(),
+                                                      outcome.reference(),
+                                                      evalTurn.turnId(),
                                                       outcome.latencyMillis()));
     }
 
@@ -554,32 +591,54 @@ public class GoldenEvalService {
 
         private final GoldenCase goldenCase;
         private final ChatTurnCompleted turn;
+        private final EvalTurn evalTurn;
         private final String answer;
         private final List<Document> retrieved;
         private final int firstRelevantRank;
         private final @Nullable ContextPrecisionScores contextPrecision;
         private final @Nullable ContextPrecisionScores citedContextPrecision;
+        private final @Nullable ReferenceScores reference;
         private final long latencyMillis;
         private EvalScores scores;
         private @Nullable ContextPrecisionScores judgedContextPrecision;
+        private @Nullable TurnVerdicts verdicts;
 
-        CaseOutcome(GoldenCase goldenCase, ChatTurnCompleted turn, String answer, List<Document> retrieved,
-                    EvalScores scores, int firstRelevantRank,
+        CaseOutcome(GoldenCase goldenCase, ChatTurnCompleted turn, EvalTurn evalTurn, String answer,
+                    List<Document> retrieved, EvalScores scores, int firstRelevantRank,
                     @Nullable ContextPrecisionScores contextPrecision,
-                    @Nullable ContextPrecisionScores citedContextPrecision, long latencyMillis) {
+                    @Nullable ContextPrecisionScores citedContextPrecision,
+                    @Nullable ReferenceScores reference, long latencyMillis) {
             this.goldenCase = goldenCase;
             this.turn = turn;
+            this.evalTurn = evalTurn;
             this.answer = answer;
             this.retrieved = retrieved;
             this.scores = scores;
             this.firstRelevantRank = firstRelevantRank;
             this.contextPrecision = contextPrecision;
             this.citedContextPrecision = citedContextPrecision;
+            this.reference = reference;
             this.latencyMillis = latencyMillis;
         }
 
-        void applyJudgements(@Nullable Boolean relevancy, @Nullable Boolean groundedness) {
-            this.scores = scores.withJudgements(relevancy, groundedness);
+        /** The judges' verdicts; relevancy and groundedness also feed the case's pass/fail, as before. */
+        void applyVerdicts(TurnVerdicts verdicts) {
+            this.verdicts = verdicts;
+            this.scores = scores.withJudgements(verdicts.relevancyPass(), verdicts.groundednessPass());
+        }
+
+        /** The case's turn as it is stored in {@code eval_turn}. */
+        public EvalTurn evalTurn() {
+            return evalTurn;
+        }
+
+        public @Nullable TurnVerdicts verdicts() {
+            return verdicts;
+        }
+
+        /** Expected-page rank metrics and page recall; null when the case declares no expected pages. */
+        public @Nullable ReferenceScores reference() {
+            return reference;
         }
 
         void applyJudgedPrecision(@Nullable ContextPrecisionScores judged) {
@@ -677,12 +736,15 @@ public class GoldenEvalService {
                                   @Nullable Double judgedPrecisionAtK,
                                   @Nullable Double citedContextPrecision,
                                   @Nullable Double citedPrecisionAtK,
+                                  @Nullable Double recallAtK,
+                                  @Nullable Double ndcgAtK,
                                   double citationValidity,
                                   double citationFabrication,
                                   int citationsEmitted,
                                   int inventedPageCount,
                                   @Nullable Double relevancyRate,
                                   @Nullable Double groundednessRate,
+                                  @Nullable Double phraseCoverage,
                                   long durationMillis,
                                   List<String> failures) {
 

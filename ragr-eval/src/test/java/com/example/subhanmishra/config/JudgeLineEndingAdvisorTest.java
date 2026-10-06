@@ -43,7 +43,8 @@ class JudgeLineEndingAdvisorTest {
     private final ChatModel model = mock(ChatModel.class);
     private final EvalConfig config = new EvalConfig();
     private final EvalProperties properties =
-            new EvalProperties(true, "rag.chat.turn.completed", "judge", 0.0, 8, 8192, null, null);
+            new EvalProperties(true, "rag.chat.turn.completed", "rag.chat.feedback", "judge", 0.0, 8, 8192, null,
+                               null, null, null);
     @SuppressWarnings("unchecked")
     private final ObjectProvider<ChatClient.Builder> builders = mock(ObjectProvider.class);
 

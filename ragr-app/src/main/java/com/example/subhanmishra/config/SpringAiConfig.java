@@ -2,26 +2,28 @@ package com.example.subhanmishra.config;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.redis.RedisChatMemoryRepository;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import redis.clients.jedis.RedisClient;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 
 @Configuration
 public class SpringAiConfig {
 
     /**
      * Mirrors {@code QuestionAnswerAdvisor}'s own default template, with the citation rule restated
-     * immediately after the context.
+     * immediately after the context. {@link PooledQuestionAnswerAdvisor} renders it.
      *
      * <p>The rule is already in the system prompt, but llama3.2 ignored it there: it sits in item 1 of a
      * four-item capability list, thousands of tokens away from the passages it refers to, and a 3B model
@@ -73,24 +75,41 @@ public class SpringAiConfig {
             acknowledgement, and no closing offer of further help.
             """);
 
+    /**
+     * Indented 24 spaces inside the text block on purpose: that is what the model has always been sent,
+     * since the block was first written inline with its closing delimiter 24 columns left of its text.
+     * Re-indenting it would change every prompt and with it every measurement taken so far.
+     */
+    private static final String SYSTEM_PROMPT = """
+                                You are DocAI, an intelligent, versatile AI document intelligence assistant.
+                                Your Capabilities:
+                                1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line. A page number is always a whole number; a dotted heading number inside a passage, such as "5.3", is a section and must never be cited as a page.
+                                2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
+                                3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
+                                4. Tone & Format: Be polite but direct - lead with the answer. No greetings, no restating the question, no thanking the user, no closing offers of further help. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
+
+        """;
+
+    /**
+     * A short hash of everything the model is told besides the conversation itself, carried on every
+     * chat turn event so evaluation can split a metric at a prompt change rather than average across it.
+     */
+    public static final String PROMPT_VERSION = promptVersion(SYSTEM_PROMPT + QA_PROMPT_TEMPLATE.getTemplate());
+
+    private static String promptVersion(String prompts) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(prompts.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every JVM", e);
+        }
+    }
+
     @Bean
     public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory, VectorStore vectorStore, RagProperties ragProperties) {
-        var qaAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
-                                             .searchRequest(SearchRequest.builder()
-                                                                         .similarityThreshold(ragProperties.similarityThreshold())
-                                                                         .topK(ragProperties.topK())
-                                                                         .build())
-                                             .promptTemplate(QA_PROMPT_TEMPLATE)
-                                             .build();
-        return builder.defaultSystem("""
-                                        You are DocAI, an intelligent, versatile AI document intelligence assistant.
-                                        Your Capabilities:
-                                        1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line. A page number is always a whole number; a dotted heading number inside a passage, such as "5.3", is a section and must never be cited as a page.
-                                        2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
-                                        3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
-                                        4. Tone & Format: Be polite but direct - lead with the answer. No greetings, no restating the question, no thanking the user, no closing offers of further help. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
-
-                """).defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+        var qaAdvisor = new PooledQuestionAnswerAdvisor(vectorStore, QA_PROMPT_TEMPLATE, ragProperties);
+        return builder.defaultSystem(SYSTEM_PROMPT)
+                    .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                     .defaultAdvisors(qaAdvisor)
                     .build();
     }

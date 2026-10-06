@@ -18,10 +18,9 @@ import java.util.UUID;
  * <p>The configuration columns are the point of the table. A score without the chat model, judge
  * model, top-k and threshold that produced it cannot be compared to any other score.
  *
- * <p>What is deliberately not recorded is the corpus. A pipeline change is handled by dropping every
- * chunk and re-ingesting, and nothing marks that boundary here: two runs either side of a re-ingest
- * look comparable and are scoring different chunks. Read the trend with the date of the last re-ingest
- * in mind.
+ * <p>The corpus is not recorded here, but each case's turn in {@code eval_turn} carries the pipeline
+ * versions of the chunks it was answered from, and the dashboard marks every re-ingest on the trend
+ * lines - two runs either side of one are scoring different chunks.
  */
 @Table(name = "eval_run")
 public record EvalRun(@Id @Nullable UUID id,
@@ -44,10 +43,13 @@ public record EvalRun(@Id @Nullable UUID id,
                       @Nullable Double judgedPrecisionAtK,
                       @Nullable Double citedContextPrecision,
                       @Nullable Double citedPrecisionAtK,
+                      @Nullable Double recallAtK,
+                      @Nullable Double ndcgAtK,
                       @Nullable Double citationValidity,
                       @Nullable Double citationFabrication,
                       @Nullable Double relevancyRate,
                       @Nullable Double groundednessRate,
+                      @Nullable Double phraseCoverage,
                       @Nullable Long durationMillis,
                       @Nullable String errorMessage) {
 
@@ -61,7 +63,8 @@ public record EvalRun(@Id @Nullable UUID id,
                                    boolean judged) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
                            null, judgeModel, judged, null, null,
-                           null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                           null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                           null, null, null);
     }
 
     /**
@@ -73,8 +76,9 @@ public record EvalRun(@Id @Nullable UUID id,
                            chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
-                           citedPrecisionAtK, citationValidity, citationFabrication, relevancyRate,
-                           groundednessRate, durationMillis, errorMessage);
+                           citedPrecisionAtK, recallAtK, ndcgAtK, citationValidity, citationFabrication,
+                           relevancyRate, groundednessRate, phraseCoverage,
+                           durationMillis, errorMessage);
     }
 
     /**
@@ -86,6 +90,9 @@ public record EvalRun(@Id @Nullable UUID id,
      * @param citedContextPrecision  attribution-based, a chunk counted as used when the answer cites its
      *                               page. Free and deterministic, so measured on every run; null only
      *                               when no case retrieved anything.
+     * @param recallAtK              page-level recall against expected pages, averaged over the cases that
+     *                               declare them; null when none does. {@code ndcgAtK} likewise.
+     * @param phraseCoverage         share of expected phrases found, over the cases that declare any.
      */
     public EvalRun completed(int passedCount,
                              double hitRate,
@@ -96,17 +103,21 @@ public record EvalRun(@Id @Nullable UUID id,
                              @Nullable Double judgedPrecisionAtK,
                              @Nullable Double citedContextPrecision,
                              @Nullable Double citedPrecisionAtK,
+                             @Nullable Double recallAtK,
+                             @Nullable Double ndcgAtK,
                              double citationValidity,
                              double citationFabrication,
                              @Nullable Double relevancyRate,
-                             @Nullable Double groundednessRate) {
+                             @Nullable Double groundednessRate,
+                             @Nullable Double phraseCoverage) {
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.COMPLETED, startedAt, finished, caseCount,
                            passedCount, chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
-                           citedPrecisionAtK, citationValidity, citationFabrication, relevancyRate,
-                           groundednessRate, finished.toEpochMilli() - startedAt.toEpochMilli(), null);
+                           citedPrecisionAtK, recallAtK, ndcgAtK, citationValidity, citationFabrication,
+                           relevancyRate, groundednessRate, phraseCoverage,
+                           finished.toEpochMilli() - startedAt.toEpochMilli(), null);
     }
 
     public EvalRun failed(String message) {
@@ -115,9 +126,9 @@ public record EvalRun(@Id @Nullable UUID id,
                            chatModel, judgeModel, judged, topK, similarityThreshold,
                            hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
                            judgedContextPrecision, judgedPrecisionAtK,
-                           citedContextPrecision, citedPrecisionAtK,
+                           citedContextPrecision, citedPrecisionAtK, recallAtK, ndcgAtK,
                            citationValidity, citationFabrication,
-                           relevancyRate, groundednessRate,
+                           relevancyRate, groundednessRate, phraseCoverage,
                            finished.toEpochMilli() - startedAt.toEpochMilli(), message);
     }
 }

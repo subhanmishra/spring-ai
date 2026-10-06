@@ -41,6 +41,22 @@ public final class ChunkMetadata {
     /** The 1-based data rows this chunk covers, e.g. {@code "13-24"}, absent for a header-only table. */
     public static final String TABLE_ROWS = "tableRows";
 
+    /**
+     * The numbered section the chunk belongs to, as its heading line - {@code "9.2.6. Set the Active
+     * Spring Profiles"}: the first heading inside the chunk, or else the last one before it in the same
+     * document. Absent before the first heading and for documents with none. Evaluation groups metrics
+     * and the human review view by it.
+     */
+    public static final String SECTION = "section";
+
+    /**
+     * A short hash of everything that decides what a chunk contains - the chunk-shaping settings, the
+     * parser revision and the embedding model - stamped on every chunk at ingest. Chunks from before and
+     * after a pipeline change can sit side by side until the corpus is re-ingested, and a turn carries the
+     * versions of the chunks it was answered from, so evaluation can tell the two apart.
+     */
+    public static final String PIPELINE_VERSION = "pipelineVersion";
+
     private ChunkMetadata() {
     }
 

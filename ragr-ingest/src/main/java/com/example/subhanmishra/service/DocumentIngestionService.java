@@ -1,6 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
+import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
@@ -9,10 +10,12 @@ import com.example.subhanmishra.repository.VectorStoreRepository;
 import io.micrometer.context.ContextSnapshot;
 import io.micrometer.context.ContextSnapshotFactory;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -31,6 +34,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -47,6 +51,9 @@ public class DocumentIngestionService {
     private final DocumentHistoryService historyService;
     private final VectorStoreRepository vectorStoreRepository;
     private final IngestionProperties ingestionProperties;
+
+    /** Stamped on every chunk as {@link ChunkMetadata#PIPELINE_VERSION}; see {@link IngestionProperties#pipelineVersion}. */
+    private final String pipelineVersion;
 
     /**
      * Each batch commits on its own connection, so batch writes cannot join the caller's transaction.
@@ -68,7 +75,8 @@ public class DocumentIngestionService {
                                     DocumentHistoryService historyService,
                                     VectorStoreRepository vectorStoreRepository,
                                     IngestionProperties ingestionProperties,
-                                    PlatformTransactionManager transactionManager) {
+                                    PlatformTransactionManager transactionManager,
+                                    @Value("${spring.ai.ollama.embedding.model}") String embeddingModel) {
         this.vectorStore = vectorStore;
         this.historyService = historyService;
         this.vectorStoreRepository = vectorStoreRepository;
@@ -76,6 +84,7 @@ public class DocumentIngestionService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.ingestionPermits = new Semaphore(Math.max(1, ingestionProperties.concurrency()));
+        this.pipelineVersion = ingestionProperties.pipelineVersion(embeddingModel);
     }
 
     /**
@@ -91,7 +100,7 @@ public class DocumentIngestionService {
         // and will not be rolled back if a batch write fails.
         historyService.recordHistory(metadata.getId(), DocumentStatus.PROCESSING, "Starting to chunk and embed document");
 
-        Stream<Document> enrichedStream = getEnrichedStream(metadata, (Stream<Document>) parseResult.get("documentStream"));
+        Stream<Document> enrichedStream = getEnrichedStream(metadata, (Stream<Document>) parseResult.get("documentStream"), pipelineVersion);
 
         // 2. Batch the stream, then write the batches concurrently to the vector store
         List<List<Document>> batches = partition(enrichedStream, ingestionProperties.batchSize()).toList();
@@ -233,19 +242,32 @@ public class DocumentIngestionService {
         }
     }
 
-    private static @NonNull Stream<Document> getEnrichedStream(DocumentMetadata metadata, Stream<Document> documentStream) {
+    private static @NonNull Stream<Document> getEnrichedStream(DocumentMetadata metadata, Stream<Document> documentStream,
+                                                               String pipelineVersion) {
         if (documentStream == null) {
             throw new IllegalStateException("Parsing result did not contain a document stream.");
         }
 
         // 1. Enrich metadata on each chunk lazily as part of the stream
         AtomicInteger chunkIndex = new AtomicInteger(0);
+        // The section a chunk belongs to is carried forward from the chunks before it, which relies on
+        // the stream being sequential and in document order - the same assumption chunkIndex makes.
+        AtomicReference<@Nullable String> currentSection = new AtomicReference<>();
         return documentStream.map(chunk -> {
             Map<String, Object> newMetadata = new HashMap<>(chunk.getMetadata());
             newMetadata.put(ChunkMetadata.DOCUMENT_ID, metadata.getId().toString());
             newMetadata.put(ChunkMetadata.FILE_NAME, metadata.getFilename());
             newMetadata.put(ChunkMetadata.CONTENT_TYPE, metadata.getContentType());
             newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
+            newMetadata.put(ChunkMetadata.PIPELINE_VERSION, pipelineVersion);
+            List<String> headings = CitationResolver.sectionHeadings(chunk.getText());
+            String section = headings.isEmpty() ? currentSection.get() : headings.getFirst();
+            if (!headings.isEmpty()) {
+                currentSection.set(headings.getLast());
+            }
+            if (section != null) {
+                newMetadata.put(ChunkMetadata.SECTION, section);
+            }
 
             // Normalize page number metadata
             Object pageNumber = chunk.getMetadata().get("page_number");

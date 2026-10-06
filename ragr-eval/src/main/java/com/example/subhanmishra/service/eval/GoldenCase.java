@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service.eval;
 
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -31,6 +32,11 @@ import java.util.List;
  * @param expectRefusal  whether the assistant should decline. Almost always false: the system prompt
  *                       explicitly promises to answer general knowledge, and the stock
  *                       QuestionAnswerAdvisor template that forbids it is softened for that reason.
+ * @param expectedPagesMode how page recall reads {@code expectedPages}: {@code ALL} (the default) when
+ *                       the answer needs every listed page, {@code ANY} when each listed page answers the
+ *                       question on its own, so retrieving one is full recall. Hit rate and MRR ignore it.
+ * @param category       the {@link TaskType} this case exercises, so golden results can be broken down the
+ *                       way live ones are; optional
  */
 public record GoldenCase(String id,
                          String query,
@@ -40,7 +46,9 @@ public record GoldenCase(String id,
                          List<String> mustContain,
                          List<String> mustNotContain,
                          Boolean expectGrounded,
-                         Boolean expectRefusal) {
+                         Boolean expectRefusal,
+                         ExpectedPagesMode expectedPagesMode,
+                         @Nullable TaskType category) {
 
     /** Normalises the optional collections to empty and the optional flags to their defaults. */
     public GoldenCase {
@@ -49,10 +57,17 @@ public record GoldenCase(String id,
         mustNotContain = mustNotContain != null ? List.copyOf(mustNotContain) : List.of();
         expectGrounded = expectGrounded == null || expectGrounded;
         expectRefusal = expectRefusal != null && expectRefusal;
+        expectedPagesMode = expectedPagesMode != null ? expectedPagesMode : ExpectedPagesMode.ALL;
     }
 
     /** Whether this case asserts anything about retrieval. Recall is not scored when it does not. */
     public boolean scoresRecall() {
         return !expectedPages.isEmpty();
+    }
+
+    /** Whether an answer needs every expected page, or any one of them. */
+    public enum ExpectedPagesMode {
+        ALL,
+        ANY
     }
 }

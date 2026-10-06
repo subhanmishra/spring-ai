@@ -1,5 +1,6 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.config.PooledQuestionAnswerAdvisor;
 import com.example.subhanmishra.config.SpringAiProperties;
 import com.example.subhanmishra.dto.ChatAnswerDto;
 import com.example.subhanmishra.dto.ChatDoneDto;
@@ -9,6 +10,7 @@ import com.example.subhanmishra.dto.CitationDto;
 import com.example.subhanmishra.dto.ConversationDto;
 import com.example.subhanmishra.dto.SourceDto;
 import com.example.subhanmishra.dto.UsageDto;
+import com.example.subhanmishra.event.ChatTurnCompleted.Timings;
 import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.exception.ResourceNotFoundException;
 import com.example.subhanmishra.chunk.ChunkMetadata;
@@ -18,6 +20,8 @@ import com.example.subhanmishra.citation.CitationParser;
 import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.citation.CitationResolver.Repair;
 import com.example.subhanmishra.citation.CitationResolver.Resolution;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -38,6 +42,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -49,23 +55,37 @@ public class ChatService {
     private final SpringAiProperties springAiProperties;
     private final ChatTurnPublisher chatTurnPublisher;
 
+    /**
+     * Generations running right now, published as {@code rag.chat.generations.active}.
+     *
+     * <p>ragr-eval reads it before every judge call and waits while it is above zero. The judges and chat
+     * share the one Ollama runner, which serves one request at a time, so a judge call started while a
+     * user is waiting puts that user behind it. Counted from the request into the model to the last token,
+     * which covers retrieval too - a judge call started mid-retrieval would still be ahead in the queue.
+     */
+    private final AtomicInteger activeGenerations = new AtomicInteger();
+
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
                        ChatMemoryRepository chatMemoryRepository,
                        SpringAiProperties springAiProperties,
-                       ChatTurnPublisher chatTurnPublisher) {
+                       ChatTurnPublisher chatTurnPublisher,
+                       MeterRegistry registry) {
         this.chatClient = chatClient;
         this.chatMemoryRepository = chatMemoryRepository;
         this.chatMemory = chatMemory;
         this.springAiProperties = springAiProperties;
         this.chatTurnPublisher = chatTurnPublisher;
+        Gauge.builder("rag.chat.generations.active", activeGenerations, AtomicInteger::get)
+             .description("Chat generations in flight; ragr-eval holds its judges while this is above zero")
+             .register(registry);
     }
 
     /**
      * Answers a prompt, and publishes the turn for evaluation on the way out.
      *
      * <p>Takes the {@code ChatClientResponse} rather than {@code content()} so the retrieved documents
-     * can be read back. {@code QuestionAnswerAdvisor} puts the chunks it retrieved into the advisor
+     * can be read back. {@link PooledQuestionAnswerAdvisor} puts the chunks it retrieved into the advisor
      * context under {@link QuestionAnswerAdvisor#RETRIEVED_DOCUMENTS}, which is the only way to see the
      * context an answer was actually built on without re-running the search - and a second search would
      * be a different search, since it would not share this one's filters or timing.
@@ -82,19 +102,30 @@ public class ChatService {
      */
     public ChatAnswerDto generate(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
-        ChatClientResponse response = chatClient.prompt()
-                .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .chatClientResponse();
+        UUID turnId = UUID.randomUUID();
+        ChatClientResponse response;
+        activeGenerations.incrementAndGet();
+        try {
+            response = chatClient.prompt()
+                    .user(prompt)
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                    .call()
+                    .chatClientResponse();
+        } finally {
+            activeGenerations.decrementAndGet();
+        }
 
         List<Document> retrieved = retrievedDocuments(response);
         Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
-        chatTurnPublisher.publish(origin, conversationId, prompt, resolution, retrieved, modelOf(response.chatResponse()));
+        Timings timings = new Timings(retrievalMillis(response), null, millisSince(started), false);
+        chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, resolution,
+                                                             retrieved, excludedDocuments(response),
+                                                             response.chatResponse(), timings));
 
         AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
         List<CitationDto> citations = citations(resolution, retrieved, context);
-        return new ChatAnswerDto(AnswerCitations.strip(resolution.answer(), context),
+        return new ChatAnswerDto(turnId,
+                                 AnswerCitations.strip(resolution.answer(), context),
                                  !retrieved.isEmpty(),
                                  sources(retrieved, citations),
                                  citations,
@@ -122,8 +153,12 @@ public class ChatService {
      */
     public Flux<ServerSentEvent<?>> generateStream(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
+        UUID turnId = UUID.randomUUID();
         StringBuilder answer = new StringBuilder();
         AtomicReference<List<Document>> retrieved = new AtomicReference<>(List.of());
+        AtomicReference<List<Document>> excluded = new AtomicReference<>(List.of());
+        AtomicReference<@Nullable Long> retrievalMillis = new AtomicReference<>();
+        AtomicReference<@Nullable Long> firstTokenMillis = new AtomicReference<>();
         AtomicReference<AnswerCitations.Context> context = new AtomicReference<>(AnswerCitations.Context.EMPTY);
         AtomicReference<@Nullable ChatResponse> last = new AtomicReference<>();
         AnswerCitations.StreamingStripper stripper = new AnswerCitations.StreamingStripper();
@@ -133,6 +168,8 @@ public class ChatService {
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .stream()
                 .chatClientResponse()
+                .doOnSubscribe(subscription -> activeGenerations.incrementAndGet())
+                .doFinally(signal -> activeGenerations.decrementAndGet())
                 .concatMap(response -> {
                     List<Document> documents = retrievedDocuments(response);
                     // The same list arrives on every chunk; the context is built from it once.
@@ -140,10 +177,17 @@ public class ChatService {
                         retrieved.set(documents);
                         context.set(AnswerCitations.Context.of(documents));
                     }
+                    if (retrievalMillis.get() == null) {
+                        retrievalMillis.set(retrievalMillis(response));
+                        excluded.set(excludedDocuments(response));
+                    }
                     if (response.chatResponse() != null) {
                         last.set(response.chatResponse());
                     }
                     String text = answerOf(response.chatResponse());
+                    if (!text.isEmpty() && firstTokenMillis.get() == null) {
+                        firstTokenMillis.set(millisSince(started));
+                    }
                     answer.append(text);
                     return token(stripper.accept(text, context.get()));
                 });
@@ -151,21 +195,36 @@ public class ChatService {
         Flux<ServerSentEvent<?>> closing = Flux.defer(() -> {
             List<Document> documents = retrieved.get();
             Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
-            chatTurnPublisher.publish(origin, conversationId, prompt, resolution, documents, modelOf(last.get()));
+            Timings timings = new Timings(retrievalMillis.get(), firstTokenMillis.get(), millisSince(started), true);
+            chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, resolution,
+                                                                 documents, excluded.get(), last.get(), timings));
 
             List<CitationDto> citations = citations(resolution, documents, context.get());
             return token(stripper.finish(context.get())).concatWith(Flux.just(
                     ServerSentEvent.builder(new ChatSourcesDto(!documents.isEmpty(), sources(documents, citations)))
                                    .event("sources").build(),
-                    ServerSentEvent.builder(new ChatDoneDto(citations, usage(last.get(), started)))
+                    ServerSentEvent.builder(new ChatDoneDto(turnId, citations, usage(last.get(), started)))
                                    .event("done").build()));
         });
 
         return tokens.concatWith(closing);
     }
 
-    private static @Nullable String modelOf(@Nullable ChatResponse chatResponse) {
-        return chatResponse != null && chatResponse.getMetadata() != null ? chatResponse.getMetadata().getModel() : null;
+    private static long millisSince(long startedNanos) {
+        return Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
+    }
+
+    /** The rest of the candidate pool, which {@link PooledQuestionAnswerAdvisor} kept out of the prompt. */
+    @SuppressWarnings("unchecked")
+    private static List<Document> excludedDocuments(ChatClientResponse response) {
+        Object documents = response.context().get(PooledQuestionAnswerAdvisor.EXCLUDED_DOCUMENTS);
+        return documents instanceof List<?> list ? (List<Document>) list : List.of();
+    }
+
+    private static @Nullable Long retrievalMillis(ChatClientResponse response) {
+        return response.context().get(PooledQuestionAnswerAdvisor.RETRIEVAL_MILLIS) instanceof Long millis
+                ? millis
+                : null;
     }
 
     private static Flux<ServerSentEvent<?>> token(String text) {

@@ -1,7 +1,12 @@
 package com.example.subhanmishra.config;
 
+import com.example.subhanmishra.service.eval.ChunkGradeEvaluator;
+import com.example.subhanmishra.service.eval.CitationSupportEvaluator;
+import com.example.subhanmishra.service.eval.ClaimFaithfulnessEvaluator;
+import com.example.subhanmishra.service.eval.CompletenessEvaluator;
 import com.example.subhanmishra.service.eval.ContextPrecisionEvaluator;
 import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
+import com.example.subhanmishra.service.eval.TaskClassifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.evaluation.FactCheckingEvaluator;
 import org.springframework.ai.chat.evaluation.RelevancyEvaluator;
@@ -137,6 +142,56 @@ public class EvalConfig {
         return new ContextPrecisionEvaluator(judgeClientBuilder(builders, properties));
     }
 
+    /**
+     * The same judge client with a generation cap long enough for a list. The claim judges write one line
+     * per claim, and the one-word cap every other judge runs with would cut that list off after its first
+     * few tokens.
+     */
+    private ChatClient.Builder listJudgeClientBuilder(ObjectProvider<ChatClient.Builder> builders,
+                                                      EvalProperties properties) {
+        return builders.getObject()
+                       .defaultOptions(judgeOptions(properties).numPredict(properties.judge().claimsNumPredict()))
+                       .defaultAdvisors(new JudgeLineEndingAdvisor());
+    }
+
+    /**
+     * Citation checks per answer, at most. A grounded answer here cites 2-3 pages on average (82 citations
+     * across the five verification runs of 9 cases each), so this bounds an outlier without truncating
+     * the usual answer.
+     */
+    private static final int MAX_CITATION_CHECKS = 6;
+
+    /** Grades every chunk of a turn's pool for the question - the source of live retrieval metrics. */
+    @Bean
+    public ChunkGradeEvaluator chunkGradeEvaluator(ObjectProvider<ChatClient.Builder> builders,
+                                                   EvalProperties properties) {
+        return new ChunkGradeEvaluator(judgeClientBuilder(builders, properties));
+    }
+
+    @Bean
+    public TaskClassifier taskClassifier(ObjectProvider<ChatClient.Builder> builders, EvalProperties properties) {
+        return new TaskClassifier(judgeClientBuilder(builders, properties));
+    }
+
+    @Bean
+    public CompletenessEvaluator completenessEvaluator(ObjectProvider<ChatClient.Builder> builders,
+                                                       EvalProperties properties) {
+        return new CompletenessEvaluator(judgeClientBuilder(builders, properties));
+    }
+
+    @Bean
+    public ClaimFaithfulnessEvaluator claimFaithfulnessEvaluator(ObjectProvider<ChatClient.Builder> builders,
+                                                                 EvalProperties properties) {
+        return new ClaimFaithfulnessEvaluator(listJudgeClientBuilder(builders, properties),
+                                              properties.judge().maxClaims());
+    }
+
+    @Bean
+    public CitationSupportEvaluator citationSupportEvaluator(ObjectProvider<ChatClient.Builder> builders,
+                                                             EvalProperties properties) {
+        return new CitationSupportEvaluator(judgeClientBuilder(builders, properties), MAX_CITATION_CHECKS);
+    }
+
     @Bean
     public GoldenDatasetLoader goldenDatasetLoader(ResourceLoader resourceLoader) {
         return new GoldenDatasetLoader(resourceLoader);
@@ -163,8 +218,13 @@ public class EvalConfig {
                 throw new IllegalStateException(
                         "app.eval.online.judge-sample-rate must be between 0.0 and 1.0, was " + rate);
             }
-            if (properties.online().maxConcurrentJudgements() < 1) {
-                throw new IllegalStateException("app.eval.online.max-concurrent-judgements must be at least 1");
+            double reviewRate = properties.online().reviewSampleRate();
+            if (reviewRate < 0.0 || reviewRate > 1.0) {
+                throw new IllegalStateException(
+                        "app.eval.online.review-sample-rate must be between 0.0 and 1.0, was " + reviewRate);
+            }
+            if (properties.judge().maxClaims() < 1) {
+                throw new IllegalStateException("app.eval.judge.max-claims must be at least 1");
             }
         }
     }

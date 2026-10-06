@@ -11,7 +11,8 @@ chunked, and stored as embeddings in a Postgres/pgvector store. A chat interface
 grounded in the content of the uploaded documents, with chat history kept in Redis. Answer quality is
 measured continuously on live traffic and on demand against a curated dataset. Three applications do
 this - `ragr-ingest`, `ragr-app` (chat) and `ragr-eval` - sharing one Postgres and talking through the
-vector store and a Kafka topic, never by calling each other, except the golden suite driving chat.
+vector store and two Kafka topics, never by calling each other, except the golden suite driving chat
+and ragr-eval reading chat's active-generations gauge so its judges wait for idle chat.
 
 ## Stack & versions
 
@@ -76,7 +77,8 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │   └── src/main/java/.../subhanmishra/
 │       ├── chunk     # ChunkMetadata - the metadata keys every stored chunk carries
 │       ├── citation  # Citation, CitationParser, CitationResolver, AnswerCitations
-│       ├── event     # ChatTurnCompleted, TurnOrigin - the Kafka contract between chat and eval
+│       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka contracts
+│       │             # between chat and eval
 │       └── exception # ApiExceptionHandler (abstract; each app's advice extends it),
 │                     # ResourceNotFoundException
 ├── ragr-app         # the chat service (port 8080, actuator 9095); publishes turns to Kafka
@@ -97,7 +99,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │       ├── logback-spring.xml        # console + Loki appenders
 │       │       └── docs/                     # spring-boot-reference.pdf, the golden corpus
 │       └── test                              # SpringAiApplicationTests, ChatTurnPublisherTest,
-│                                             # ChatControllerOriginTest
+│                                             # ChatController*Test, PooledQuestionAnswerAdvisorTest
 ├── ragr-ingest      # ingestion, its own app (port 8081, actuator 9097): upload, parse, chunk, index
 │   └── src
 │       ├── main
@@ -119,22 +121,30 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │       ├── logback-spring.xml
 │       │       └── db/migration/             # Flyway V1, public schema incl. vector_store
 │       └── test                              # IngestApplicationTests, parser tests
-├── ragr-eval        # evaluation, its own app: consumes turns, scores, judges, runs the golden suite
+├── ragr-eval        # evaluation, its own app: stores and scores turns, judges them while chat is
+│   │                # idle, records ratings and reviews, runs the golden suite
 │   └── src
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # EvalConfig, EvalProperties, ObservationConfig,
 │       │   │   │               # JudgeLineEndingAdvisor (LF judge prompts on every platform)
-│       │   │   ├── entity      # EvalRun, EvalCaseResult, EvalRunStatus
-│       │   │   ├── repository
-│       │   │   └── service     # OnlineEvalService (the Kafka listener), EvalScoringService,
+│       │   │   ├── controller  # TurnReviewController (PUT /eval/turns/{id}/review)
+│       │   │   ├── dto
+│       │   │   ├── entity      # EvalRun, EvalCaseResult, EvalRunStatus, EvalTurn, EvalTurnChunk
+│       │   │   ├── exception   # EvalExceptionHandler
+│       │   │   ├── repository  # EvalTurnRepository (plain SQL: the judge queue, verdicts, feedback)
+│       │   │   └── service     # OnlineEvalService (turn listener), TurnJudgeWorker (the queue),
+│       │   │       │           # TurnJudgeService (the judge stages), ChatIdleGate, FeedbackService,
+│       │   │       │           # TurnReviewService, EvalRetentionService, EvalScoringService,
 │       │   │       │           # EvalMetricsService, GoldenEvalService
-│       │   │       └── eval    # the score records, ContextPrecisionEvaluator, the golden dataset model
+│       │   │       └── eval    # the judges, RetrievalRanking, TurnVerdicts, TaskType, score records,
+│       │   │                   # the golden dataset model
 │       │   └── resources
-│       │       ├── application.yaml          # all of it; no profiles. Port 9096, actuator only
+│       │       ├── application.yaml          # all of it; no profiles. Port 9096
 │       │       ├── eval/golden-dataset.yaml  # curated regression cases
 │       │       └── db/migration/             # Flyway V1, eval schema, own history table
-│       └── test                              # EvalApplicationTests, scoring tests,
+│       └── test                              # EvalApplicationTests, scoring, judge, worker and
+│                                             # idle-gate tests,
 │                                             # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
 ├── docker/          # compose service config (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime volume data, not source
@@ -155,13 +165,16 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 `DocumentIngestionService` (enrich + write to pgvector, one virtual thread per batch) → status
 `INDEXED`/`FAILED`, with every transition recorded by `DocumentHistoryService`.
 
-**Chat** (`ragr-app`, port 8080): `ChatController` (base `/ai`) → `ChatService` → `ChatClient` → `QuestionAnswerAdvisor`
-retrieves from pgvector → Ollama generates → history to Redis → `ChatTurnPublisher` sends the turn to
-Kafka (`rag.chat.turn.completed`) without holding up the response.
+**Chat** (`ragr-app`, port 8080): `ChatController` (base `/ai`) → `ChatService` → `ChatClient` →
+`PooledQuestionAnswerAdvisor` retrieves a candidate pool from pgvector, of which the top-k reach the
+prompt → Ollama generates → history to Redis → `ChatTurnPublisher` sends the turn, with the whole pool,
+to Kafka (`rag.chat.turn.completed`) without holding up the response. Ratings go to `rag.chat.feedback`.
 
 **Evaluation** (`ragr-eval`, a separate process): `OnlineEvalService` consumes each turn → deterministic
-scores on every turn, LLM judges on every grounded turn (a configurable sample) → Micrometer, scraped by Prometheus from port 9096. The
-golden suite drives ragr-app's real `/ai/generate` and reads its own turns back off the same topic.
+scores, and the turn with its pool stored in `eval_turn` as PENDING → `TurnJudgeWorker` judges queued
+turns one at a time, each judge call held by `ChatIdleGate` until ragr-app has no generation running →
+verdicts in Postgres, rates in Micrometer (port 9096). The golden suite drives ragr-app's real
+`/ai/generate`, reads its own turns back off the same topic, and judges them with the same stages.
 
 Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake
 it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through
@@ -193,7 +206,7 @@ these.
 | `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics, the turn event | `ChatService`, `ChatController`, `SpringAiConfig`, `citation/**`, `event/**`, `ChatTurnPublisher` |
 | `evaluation.md` | where eval runs (ragr-eval, Kafka) and why, online vs golden split, judge selection, metric registration, citation fabrication and resolution | `ragr-eval/**`, `service/eval/**`, `Eval*`, `EvalSuiteIT` |
 | `observability.md` | compose stack, tracing/logging wiring, the four dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
-| `api-and-errors.md` | `ApiExceptionHandler` and its two subclasses, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
+| `api-and-errors.md` | `ApiExceptionHandler` and its three subclasses, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
 
 These documents are deliberately thin. The reasoning behind this codebase lives in its comments —
 roughly a third of `src/main/java` is comment text, and classes like `EvalConfig`,

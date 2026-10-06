@@ -80,6 +80,24 @@ public final class CitationResolver {
     private static final Pattern SECTION_HEADING = Pattern.compile(
             "(?m)^[ \\t]*(\\d{1,2}(?:\\.\\d{1,2}){1,2})\\.[ \\t]+\\p{Lu}");
 
+    /**
+     * Every numbered heading in a text, in order, each as its whole line - {@code "9.2.6. Set the Active
+     * Spring Profiles"}. Matched by the same pattern resolution uses, so anything named here is something
+     * a section citation could resolve to. Empty for null or headingless text.
+     */
+    public static List<String> sectionHeadings(@Nullable String text) {
+        if (text == null || text.isEmpty()) {
+            return List.of();
+        }
+        List<String> headings = new ArrayList<>();
+        Matcher matcher = SECTION_HEADING.matcher(text);
+        while (matcher.find()) {
+            int lineEnd = text.indexOf('\n', matcher.start(1));
+            headings.add(text.substring(matcher.start(1), lineEnd < 0 ? text.length() : lineEnd).strip());
+        }
+        return List.copyOf(headings);
+    }
+
     /** Marks a section number that resolved to more than one retrieved page, so it must be left alone. */
     private static final Citation AMBIGUOUS = new Citation("", null);
 

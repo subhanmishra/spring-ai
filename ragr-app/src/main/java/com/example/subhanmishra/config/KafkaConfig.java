@@ -30,4 +30,15 @@ public class KafkaConfig {
                            .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(chatTurns.retention().toMillis()))
                            .build();
     }
+
+    /** Users' ratings of answers. One partition for the same reasons; the volume is a fraction of turns. */
+    @Bean
+    public NewTopic feedbackTopic(EventsProperties properties) {
+        EventsProperties.Feedback feedback = properties.feedback();
+        return TopicBuilder.name(feedback.topic())
+                           .partitions(1)
+                           .replicas(1)
+                           .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(feedback.retention().toMillis()))
+                           .build();
+    }
 }

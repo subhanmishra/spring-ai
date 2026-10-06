@@ -16,7 +16,7 @@ applications, each running in its own process; the fourth is a library they shar
 |---|---|---|---|---|
 | `ragr-ingest` | Upload, parse, chunk, embed and index documents | `8081`, actuator `9097` | the `public` schema, `vector_store` included | [ragr-ingest/README.md](ragr-ingest/README.md) |
 | `ragr-app` | Chat: retrieve, generate, cite, remember | `8080`, actuator `9095` | `compose.yaml` - it starts the containers | [ragr-app/README.md](ragr-app/README.md) |
-| `ragr-eval` | Score every chat turn; run the golden suite | actuator `9096` only | the `eval` schema | [ragr-eval/README.md](ragr-eval/README.md) |
+| `ragr-eval` | Store, score and judge every chat turn; record ratings and reviews; run the golden suite | `9096` (actuator and human review) | the `eval` schema | [ragr-eval/README.md](ragr-eval/README.md) |
 | `ragr-shared` | The contracts between the applications | - | - | [ragr-shared/README.md](ragr-shared/README.md) |
 
 ## Architecture
@@ -34,9 +34,9 @@ flowchart TB
 
     subgraph data [Data]
         direction LR
-        pg[(Postgres + pgvector<br/>public: documents, vector_store<br/>eval: runs, case results)]
+        pg[(Postgres + pgvector<br/>public: documents, vector_store<br/>eval: runs, case results,<br/>turns, pools, feedback)]
         redis[(Redis<br/>chat memory)]
-        kafka{{Kafka<br/>rag.chat.turn.completed}}
+        kafka{{Kafka<br/>rag.chat.turn.completed<br/>rag.chat.feedback}}
     end
 
     ollama[Ollama<br/>nomic-embed-text, gemma4:e2b]
@@ -47,18 +47,20 @@ flowchart TB
     ingest -- write chunks --> pg
     chat -- similarity search --> pg
     chat -- conversation --> redis
-    chat -- publish turn --> kafka
-    kafka -- consume turn --> eval
-    eval -- golden runs --> pg
-    eval -. golden suite asks .-> chat
+    chat -- publish turn, rating --> kafka
+    kafka -- consume turn, rating --> eval
+    eval -- turns, verdicts, golden runs --> pg
+    eval -. golden suite asks,<br/>idle gate reads .-> chat
     apps -- embed, generate, judge --> ollama
     apps -. metrics, logs, traces .-> obs
 ```
 
 ### The applications never call each other
 
-With one exception - the golden suite driving chat's real endpoint - the three applications share no
-HTTP calls. Each is coupled to the others only through data, by exactly two contracts:
+With two read-only exceptions - the golden suite driving chat's real endpoint, and ragr-eval reading
+chat's `rag.chat.generations.active` gauge so its judges never run while a user is waiting on the same
+model - the three applications share no HTTP calls. Each is coupled to the others only through data, by
+these contracts:
 
 - **`vector_store`, from ingest to chat.** ragr-ingest writes chunks, ragr-app searches them. Every
   chunk's stored text begins with a `[filename, p. N]` citation line, which is what lets the model
@@ -68,11 +70,14 @@ HTTP calls. Each is coupled to the others only through data, by exactly two cont
   loudly at query time; a different model with the same dimension fails silently, returning poor
   matches with no error.
 - **`ChatTurnCompleted` on Kafka, from chat to eval.** Each completed turn is published carrying the
-  question, the resolved answer and the full text, metadata and scores of every chunk retrieved. So
-  evaluation never queries the vector store and always scores what the model actually saw.
+  question, the resolved answer, the full text, metadata and scores of the chunks in the prompt and of
+  the rest of the candidate pool, timings and token usage. So evaluation never queries the vector store,
+  always scores what the model actually saw, and can measure recall against what retrieval left out.
+- **`ChatFeedbackSubmitted` on Kafka, from chat to eval.** A user's thumbs up or down on a turn,
+  by the `turnId` the answer came back with.
 
 Two consequences follow. Each application can be stopped without breaking the others: with ragr-eval
-down, chat is unaffected and turns are simply not scored; with ragr-ingest down, chat still answers
+down, chat is unaffected and turns wait on the topic until it returns; with ragr-ingest down, chat still answers
 from what is already indexed. And a change on one side of a contract is a change to both.
 
 ### Flows across the applications
@@ -113,7 +118,8 @@ sequenceDiagram
     C-->>U: answer, sources, citations
 ```
 
-**A turn, from chat to dashboard.** Scoring happens seconds after the answer, in another process.
+**A turn, from chat to dashboard.** Deterministic scoring happens seconds after the answer, in another
+process; judging is queued and runs only while no chat generation is in flight.
 
 ```mermaid
 sequenceDiagram
@@ -125,9 +131,10 @@ sequenceDiagram
 
     C-)K: ChatTurnCompleted
     K->>E: consume
-    E->>E: deterministic scores, every turn
-    opt every grounded turn, if the judge is free
-        E->>O: relevancy and groundedness judges
+    E->>E: deterministic scores, store the turn and its pool, queue it
+    loop each judge call, oldest queued turn first
+        E->>C: rag.chat.generations.active - wait while above 0
+        E->>O: task, chunk grades, relevancy, groundedness,<br/>claims, citation support, completeness
     end
     M->>E: scrape /actuator/prometheus
 ```
@@ -315,7 +322,8 @@ Serial saved about 290 MB at peak between them. Their pom comments carry the G1 
 
 OpenAPI docs are served by each application with an API once it is running:
 `http://localhost:8080/swagger-ui.html` for chat and diagnostics, `http://localhost:8081/swagger-ui.html`
-for documents. ragr-eval has no API.
+for documents. ragr-eval's one endpoint, human review of evaluated turns, is in
+[ragr-eval/README.md](ragr-eval/README.md#human-review).
 
 ## Infrastructure (`compose.yaml`)
 

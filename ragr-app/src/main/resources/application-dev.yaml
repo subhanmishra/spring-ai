@@ -255,6 +255,12 @@ app:
     # Retrieval only. What is chunked and stored is configured in ragr-ingest under app.ingestion.
     top-k: 5
     similarity-threshold: 0.6
+    # One vector query fetches pool-size candidates above pool-floor; only the leading top-k at or above
+    # similarity-threshold reach the prompt, and the rest travel to ragr-eval, which measures recall
+    # against them. LIMIT 10 costs the same as LIMIT 5 on this corpus (about 0.8 ms warm, measured
+    # 6 Oct 2026); LIMIT 20 about 3.8 ms. See PooledQuestionAnswerAdvisor.
+    pool-size: 10
+    pool-floor: 0.0
   ai: # New section for Spring AI properties
     max-chat-messages: 10
 
@@ -265,4 +271,7 @@ app:
       # Evaluation normally keeps up within seconds; the rest of the window is for replaying past
       # traffic through a new judge or metric. At a few KB per turn, three days of dev traffic is
       # nothing on disk.
+      retention: 3d
+    feedback:
+      topic: rag.chat.feedback
       retention: 3d
