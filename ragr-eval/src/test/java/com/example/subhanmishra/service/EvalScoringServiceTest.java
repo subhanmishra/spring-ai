@@ -3,15 +3,18 @@ package com.example.subhanmishra.service;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
 import com.example.subhanmishra.service.eval.GoldenCase;
+import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
+import org.springframework.core.io.DefaultResourceLoader;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 class EvalScoringServiceTest {
@@ -28,7 +31,7 @@ class EvalScoringServiceTest {
     }
 
     private static GoldenCase caseOf(String id, String query, List<Integer> pages, List<String> mustContain) {
-        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null, null);
+        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null, null, null);
     }
 
     @Nested
@@ -236,7 +239,7 @@ class EvalScoringServiceTest {
                                           chunk("manual.pdf", 158, "spring.datasource.*", 0.70),
                                           chunk("manual.pdf", 999, "unrelated", 0.65));
             GoldenCase goldenCase = new GoldenCase("datasource", "q", null, "manual.pdf", List.of(158), List.of(),
-                                                   List.of(), true, false, null, null, List.of(400));
+                                                   List.of(), true, false, null, null, List.of(400), null);
 
             EvalScoringService.ReferenceScores reference = service.referenceScores(pool, 2, goldenCase);
 
@@ -256,7 +259,7 @@ class EvalScoringServiceTest {
             // Guards the system prompt's General Knowledge capability. This is the case that breaks if
             // anyone restores QuestionAnswerAdvisor's stock "not prior knowledge" closing line.
             GoldenCase goldenCase = new GoldenCase("general", "what is a queue", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null);
 
             EvalScores scores = service.score(
                     "I don't have enough information to answer that.", List.of(), goldenCase);
@@ -281,11 +284,40 @@ class EvalScoringServiceTest {
         @DisplayName("an out-of-corpus case is not failed for retrieving nothing")
         void outOfCorpusCaseToleratesNoRetrieval() {
             GoldenCase goldenCase = new GoldenCase("out-of-corpus", "Acme revenue 2019", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null);
 
             EvalScores scores = service.score("I don't have data on Acme Corporation.", List.of(), goldenCase);
 
             assertThat(scores.expectations().groundingMissing()).isFalse();
+        }
+
+        @Test
+        @DisplayName("a forbidden pattern fails the wrong answer but not a right one sharing its words")
+        void forbiddenPatternIsNarrowerThanAPhrase() {
+            // The port-in-use case as the dataset declares it, against answers the model gave on 6 Oct 2026.
+            GoldenCase goldenCase = new GoldenDatasetLoader(new DefaultResourceLoader())
+                    .load("classpath:eval/golden-dataset.yaml").cases().stream()
+                    .filter(c -> c.id().equals("port-in-use-startup-failure"))
+                    .findFirst().orElseThrow();
+            String wrong = "* **Change the HTTP Port:** In a standalone application, you can set the external "
+                           + "property `management.server.port` to make the application listen on a different port.";
+            String aside = "You can change the HTTP port by setting `server.port`. For example, to change the "
+                           + "management server port, you can set `management.server.port=8081`.";
+            String asideALineLater = "If you are configuring the management server port, you can set it using "
+                                     + "properties or YAML:\n* In properties: `management.server.port=8081`";
+
+            assertThat(service.score(wrong, List.of(), goldenCase).failureReasons())
+                    .contains("contains forbidden text: [management.server.port]");
+            assertThat(service.score(aside, List.of(), goldenCase).answer().forbiddenFound()).isEmpty();
+            assertThat(service.score(asideALineLater, List.of(), goldenCase).answer().forbiddenFound()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a malformed pattern fails when the dataset loads")
+        void malformedPatternFailsAtLoad() {
+            assertThatThrownBy(() -> new GoldenCase("bad", "q", null, null, null, null, null, null, null, null, null,
+                                                    null, List.of("(unclosed")))
+                    .isInstanceOf(java.util.regex.PatternSyntaxException.class);
         }
 
         @Test

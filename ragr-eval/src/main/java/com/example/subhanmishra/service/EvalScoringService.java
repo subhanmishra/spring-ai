@@ -21,6 +21,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -199,6 +200,13 @@ public class EvalScoringService {
             for (String phrase : goldenCase.mustNotContain()) {
                 if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
                     forbidden.add(phrase);
+                }
+            }
+            // Reported by the text that matched, not the pattern, so the failure reads like a phrase's.
+            for (Pattern pattern : goldenCase.forbiddenPatterns()) {
+                Matcher matcher = pattern.matcher(answer);
+                if (matcher.find()) {
+                    forbidden.add(matcher.group());
                 }
             }
         }

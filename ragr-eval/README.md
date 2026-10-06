@@ -107,7 +107,9 @@ A fixed set of 11 questions (`src/main/resources/eval/golden-dataset.yaml`), eac
 to hold its answer, verified by reading the retrieved chunks rather than guessed, a task category, and -
 for a case listing several pages - whether the answer needs all of them or any one
 (`expectedPagesMode`). `relevantPages` adds the other pages whose chunks state part of the answer,
-found by reading a whole candidate pool by hand; only the judge's calibration reads them.
+found by reading a whole candidate pool by hand; only the judge's calibration reads them. Answers are
+checked with `mustContain` and `mustNotContain` (phrases, case-insensitive) and `mustNotMatch`
+(regular expressions), the last for a wrong answer that shares its words with a right one.
 
 On top of the live metrics it adds the ones that need known-correct pages: page-level Recall@K, hit rate,
 MRR, and precision and NDCG with expected-page chunks as the relevant ones. A judged run also stores

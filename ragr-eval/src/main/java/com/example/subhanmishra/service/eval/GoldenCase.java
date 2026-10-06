@@ -3,6 +3,7 @@ package com.example.subhanmishra.service.eval;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -43,6 +44,10 @@ import java.util.stream.Stream;
  *                       Only the judge's calibration reads them: recall, hit rate and MRR keep asking
  *                       whether the pages known to hold the answer were found, and a page added here
  *                       must not lower the bar for that.
+ * @param mustNotMatch   regular expressions the answer must not match, case-insensitively - for a wrong
+ *                       answer that shares its words with a right one, where {@code mustNotContain} would
+ *                       fail both. Compiled when the dataset loads, so a malformed pattern fails the run
+ *                       before any question is asked.
  */
 public record GoldenCase(String id,
                          String query,
@@ -55,7 +60,8 @@ public record GoldenCase(String id,
                          Boolean expectRefusal,
                          ExpectedPagesMode expectedPagesMode,
                          @Nullable TaskType category,
-                         List<Integer> relevantPages) {
+                         List<Integer> relevantPages,
+                         List<String> mustNotMatch) {
 
     /** Normalises the optional collections to empty and the optional flags to their defaults. */
     public GoldenCase {
@@ -66,6 +72,13 @@ public record GoldenCase(String id,
         expectRefusal = expectRefusal != null && expectRefusal;
         expectedPagesMode = expectedPagesMode != null ? expectedPagesMode : ExpectedPagesMode.ALL;
         relevantPages = relevantPages != null ? List.copyOf(relevantPages) : List.of();
+        mustNotMatch = mustNotMatch != null ? List.copyOf(mustNotMatch) : List.of();
+        mustNotMatch.forEach(Pattern::compile);
+    }
+
+    /** {@link #mustNotMatch}, compiled. */
+    public List<Pattern> forbiddenPatterns() {
+        return mustNotMatch.stream().map(regex -> Pattern.compile(regex, Pattern.CASE_INSENSITIVE)).toList();
     }
 
     /** Whether this case asserts anything about retrieval. Recall is not scored when it does not. */

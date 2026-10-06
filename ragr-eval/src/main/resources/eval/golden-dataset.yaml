@@ -164,8 +164,13 @@ cases:
     # No mustContain: p. 64 names no property, and "server.port" is a substring of the wrong answer.
     # The wrong answer is what is asserted against: on 6 Oct 2026 the model told users to set the
     # actuator's management.server.port to move the application, in every one of four answers.
-    mustNotContain:
-      - management.server.port
+    # A pattern, not mustNotContain, because a right answer can name the property too, as an aside
+    # about the management port - which failed this case once in run 8 after the fixes. So the property
+    # fails unless "management port" or "management server port" comes within 120 characters before it.
+    # Checked against the 15 answers to this question that named it on 6 Oct 2026: all 12 that offered
+    # it as the application's port fail, all 3 labelled asides pass.
+    mustNotMatch:
+      - '(?<!\bmanagement (?:server )?port\b[\s\S]{0,120})management\.server\.port'
 
   - id: autoconfig-not-applied
     query: Auto-configuration is not doing what I expect. How can I find out why a particular auto-configuration was or was not applied?
