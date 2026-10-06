@@ -19,6 +19,23 @@ import org.springframework.ai.document.Document;
  * search chose it for that - and a YES/NO judge given only topical closeness answers YES. Grade 1 gives
  * "on topic but does not answer" somewhere to go, and only grade 2 counts as relevant.
  *
+ * <p><b>The judge is asked on a four-point scale and its answer folded onto three.</b> Asked 0/1/2 with
+ * "2 = it contains the information an answer needs", this model grades nearly every on-topic chunk 2.
+ * Measured 6 Oct 2026 over the 90 pool chunks of a judged golden run, against grades assigned by
+ * reading each chunk in full: precision 0.56 - 18 of 41 chunks it called relevant were not - and recall
+ * 1.00. Tightening the wording of the same three grades did not move it (0.57), nor did a
+ * "could someone answer from only this passage" phrasing (0.57, and recall fell to 0.87). Asking it to
+ * name the fact sought before grading swung the other way: precision 0.93, recall 0.57, because it
+ * stopped crediting a passage that answers one half of a two-part question. Separating "the whole
+ * answer" (3) from "part of the answer" (2) gave it a place for both: precision 0.76, recall 0.96, with
+ * most of the remaining disagreements on chunks that were borderline to grade by hand too. Both 3 and 2
+ * are stored as 2, so {@link RetrievalRanking} and the stored grades keep their meaning. The longer
+ * prompt costs nothing measurable - 0.61 s a chunk against 0.64 s, back to back.
+ *
+ * <p>The prompt carries no examples. Any taken from the corpus would come from the golden cases, the
+ * only text graded by hand, and would make the judge's agreement there overstate its agreement on live
+ * traffic.
+ *
  * <p>One call per chunk, about 1-3.5 s each on this host (measured 6 Oct 2026: a 124-token prompt in
  * 1.0 s, a 506-token one in 3.5 s; prompt evaluation runs at ~150 tokens/s and the one-digit reply costs
  * 0.08 s). Per chunk rather than one listwise call, because each call is then short enough that a user
@@ -27,7 +44,8 @@ import org.springframework.ai.document.Document;
 public class ChunkGradeEvaluator {
 
     private static final String PROMPT = """
-            You are grading a passage that a search returned for a question.
+            You are grading a passage that a search returned for a question. The search finds passages on the
+            same topic as the question, so most passages it returns are related without answering it.
 
             Question:
             {question}
@@ -35,11 +53,13 @@ public class ChunkGradeEvaluator {
             Passage:
             {passage}
 
-            How useful is this passage for answering the question?
-            2 = it contains the information an answer needs
-            1 = it is on the same topic but does not answer the question
-            0 = it is not useful
-            Reply with exactly one digit: 0, 1 or 2.""";
+            Grade the passage:
+            3 = it states the whole answer.
+            2 = it states part of the answer - for example one of the things a two-part question asks.
+            1 = it is about the same feature, property or subject, but states no part of the answer.
+            0 = it is about something else.
+
+            Reply on one line: "Grade: " and one digit.""";
 
     private final ChatClient chatClient;
 
@@ -47,7 +67,7 @@ public class ChunkGradeEvaluator {
         this.chatClient = chatClientBuilder.build();
     }
 
-    /** The chunk's grade, or null when the judge's reply was not one of the three digits. */
+    /** The chunk's grade, 0-2, or null when the judge's reply was not one of the four digits. */
     public @Nullable Integer grade(String question, Document chunk) {
         // Template parameters, not concatenation: the corpus is full of ${...} property placeholders, and a
         // substituted value is not re-rendered whereas prompt text is.
@@ -57,6 +77,12 @@ public class ChunkGradeEvaluator {
                                                       .param("passage", JudgeText.passage(chunk)))
                                     .call()
                                     .content();
-        return JudgeText.digit(response, 0, 2);
+        return gradeOf(response);
+    }
+
+    /** The judge's 0-3 reply folded onto the stored 0-2 scale: whole and partial answers are both relevant. */
+    static @Nullable Integer gradeOf(@Nullable String response) {
+        Integer grade = JudgeText.digit(response, 0, 3);
+        return grade == null ? null : Math.min(grade, RetrievalRanking.RELEVANT);
     }
 }

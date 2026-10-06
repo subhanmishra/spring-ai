@@ -26,6 +26,13 @@ description: >-
   needs every one, ANY when each answers on its own. Like the pages themselves, it is decided by reading
   the chunk text.
 
+  relevantPages lists the further pages whose chunks in the candidate pool state part of the answer -
+  found by reading every chunk of the pool of a judged run in full and grading it by hand. They exist to
+  calibrate the chunk-grading judge: against expectedPages alone, the judge's correct calls on these
+  pages counted as disagreements. Recall, hit rate and MRR ignore them. They are page-level, so a page
+  listed here also makes its other chunks "relevant", and they describe one pool: a retrieval change
+  that brings a new page into the pool leaves it unlisted until someone reads it.
+
 cases:
 
   - id: actuator-http-exposure
@@ -40,6 +47,9 @@ cases:
     # 278 continues the endpoint table. Either page answers, so recall does not require both.
     expectedPagesMode: ANY
     category: CONCEPTUAL
+    # Verified 6 Oct 2026 by reading the pool: p. 299 opens section 5.3, which states the /actuator
+    # prefix again; p. 281 shows the management.endpoints.web.exposure.include setting.
+    relevantPages: [281, 299]
     mustContain:
       - actuator
 
@@ -55,6 +65,9 @@ cases:
     # Both halves are needed - see the description.
     expectedPagesMode: ALL
     category: CONFIG_LOOKUP
+    # Verified 6 Oct 2026 by reading the pool: p. 306 lists TRACE..OFF for the loggers endpoint; p. 582
+    # describes the logging.level property's keys and values in the metadata appendix.
+    relevantPages: [306, 582]
     mustContain:
       - logging.level
 
@@ -67,6 +80,9 @@ cases:
     expectedFile: spring-boot-reference.pdf
     expectedPages: [107]
     category: HOW_TO
+    # Verified 6 Oct 2026 by reading the pool: p. 372 is the "Set the Active Spring Profiles" how-to;
+    # p. 108 shows --spring.profiles.active and setAdditionalProfiles.
+    relevantPages: [108, 372]
     mustContain:
       - spring.profiles.active
 
@@ -77,6 +93,8 @@ cases:
     expectedFile: spring-boot-reference.pdf
     expectedPages: [32]
     category: CONCEPTUAL
+    # Verified 6 Oct 2026 by reading the pool: p. 35 says the parent POM gives the project its run goal.
+    relevantPages: [35]
     mustContain:
       - spring-boot-starter-parent
 
@@ -89,6 +107,10 @@ cases:
     expectedFile: spring-boot-reference.pdf
     expectedPages: [158]
     category: HOW_TO
+    # Verified 6 Oct 2026 by reading the pool: p. 159 continues the pool settings; pp. 400, 401, 403 and
+    # 404 are the custom-DataSource how-to, which says Boot reuses your bean and auto-configuration backs
+    # off. pp. 402 and 405 were read and left out: Hikari's jdbcUrl caveat and a second DataSource.
+    relevantPages: [159, 400, 401, 403, 404]
     mustContain:
       - spring.datasource
 
@@ -103,6 +125,10 @@ cases:
     # separate route to an answer, not two halves of one, so either counts as full recall.
     expectedPagesMode: ANY
     category: HOW_TO
+    # Verified 6 Oct 2026 by reading the pool: p. 36 adds the plugin and runs mvn package - the most
+    # direct answer in the pool. pp. 426, 428, 359 and 604 were read and left out: classifiers, a
+    # non-executable jar, an overview and the jar format appendix mention the plugin without the steps.
+    relevantPages: [36]
     mustContain:
       - spring-boot-maven-plugin
 
@@ -116,6 +142,9 @@ cases:
     expectedFile: spring-boot-reference.pdf
     expectedPages: [419]
     category: HOW_TO
+    # Verified 6 Oct 2026 by reading the pool: p. 300 is "Customizing the Management Server Port"; p. 294
+    # names management.server.port as how the actuator gets a separate port.
+    relevantPages: [294, 300]
     mustContain:
       - management.server
 

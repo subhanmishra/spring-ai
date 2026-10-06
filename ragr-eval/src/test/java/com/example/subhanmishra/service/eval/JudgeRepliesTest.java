@@ -33,6 +33,16 @@ class JudgeRepliesTest {
             assertThat(JudgeText.digit("3", 0, 2)).isNull();
             assertThat(JudgeText.digit("two", 0, 2)).isNull();
         }
+
+        @Test
+        @DisplayName("a chunk graded as the whole answer or part of it is stored as relevant")
+        void chunkGradeFoldsWholeAndPartialAnswers() {
+            assertThat(ChunkGradeEvaluator.gradeOf("Grade: 3")).isEqualTo(RetrievalRanking.RELEVANT);
+            assertThat(ChunkGradeEvaluator.gradeOf("Grade: 2")).isEqualTo(RetrievalRanking.RELEVANT);
+            assertThat(ChunkGradeEvaluator.gradeOf("Grade: 1")).isEqualTo(1);
+            assertThat(ChunkGradeEvaluator.gradeOf("Grade: 4")).isNull();
+            assertThat(ChunkGradeEvaluator.gradeOf("relevant")).isNull();
+        }
     }
 
     @Nested

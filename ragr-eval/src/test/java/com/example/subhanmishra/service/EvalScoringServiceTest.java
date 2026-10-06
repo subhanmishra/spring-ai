@@ -28,7 +28,7 @@ class EvalScoringServiceTest {
     }
 
     private static GoldenCase caseOf(String id, String query, List<Integer> pages, List<String> mustContain) {
-        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null);
+        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null, null);
     }
 
     @Nested
@@ -228,6 +228,22 @@ class EvalScoringServiceTest {
             assertThat(goldenCase.scoresRecall()).isFalse();
             assertThat(service.firstRelevantRank(retrieved, goldenCase)).isZero();
         }
+
+        @Test
+        @DisplayName("relevant pages widen the judge's reference but not recall or rank")
+        void relevantPagesCalibrateOnly() {
+            List<Document> pool = List.of(chunk("manual.pdf", 400, "own DataSource bean", 0.72),
+                                          chunk("manual.pdf", 158, "spring.datasource.*", 0.70),
+                                          chunk("manual.pdf", 999, "unrelated", 0.65));
+            GoldenCase goldenCase = new GoldenCase("datasource", "q", null, "manual.pdf", List.of(158), List.of(),
+                                                   List.of(), true, false, null, null, List.of(400));
+
+            EvalScoringService.ReferenceScores reference = service.referenceScores(pool, 2, goldenCase);
+
+            assertThat(reference.relevance()).isEqualTo("1,1,0");
+            assertThat(reference.ranking().reciprocalRank()).isEqualTo(0.5);
+            assertThat(reference.pageRecall()).isEqualTo(1.0);
+        }
     }
 
     @Nested
@@ -240,7 +256,7 @@ class EvalScoringServiceTest {
             // Guards the system prompt's General Knowledge capability. This is the case that breaks if
             // anyone restores QuestionAnswerAdvisor's stock "not prior knowledge" closing line.
             GoldenCase goldenCase = new GoldenCase("general", "what is a queue", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null);
 
             EvalScores scores = service.score(
                     "I don't have enough information to answer that.", List.of(), goldenCase);
@@ -265,7 +281,7 @@ class EvalScoringServiceTest {
         @DisplayName("an out-of-corpus case is not failed for retrieving nothing")
         void outOfCorpusCaseToleratesNoRetrieval() {
             GoldenCase goldenCase = new GoldenCase("out-of-corpus", "Acme revenue 2019", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null);
 
             EvalScores scores = service.score("I don't have data on Acme Corporation.", List.of(), goldenCase);
 

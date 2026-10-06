@@ -305,6 +305,10 @@ public class EvalScoringService {
      * ({@code expectedPagesMode: ANY}), 1.0 as soon as one is. Chunk-level pooled recall from the ranking
      * answers a different question - whether the threshold kept what the pool found.
      *
+     * <p>The stored relevance vector is wider than the ranking: a chunk on any of the case's
+     * {@link GoldenCase#referencePages() reference pages} counts, so that comparing it with the judge's
+     * grades measures the judge rather than how narrowly {@code expectedPages} was drawn.
+     *
      * @param pool      the candidate pool in rank order
      * @param inContext how many leading pool chunks were in the prompt
      * @return null when the case declares no expected pages
@@ -313,7 +317,7 @@ public class EvalScoringService {
         if (!goldenCase.scoresRecall()) {
             return null;
         }
-        List<Boolean> relevance = relevance(pool, goldenCase);
+        List<Boolean> relevance = relevance(pool, goldenCase, goldenCase.expectedPages());
         RetrievalRanking ranking = RetrievalRanking.of(
                 relevance.stream().map(relevant -> relevant ? RetrievalRanking.RELEVANT : 0).toList(), inContext);
 
@@ -327,25 +331,32 @@ public class EvalScoringService {
         double pageRecall = goldenCase.expectedPagesMode() == GoldenCase.ExpectedPagesMode.ANY
                 ? (found.isEmpty() ? 0.0 : 1.0)
                 : (double) found.size() / new HashSet<>(goldenCase.expectedPages()).size();
-        String vector = relevance.stream().map(relevant -> relevant ? "1" : "0").collect(Collectors.joining(","));
+        String vector = relevance(pool, goldenCase, goldenCase.referencePages()).stream()
+                                                                             .map(relevant -> relevant ? "1" : "0")
+                                                                             .collect(Collectors.joining(","));
         return new ReferenceScores(ranking, pageRecall, vector);
     }
 
     /**
      * @param ranking    rank metrics with expected-page chunks as the relevant ones
      * @param pageRecall expected pages found in the prompt, honouring the case's mode
-     * @param relevance  the pool's expected-page vector, "1,0,0,0,1,0,0,1,0,0"
+     * @param relevance  the pool's reference-page vector, "1,0,0,0,1,0,0,1,0,0" - what the judge's
+     *                   chunk grades are calibrated against
      */
     public record ReferenceScores(RetrievalRanking ranking, double pageRecall, String relevance) {
     }
 
     /**
-     * Per-rank relevance against the case's expected pages, in rank order.
+     * Per-rank relevance against the given pages of the case, in rank order.
      *
      * <p>The single definition of "relevant" on the reference-based path. Rank and precision both read
      * it, and having had two copies of the page-matching rule is how they would drift apart.
      */
     private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
+        return relevance(retrieved, goldenCase, goldenCase.expectedPages());
+    }
+
+    private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase, List<Integer> pages) {
         if (retrieved == null || !goldenCase.scoresRecall()) {
             return List.of();
         }
@@ -357,7 +368,7 @@ public class EvalScoringService {
                         || goldenCase.expectedFile().equalsIgnoreCase(header.fileName()));
             relevance.add(fileMatches
                                   && header.pageNumber() != null
-                                  && goldenCase.expectedPages().contains(header.pageNumber()));
+                                  && pages.contains(header.pageNumber()));
         }
         return relevance;
     }

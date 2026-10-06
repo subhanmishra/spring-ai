@@ -3,6 +3,7 @@ package com.example.subhanmishra.service.eval;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * One case in the curated regression dataset.
@@ -37,6 +38,11 @@ import java.util.List;
  *                       question on its own, so retrieving one is full recall. Hit rate and MRR ignore it.
  * @param category       the {@link TaskType} this case exercises, so golden results can be broken down the
  *                       way live ones are; optional
+ * @param relevantPages  further pages whose retrieved chunks state part of the answer, beyond the
+ *                       {@code expectedPages} that hold it. Verified by reading chunk text, like those.
+ *                       Only the judge's calibration reads them: recall, hit rate and MRR keep asking
+ *                       whether the pages known to hold the answer were found, and a page added here
+ *                       must not lower the bar for that.
  */
 public record GoldenCase(String id,
                          String query,
@@ -48,7 +54,8 @@ public record GoldenCase(String id,
                          Boolean expectGrounded,
                          Boolean expectRefusal,
                          ExpectedPagesMode expectedPagesMode,
-                         @Nullable TaskType category) {
+                         @Nullable TaskType category,
+                         List<Integer> relevantPages) {
 
     /** Normalises the optional collections to empty and the optional flags to their defaults. */
     public GoldenCase {
@@ -58,11 +65,17 @@ public record GoldenCase(String id,
         expectGrounded = expectGrounded == null || expectGrounded;
         expectRefusal = expectRefusal != null && expectRefusal;
         expectedPagesMode = expectedPagesMode != null ? expectedPagesMode : ExpectedPagesMode.ALL;
+        relevantPages = relevantPages != null ? List.copyOf(relevantPages) : List.of();
     }
 
     /** Whether this case asserts anything about retrieval. Recall is not scored when it does not. */
     public boolean scoresRecall() {
         return !expectedPages.isEmpty();
+    }
+
+    /** Every page a chunk relevant to the question may come from: the expected pages and the relevant ones. */
+    public List<Integer> referencePages() {
+        return Stream.concat(expectedPages.stream(), relevantPages.stream()).distinct().toList();
     }
 
     /** Whether an answer needs every expected page, or any one of them. */

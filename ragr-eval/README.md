@@ -23,10 +23,11 @@ traffic:
 
 **Live retrieval metrics come from a candidate pool.** ragr-app's one vector query fetches 10
 candidates; the prompt gets the top-k above the similarity threshold, as it always has, and the event
-carries the rest. The judge grades every candidate 0/1/2 for the question, and a chunk is relevant at 2.
+carries the rest. The judge grades every candidate for the question - the whole answer, part of it, on
+the topic only, or unrelated - and a chunk holding the whole answer or part of it is relevant.
 Recall is *pooled* - relevant chunks in the prompt over relevant chunks in the pool - so it is an upper
 bound: a relevant chunk ranked below the pool is invisible to it. The golden suite runs the same judge
-and compares it chunk by chunk with the expected pages; that agreement is what says how far the live
+and compares it chunk by chunk with pages verified by hand; that agreement is what says how far the live
 numbers can be trusted.
 
 **The judge is the chat model grading its own answers**, which makes the judged rates optimistic. A
@@ -102,7 +103,8 @@ verdict with the judges', which is the evidence for whether the self-judge is go
 A fixed set of 9 questions (`src/main/resources/eval/golden-dataset.yaml`), each with the pages known
 to hold its answer, verified by reading the retrieved chunks rather than guessed, a task category, and -
 for a case listing several pages - whether the answer needs all of them or any one
-(`expectedPagesMode`).
+(`expectedPagesMode`). `relevantPages` adds the other pages whose chunks state part of the answer,
+found by reading a whole candidate pool by hand; only the judge's calibration reads them.
 
 On top of the live metrics it adds the ones that need known-correct pages: page-level Recall@K, hit rate,
 MRR, and precision and NDCG with expected-page chunks as the relevant ones. A judged run also stores
@@ -199,7 +201,7 @@ suite on the left and live traffic on the right:
   answers.
 - **3. End to end** - case pass rate and end-to-end success, the debugging matrix, a breakdown by task,
   thumbs up/down and "asked again", human agreement, latency.
-- **Calibration** - the judge against expected pages, against human review and against user ratings.
+- **Calibration** - the judge against the verified pages, against human review and against user ratings.
 - **Drill-down** - the review queue, failing live turns with each stage's verdict and the chunk grades,
   and the golden per-case tables and run history.
 

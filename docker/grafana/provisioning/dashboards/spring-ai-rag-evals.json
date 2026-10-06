@@ -2423,8 +2423,8 @@
     {
       "id": 39,
       "type": "stat",
-      "title": "Judge vs expected pages (golden)",
-      "description": "Chunk by chunk over the latest judged golden run: does the judge's 'relevant' (grade 2) match the dataset's expected pages? Disagreement has two readings - a chunk the judge calls relevant from an unlisted page may mean expectedPages is too narrow; an expected-page chunk graded below 2 is the judge missing it. This number is what the live retrieval metrics rest on.",
+      "title": "Judge vs reference pages (golden)",
+      "description": "Chunk by chunk over the latest judged golden run: does the judge's 'relevant' (grade 2) match the dataset's reference pages - expectedPages plus relevantPages, both verified by reading the chunks? 'Judge only' is the judge calling an unlisted page relevant: leniency, or a page nobody has read yet. 'Reference only' is the judge missing one, though the reference is page-level, so a page's other, unhelpful chunks count too. This number is what the live retrieval metrics rest on. Hand-graded 6 Oct 2026: 0.71 with the old three-grade prompt, 0.83 with the four-grade one.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -2495,7 +2495,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(CASE WHEN (c.judge_grade >= 2) = (r.v = '1') THEN 1.0 ELSE 0.0 END) AS \"agreement\", COUNT(*) FILTER (WHERE c.judge_grade >= 2 AND r.v = '0') AS \"n judge only\", COUNT(*) FILTER (WHERE c.judge_grade < 2 AND r.v = '1') AS \"n expected only\", COUNT(*) AS \"n chunks\" FROM eval.eval_case_result cr JOIN eval.eval_turn_chunk c ON c.turn_id = cr.turn_id CROSS JOIN LATERAL (SELECT u.v FROM unnest(string_to_array(cr.reference_relevance, ',')) WITH ORDINALITY AS u(v, ord) WHERE u.ord = c.rank) r WHERE cr.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) AND c.judge_grade IS NOT NULL",
+          "rawSql": "SELECT AVG(CASE WHEN (c.judge_grade >= 2) = (r.v = '1') THEN 1.0 ELSE 0.0 END) AS \"agreement\", COUNT(*) FILTER (WHERE c.judge_grade >= 2 AND r.v = '0') AS \"n judge only\", COUNT(*) FILTER (WHERE c.judge_grade < 2 AND r.v = '1') AS \"n reference only\", COUNT(*) AS \"n chunks\" FROM eval.eval_case_result cr JOIN eval.eval_turn_chunk c ON c.turn_id = cr.turn_id CROSS JOIN LATERAL (SELECT u.v FROM unnest(string_to_array(cr.reference_relevance, ',')) WITH ORDINALITY AS u(v, ord) WHERE u.ord = c.rank) r WHERE cr.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) AND c.judge_grade IS NOT NULL",
           "refId": "A"
         }
       ]
