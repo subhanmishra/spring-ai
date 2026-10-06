@@ -177,6 +177,71 @@ class CitationResolverTest {
     }
 
     @Nested
+    @DisplayName("resolving a section number written with some of its dots dropped")
+    class PartlyDotted {
+
+        /** Page 419, heading 9.13.1. Retrieved by {@code port-in-use-startup-failure}, which cited "p. 913.1". */
+        private static final Document PAGE_419 = heading(419, "9.13.1. Change the HTTP Port or Address of the Actuator Endpoints");
+
+        @Test
+        @DisplayName("the page the suite caught: p. 913.1 for section 9.13.1")
+        void resolvesTheObservedLabel() {
+            String answer = "Set management.server.port (spring-boot-reference.pdf, p. 913.1).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_107, PAGE_419));
+
+            assertThat(resolution.answer())
+                    .isEqualTo("Set management.server.port (spring-boot-reference.pdf, p. 419).");
+            assertThat(resolution.repairs())
+                    .containsExactly(new CitationResolver.Repair("spring-boot-reference.pdf", "913.1", 419));
+            assertThat(resolution.abstained()).isZero();
+        }
+
+        @Test
+        @DisplayName("a kept dot tells apart headings whose digits are the same")
+        void keptDotDisambiguates() {
+            // 4.1.1 and 4.11 both collapse to 411; only 4.1.1 has a dot after its second digit.
+            Resolution resolution = CitationResolver.resolve(
+                    "See (spring-boot-reference.pdf, p. 41.1).",
+                    List.of(heading(64, "4.1.1. Startup Failure"), heading(190, "4.11. Working with NoSQL Technologies")));
+
+            assertThat(resolution.answer()).isEqualTo("See (spring-boot-reference.pdf, p. 64).");
+        }
+
+        @Test
+        @DisplayName("two retrieved headings that both fit are ambiguous, so left alone")
+        void ambiguousAbstains() {
+            // 9.13.1 and 91.3.1 both have a dot after the third digit, so 913.1 fits either.
+            String answer = "See (spring-boot-reference.pdf, p. 913.1).";
+
+            Resolution resolution = CitationResolver.resolve(answer, List.of(PAGE_419, heading(500, "91.3.1. A Heading")));
+
+            assertThat(resolution.answer()).isEqualTo(answer);
+            assertThat(resolution.repaired()).isZero();
+            assertThat(resolution.abstained()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a dotted label no retrieved heading can be made from stays unresolved")
+        void unmatchedStaysUnresolved() {
+            Resolution resolution = CitationResolver.resolve("See (spring-boot-reference.pdf, p. 813.1).",
+                                                             List.of(PAGE_419));
+
+            assertThat(resolution.changed()).isFalse();
+            assertThat(resolution.abstained()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("dots are only deleted, never moved or added")
+        void onlyDeletion() {
+            assertThat(CitationResolver.dropsDotsOf("913.1", "9.13.1")).isTrue();
+            assertThat(CitationResolver.dropsDotsOf("91.31", "9.13.1")).isFalse();
+            assertThat(CitationResolver.dropsDotsOf("9.13.1", "9.13.1")).as("nothing dropped").isFalse();
+            assertThat(CitationResolver.dropsDotsOf("41.1", "4.11")).isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("resolving a section number to its page")
     class Resolving {
 
@@ -409,6 +474,11 @@ class CitationResolverTest {
     }
 
     /** The same chunk under a different filename, for tests that do not care about the corpus name. */
+    /** A chunk of the manual on {@code page} that opens with {@code heading}. */
+    private static Document heading(int page, String heading) {
+        return new Document("[spring-boot-reference.pdf, p. %d]\n\n%s\n\nbody".formatted(page, heading));
+    }
+
     private static Document renamed(Document document, String fileName) {
         String text = document.getText();
         return new Document(text.replaceFirst("^\\[[^\\]]*,", "[" + fileName + ","));

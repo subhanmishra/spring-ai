@@ -57,6 +57,16 @@ import java.util.regex.Pattern;
  * than counted. It is narrow - the guess must collapse onto a heading among five chunks - and the
  * repair still lands on a page the model was given, which is the property this class exists to keep.
  *
+ * <p><strong>And with only some of them dropped.</strong> On 6 Oct 2026 {@code port-in-use-startup-failure}
+ * cited "p. 913.1" for a sentence from page 419, headed "9.13.1. Change the HTTP Port or Address of the
+ * Actuator Endpoints" - the first dot dropped, the second kept. A dotted label that heads no retrieved
+ * chunk exactly is therefore also tried against the retrieved headings it can be made from by deleting
+ * dots: the same digits, with every dot the label kept sitting where the heading has one. The kept dots
+ * are evidence, and using them matters - digits alone are ambiguous more often than the dotless case
+ * suggests: of the 374 section numbers heading chunks in the corpus (counted 6 Oct 2026), 26 pairs
+ * collapse to the same digits ("4.13" and "4.1.3", "4.11" and "4.1.1"), and a kept dot tells most of
+ * them apart: "41.1" can only be "4.1.1". Two retrieved headings that both fit still abstain.
+ *
  * <p>One limitation worth stating, since it affects a citation's precision rather than its
  * correctness. The page a section number resolves to is the page the <em>heading</em> sits on, which
  * for a section spanning several pages is its opening page rather than the page carrying the specific
@@ -185,6 +195,9 @@ public final class CitationResolver {
                 Citation source;
                 if (pageRef.indexOf('.') >= 0) {
                     source = sectionSources.get(pageRef);
+                    if (source == null) {
+                        source = partlyDottedSection(pageRef, sectionSources);
+                    }
                 } else {
                     // A plain page number is a candidate only when it names no retrieved page - a page
                     // the model was shown is a real citation and is never touched - and its digits are
@@ -239,6 +252,49 @@ public final class CitationResolver {
             }
         }
         return found;
+    }
+
+    /**
+     * The retrieved heading {@code label} is with some of its dots deleted: "9.13.1" for "913.1". Null
+     * when there is none; {@link #AMBIGUOUS} when more than one fits, or the one that fits is itself
+     * ambiguous.
+     */
+    private static @Nullable Citation partlyDottedSection(String label, Map<String, Citation> sectionSources) {
+        Citation found = null;
+        for (Map.Entry<String, Citation> section : sectionSources.entrySet()) {
+            if (dropsDotsOf(label, section.getKey())) {
+                if (found != null) {
+                    return AMBIGUOUS;
+                }
+                found = section.getValue();
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Whether {@code label} is {@code section} with one or more of its dots deleted and nothing else
+     * changed: the same digits, and every dot the label kept after a digit where the section has one.
+     */
+    static boolean dropsDotsOf(String label, String section) {
+        if (label.equals(section) || !label.replace(".", "").equals(section.replace(".", ""))) {
+            return false;
+        }
+        return dotPositions(section).containsAll(dotPositions(label));
+    }
+
+    /** Each dot's position, counted in digits before it: {1, 3} for "9.13.1". */
+    private static Set<Integer> dotPositions(String label) {
+        Set<Integer> positions = new HashSet<>();
+        int digits = 0;
+        for (int i = 0; i < label.length(); i++) {
+            if (label.charAt(i) == '.') {
+                positions.add(digits);
+            } else {
+                digits++;
+            }
+        }
+        return positions;
     }
 
     /** Every page a retrieved chunk's citation header names, whichever file it is from. */
