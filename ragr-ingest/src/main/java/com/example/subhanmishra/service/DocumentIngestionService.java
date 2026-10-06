@@ -1,6 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
+import com.example.subhanmishra.citation.CitationParser;
 import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
@@ -261,6 +262,9 @@ public class DocumentIngestionService {
             newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
             newMetadata.put(ChunkMetadata.PIPELINE_VERSION, pipelineVersion);
             List<String> headings = CitationResolver.sectionHeadings(chunk.getText());
+            // The section the chunk's first line belongs to, read before this chunk's own headings move it
+            // on - named in the header only when the chunk does not open with that heading itself.
+            String openedIn = CitationResolver.opensWithSectionHeading(chunk.getText()) ? null : currentSection.get();
             String section = headings.isEmpty() ? currentSection.get() : headings.getFirst();
             if (!headings.isEmpty()) {
                 currentSection.set(headings.getLast());
@@ -277,7 +281,7 @@ public class DocumentIngestionService {
             if (pageNumber != null) {
                 newMetadata.put(ChunkMetadata.PAGE_NUMBER, pageNumber);
             }
-            return new Document(citationHeader(metadata.getFilename(), pageNumber) + chunk.getText(), newMetadata);
+            return new Document(citationHeader(metadata.getFilename(), pageNumber, openedIn) + chunk.getText(), newMetadata);
         });
     }
 
@@ -301,8 +305,20 @@ public class DocumentIngestionService {
      * numeric signal unrelated to meaning; and the stored text is no longer verbatim what the document said,
      * so anything reading chunks back must strip this line. Chunks written before this existed carry no
      * header and cannot be cited - re-ingest a document to make its citations work.
+     *
+     * <p>A chunk that starts part-way through a section gets a second line naming it, {@code Section:
+     * Customizing the Management Server Port}, without its number so the model is not offered a section
+     * number where it should cite a page. Chunk boundaries fall wherever the budget runs out, so a chunk
+     * can hold an example with nothing saying what it configures: on 6 Oct 2026 the page 301 chunk was
+     * "Properties / management.server.port=8081 / Yaml ...", its heading left in the chunk before. Asked
+     * how to fix "port 8080 already in use", gemma4:e2b copied that example as the application's port in
+     * 7 of 10 answers, and a system-prompt rule telling it to check which component an example configures
+     * changed nothing (4 of 5, at both placements tried) - it cannot check what the passage never says.
+     * With the section named beside the passage it did so in 0 of 10, while "how do I move the actuator
+     * to another port" still got management.server.port in 5 of 5. The line is embedded too, so the
+     * chunk's vector carries its subject as well.
      */
-    private static String citationHeader(String fileName, Object pageNumber) {
+    private static String citationHeader(String fileName, Object pageNumber, @Nullable String section) {
         // Tika sources (DOCX/XLSX/PPTX/HTML) have no page attribution, so the page half is omitted rather
         // than written as a guess - a wrong citation is worse than an absent one.
         String citation = pageNumber != null
@@ -311,7 +327,11 @@ public class DocumentIngestionService {
         // "\n\n", not System.lineSeparator(): this string is persisted in the vector store's content column
         // and embedded, so letting it follow the host OS would make the stored corpus differ between a
         // Windows dev machine (CRLF) and a Linux deployment for the same source document.
-        return citation + "\n\n";
+        if (section == null) {
+            return citation + "\n\n";
+        }
+        String title = section.replaceFirst("^[\\d.]+\\s*", "");
+        return citation + "\n" + CitationParser.SECTION_LINE_PREFIX + title + "\n\n";
     }
 
     // Helper method to partition a stream into batches

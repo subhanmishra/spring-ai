@@ -30,10 +30,11 @@ public record IngestionProperties(int chunkSize,
                                   TableDetection tableDetection) {
 
     /**
-     * Bump whenever parsing code changes what a chunk contains - a new stripper, a different block
-     * split - since no setting below would change to say so. The pipeline version hashes it with them.
+     * Bump whenever parsing or ingestion code changes what a chunk contains - a new stripper, a different
+     * block split, another line in the citation header - since no setting below would change to say so.
+     * The pipeline version hashes it with them.
      */
-    public static final int PARSER_REVISION = 1;
+    public static final int PARSER_REVISION = 3;
 
     /**
      * A short hash of everything that decides a chunk's content and embedding: the chunk-shaping settings,

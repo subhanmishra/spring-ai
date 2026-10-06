@@ -108,6 +108,14 @@ public final class CitationResolver {
         return List.copyOf(headings);
     }
 
+    /**
+     * Whether {@code text} opens with a numbered section heading - the same test resolution uses, so
+     * ingestion's chunk boundaries and a resolvable section number agree on what a heading is.
+     */
+    public static boolean opensWithSectionHeading(@Nullable String text) {
+        return text != null && SECTION_HEADING.matcher(text).lookingAt();
+    }
+
     /** Marks a section number that resolved to more than one retrieved page, so it must be left alone. */
     private static final Citation AMBIGUOUS = new Citation("", null);
 

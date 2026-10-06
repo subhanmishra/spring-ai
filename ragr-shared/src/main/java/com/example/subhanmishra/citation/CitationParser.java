@@ -49,6 +49,14 @@ public final class CitationParser {
     public static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
     /**
+     * Opens the line under the citation header naming the section a chunk starts inside, when the chunk
+     * does not open with that section's own heading: {@code Section: Customizing the Management Server
+     * Port}. It is part of the header - {@link #stripHeader} removes it with the citation line - and is
+     * written by {@code DocumentIngestionService.citationHeader}, which says why it exists.
+     */
+    public static final String SECTION_LINE_PREFIX = "Section: ";
+
+    /**
      * A bracketed span in the answer - the candidate container, not the citation itself. Either
      * bracket style, because the prompt asks for parentheses and a model produces both.
      *
@@ -117,7 +125,8 @@ public final class CitationParser {
     /**
      * The chunk's text with its citation header removed, or the whole text when it has none. Anything
      * comparing stored text against what a document actually said has to strip this first - the header
-     * is prepended before embedding, so the stored content is not verbatim.
+     * is prepended before embedding, so the stored content is not verbatim. The header is the citation
+     * line and, when there is one, the {@link #SECTION_LINE_PREFIX section line} under it.
      */
     public static @Nullable String stripHeader(@Nullable String chunkText) {
         if (chunkText == null) {
@@ -128,9 +137,15 @@ public final class CitationParser {
             return chunkText;
         }
         String firstLine = chunkText.substring(0, firstBreak).stripTrailing();
-        return CITATION_LINE.matcher(firstLine).matches()
-                ? chunkText.substring(firstBreak).stripLeading()
-                : chunkText;
+        if (!CITATION_LINE.matcher(firstLine).matches()) {
+            return chunkText;
+        }
+        String body = chunkText.substring(firstBreak + 1);
+        if (body.startsWith(SECTION_LINE_PREFIX)) {
+            int sectionEnd = body.indexOf('\n');
+            body = sectionEnd < 0 ? "" : body.substring(sectionEnd);
+        }
+        return body.stripLeading();
     }
 
     /**

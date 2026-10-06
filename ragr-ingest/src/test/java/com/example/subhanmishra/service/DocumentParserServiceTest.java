@@ -45,6 +45,44 @@ class DocumentParserServiceTest {
     }
 
     @Test
+    @DisplayName("a numbered section heading starts a new chunk, so the section is not buried in the last one")
+    void sectionHeadingStartsAChunk() {
+        // The case behind the rule: Gradle substitution text filling a chunk, then "9.3.3. Change the HTTP
+        // Port" trailing it. With room in the budget for both, the heading still opens its own chunk.
+        String previous = "Gradle dependency substitution swaps the Netty starter for Undertow. ".repeat(10).strip();
+        Document page = new Document(previous + "\n\n9.3.3. Change the HTTP Port\n\nSet server.port.", Map.of());
+
+        List<Document> groups = realisticBudget().coalesceParagraphs(page);
+
+        assertThat(groups).extracting(Document::getText)
+                          .containsExactly(previous, "9.3.3. Change the HTTP Port\n\nSet server.port.");
+    }
+
+    @Test
+    @DisplayName("a heading after only a short tail joins it, rather than leaving the tail as a chunk of noise")
+    void headingAfterAShortTailJoinsIt() {
+        Document page = new Document("Short tail.\n\n9.3.3. Change the HTTP Port\n\nSet server.port.", Map.of());
+
+        assertThat(realisticBudget().coalesceParagraphs(page)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a number that is not a heading - a version, a list item - does not break a chunk")
+    void onlyHeadingsBreak() {
+        String previous = "Gradle dependency substitution swaps the Netty starter for Undertow. ".repeat(10).strip();
+        Document page = new Document(previous + "\n\n3.2.1 of the framework is required.\n\n1. Add the plugin.", Map.of());
+
+        assertThat(realisticBudget().coalesceParagraphs(page)).hasSize(1);
+    }
+
+    /** The production budget of 400 tokens, so a chunk can hold a section break's worth of text. */
+    private static DocumentParserService realisticBudget() {
+        IngestionProperties properties = new IngestionProperties(400, 150, 5, 10000, CEILING_TOKENS, 200, 4, 3,
+                                                                 Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
+        return new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), properties);
+    }
+
+    @Test
     @DisplayName("consecutive short paragraphs are merged into a single group")
     void mergesShortParagraphs() {
         Document page = new Document("alpha one\n\nbeta two\n\ngamma three", Map.of());

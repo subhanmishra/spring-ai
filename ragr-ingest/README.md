@@ -40,16 +40,23 @@ table is never cut through or merged with the text around it.
 
 ### What a stored chunk looks like
 
-Each chunk's text begins with a citation line, which is embedded and stored as part of the content:
+Each chunk's text begins with a citation line, which is embedded and stored as part of the content.
+A chunk that starts part-way through a numbered section also names it, on a second line:
 
 ```
-[spring-boot-reference.pdf, p. 112]
+[spring-boot-reference.pdf, p. 301]
+Section: Customizing the Management Server Port
 
-one of TRACE, DEBUG, INFO, WARN, ERROR, FATAL, or OFF. The root logger can be configured ...
+Properties
+management.server.port=8081 ...
 ```
 
-It is the reason the chat model can cite pages at all. Anything that reads chunks back - export,
-re-ranking, re-chunking - must strip it. For formats without pages the line is just `[filename]`.
+The citation line is the reason the chat model can cite pages at all. The section line tells it what an
+example configures when the heading fell in the chunk before - without it, the model gave this one's
+`management.server.port` as the way to move the application off port 8080. Chunks break at numbered
+headings, so a chunk that opens with its own heading has no section line. Anything that reads chunks
+back - export, re-ranking, re-chunking - must strip both, with `CitationParser.stripHeader`. For
+formats without pages the citation line is just `[filename]`, and there is no section line.
 
 Each chunk's metadata carries the keys defined in `ragr-shared`'s `ChunkMetadata`: `documentId`,
 `fileName`, `contentType`, `pageNumber`, `chunkIndex` and `blockType` (`prose` or `table`), plus

@@ -158,10 +158,14 @@ cases:
     expectedPages: [64]
     category: TROUBLESHOOTING
     # Verified 6 Oct 2026 by reading the pool: p. 376 gives server.port=0 for a free port - another way
-    # out, ranked 8th and so cut off by top-k.
-    relevantPages: [376]
-    # No mustContain: p. 64 names no property, and "port" would be matched by an answer that only
-    # repeats the question.
+    # out, ranked 8th and so cut off by top-k. Since chunks break at section headings, p. 375 opens with
+    # "9.3.3. Change the HTTP Port" - server.port itself - and ranks 3rd, in context.
+    relevantPages: [375, 376]
+    # No mustContain: p. 64 names no property, and "server.port" is a substring of the wrong answer.
+    # The wrong answer is what is asserted against: on 6 Oct 2026 the model told users to set the
+    # actuator's management.server.port to move the application, in every one of four answers.
+    mustNotContain:
+      - management.server.port
 
   - id: autoconfig-not-applied
     query: Auto-configuration is not doing what I expect. How can I find out why a particular auto-configuration was or was not applied?

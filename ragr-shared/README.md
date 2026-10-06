@@ -8,14 +8,14 @@ applications fit together, see the [root README](../README.md).
 | Package | Holds | Used by |
 |---|---|---|
 | `chunk` | `ChunkMetadata`: the metadata keys every stored chunk carries (`documentId`, `fileName`, `contentType`, `pageNumber`, `chunkIndex`, `blockType`, `tableIndex`, `tableRows`, `section`, `pipelineVersion`) | ragr-ingest writes them, ragr-app reads them, ragr-eval stores section and pipeline version with each evaluated turn |
-| `citation` | `CitationParser` reads the `[filename, p. N]` line at the start of every chunk and the `(filename, p. N)` citations in an answer; `CitationResolver` rewrites a section number cited as a page into that heading's page; `AnswerCitations` decides what counts as a citation, whether it is supported, and strips citations from the answer text | ragr-app to resolve and strip, ragr-eval to score - so the response and the fabrication rate cannot disagree |
+| `citation` | `CitationParser` reads the `[filename, p. N]` line at the start of every chunk, strips it with the `Section:` line under it, and reads the `(filename, p. N)` citations in an answer; `CitationResolver` rewrites a section number cited as a page into that heading's page; `AnswerCitations` decides what counts as a citation, whether it is supported, and strips citations from the answer text | ragr-app to resolve and strip, ragr-eval to score - so the response and the fabrication rate cannot disagree; ragr-ingest to write the header and find section headings, so chunk boundaries and section resolution agree on what a heading is |
 | `event` | `ChatTurnCompleted`, the Kafka event for one completed chat turn - the answer, the chunks in the prompt and the rest of the candidate pool, timings, token usage and the prompt version; `ChatFeedbackSubmitted`, a user's rating of one turn; and `TurnOrigin` (`LIVE` or `GOLDEN`) | ragr-app publishes, ragr-eval consumes |
 | `exception` | `ApiExceptionHandler`, the shared `ProblemDetail` error handling, and `ResourceNotFoundException` | all three applications, each through its own `@RestControllerAdvice` subclass |
 
 ## Changing a contract
 
-- **The citation line** is written by ragr-ingest (`DocumentIngestionService`), described to the model
-  by ragr-app's prompts, and parsed here. Changing its format means changing all three, rebuilding
+- **The citation line** - and the `Section:` line under it - is written by ragr-ingest
+  (`DocumentIngestionService`), described to the model by ragr-app's prompts, and parsed here. Changing its format means changing all three, rebuilding
   every application, and re-ingesting every document, because the chunks already stored keep the old
   line.
 - **`ChatTurnCompleted`** is serialised as JSON. Rebuild and restart both ragr-app and ragr-eval

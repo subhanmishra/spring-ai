@@ -180,9 +180,10 @@ Two facts belong here, by a narrow test: a fact earns a place in this section on
 it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through
 the router in time, and repeating it here is pure always-loaded cost.
 
-- **Every chunk's stored text begins with a `[filename, p. N]` citation line.** It is embedded and
-  persisted, not metadata. Anything that reads chunks back — export, re-ranking, re-chunking — must
-  strip it. This is the only reason the model can cite page numbers at all. The document that owns
+- **Every chunk's stored text begins with a `[filename, p. N]` citation line**, and a `Section:`
+  line under it when the chunk starts mid-section. Both are embedded and persisted, not metadata.
+  Anything that reads chunks back — export, re-ranking, re-chunking — must strip them, with
+  `CitationParser.stripHeader`. This is the only reason the model can cite page numbers at all. The document that owns
   this (`chat-and-citations.md`) is keyed to the chat path, so it will not fire for the export or
   migration code where the mistake actually gets made.
 - **Do not use a bare `parallelStream()` for parse work.** It runs on the common pool and defeats the

@@ -1,6 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
+import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.exception.DocumentProcessingException;
 import com.example.subhanmishra.service.parse.ContentBlock;
@@ -310,7 +311,7 @@ public class DocumentParserService {
      * <p>
      * Prose is coalesced paragraph by paragraph until the next paragraph would overflow the budget -
      * without this, every short paragraph became its own chunk and the configured chunk size was never
-     * reached. A table interrupts that run: the open prose group is closed first, then the table is emitted
+     * reached - or until a numbered section heading opens a new section (see {@link ProseGroups#add}). A table interrupts that run: the open prose group is closed first, then the table is emitted
      * as its own chunk, or its own run of chunks split between rows with the header repeated on each.
      * Prose and table content therefore never share a chunk, so a table is never truncated by the prose
      * that happened to follow it.
@@ -390,6 +391,22 @@ public class DocumentParserService {
         }
 
         /**
+         * A numbered section heading closes the open group, so the section leads a chunk of its own.
+         * <p>
+         * Filling to the budget alone put most sections part-way into a chunk about something else: on
+         * 6 Oct 2026 only 39 of the manual's 374 section headings opened a chunk, and 172 sat in the
+         * second half of one. An embedding is the average of its chunk, so such a section was retrievable
+         * only as far as its neighbours' topic allowed. "9.3.3. Change the HTTP Port", the manual's answer
+         * to setting server.port, trailed a chunk of Gradle dependency substitution and ranked 13th for
+         * "How do I change the HTTP port of my application?" - behind the actuator's
+         * management.server.port, which the chat model then recommended for the application's own port.
+         * <p>
+         * Not below {@link #SECTION_BREAK_MIN_TOKENS}: a short tail of the previous section left as a chunk
+         * of its own would embed as little more than noise, so the heading joins it instead.
+         */
+        private static final int SECTION_BREAK_MIN_TOKENS = 80;
+
+        /**
          * The budget is measured on the <em>joined</em> text, never on the sum of the parts.
          * <p>
          * Summing each paragraph's own token count understates the group: joining paragraphs with a blank
@@ -407,6 +424,13 @@ public class DocumentParserService {
             int paragraphTokens = TokenCounter.count(paragraph);
 
             if (current.isEmpty()) {
+                current.append(paragraph);
+                currentTokens = paragraphTokens;
+                return;
+            }
+
+            if (currentTokens >= SECTION_BREAK_MIN_TOKENS && CitationResolver.opensWithSectionHeading(paragraph)) {
+                flush();
                 current.append(paragraph);
                 currentTokens = paragraphTokens;
                 return;

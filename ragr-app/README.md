@@ -202,7 +202,7 @@ restrict the search to one document.
 
 Each hit reports its `score` and the metadata written at ingestion time (`pageNumber`, `chunkIndex`,
 `blockType`, and for tables `tableIndex` / `tableRows`), plus `citation` and `text` - the two halves of
-the stored content. `hasCitationHeader: false` marks a chunk ingested before citation lines existed;
+the stored content, so `text` starts with the chunk's `Section:` line when it has one. `hasCitationHeader: false` marks a chunk ingested before citation lines existed;
 the model cannot cite those, and re-ingesting the document is the fix.
 
 Like the chat path, it does not reproduce conversation memory: a follow-up question retrieves here

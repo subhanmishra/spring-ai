@@ -64,7 +64,7 @@ these contracts:
 
 - **`vector_store`, from ingest to chat.** ragr-ingest writes chunks, ragr-app searches them. Every
   chunk's stored text begins with a `[filename, p. N]` citation line, which is what lets the model
-  cite pages at all, and carries the metadata keys in `ragr-shared`'s `ChunkMetadata`. **The embedding
+  cite pages at all - with a `Section:` line under it when the chunk starts mid-section - and carries the metadata keys in `ragr-shared`'s `ChunkMetadata`. **The embedding
   model and its dimensions must be identical in both applications** (`nomic-embed-text`, 768), because
   chat embeds each query with the same model to search what ingest wrote. A different dimension fails
   loudly at query time; a different model with the same dimension fails silently, returning poor

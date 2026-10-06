@@ -66,6 +66,18 @@ class CitationParserTest {
         }
 
         @Test
+        void stripsTheSectionLineWithTheHeader() {
+            String stripped = CitationParser.stripHeader(
+                    "[manual.pdf, p. 301]\nSection: Customizing the Management Server Port\n\nmanagement.server.port=8081");
+            assertThat(stripped).isEqualTo("management.server.port=8081");
+        }
+
+        @Test
+        void keepsASectionLikeLineInAChunkWithoutAHeader() {
+            assertThat(CitationParser.stripHeader("Section: body\n\nmore")).isEqualTo("Section: body\n\nmore");
+        }
+
+        @Test
         void leavesAPreHeaderChunkIntact() {
             assertThat(CitationParser.stripHeader("no header here\n\nbody")).isEqualTo("no header here\n\nbody");
         }
