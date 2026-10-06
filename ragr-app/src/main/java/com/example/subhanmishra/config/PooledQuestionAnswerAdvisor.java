@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  * <p>So this makes the <strong>one</strong> vector query the stock advisor would make, asking for
  * {@code pool-size} candidates above {@code pool-floor} instead, and then applies top-k and the
  * similarity threshold itself. The prompt is built from exactly the chunks the stock advisor would have
- * chosen, in the same order and with the same template, so the model's input is unchanged. Measured on
+ * chosen, in the same order and with the same template - laid out differently, see {@link #passages}. Measured on
  * the 946-chunk corpus, 6 Oct 2026: LIMIT 5 and LIMIT 10 both take about 0.8 ms warm, LIMIT 20 about
  * 3.8 ms - against a generation of 16-75 s.
  *
@@ -43,12 +43,15 @@ import java.util.stream.Collectors;
  *
  * <p>Written out rather than wrapping the stock advisor because its constructor is package-private and
  * its search request is final; the parts copied are {@code before}'s prompt rendering and {@code after}'s
- * metadata hand-off, line for line, including joining chunks with the platform line separator.
+ * metadata hand-off, line for line, except how the chunks are joined.
  */
 public class PooledQuestionAnswerAdvisor implements BaseAdvisor {
 
     public static final String EXCLUDED_DOCUMENTS = "rag_excluded_documents";
     public static final String RETRIEVAL_MILLIS = "rag_retrieval_millis";
+
+    /** Closes every passage in the prompt; see {@link #passages}. Part of {@code PROMPT_VERSION}. */
+    public static final String PASSAGE_END = "(end of passage)";
 
     private final VectorStore vectorStore;
     private final PromptTemplate promptTemplate;
@@ -87,15 +90,34 @@ public class PooledQuestionAnswerAdvisor implements BaseAdvisor {
         context.put(EXCLUDED_DOCUMENTS, excluded);
         context.put(RETRIEVAL_MILLIS, retrievalMillis);
 
-        String documentContext = retrieved.stream()
-                                          .map(Document::getText)
-                                          .collect(Collectors.joining(System.lineSeparator()));
         String augmented = promptTemplate.render(Map.of("query", userMessage.getText(),
-                                                        "question_answer_context", documentContext));
+                                                        "question_answer_context", passages(retrieved)));
         return request.mutate()
                       .prompt(request.prompt().augmentUserMessage(augmented))
                       .context(context)
                       .build();
+    }
+
+    /**
+     * The chunks as the prompt shows them: each closed by {@link #PASSAGE_END}, with a blank line either
+     * side of it.
+     * <p>
+     * The stock advisor joins chunks with one line separator, so a passage ran straight into the next
+     * one's {@code [filename, p. N]} line and nothing said where it ended. gemma4:e2b read each source
+     * line as closing the text above it: asked how to fix "port 8080 already in use", it cited page 375's
+     * server.port instructions as page 301 - the chunk after it - 13 times in 10 answers, 6 Oct 2026. A
+     * blank line between passages changed nothing (13 of 13 again). A "---" rule fixed the page but in 4
+     * of 20 answers the model wrote the filename as "Spring Boot reference.pdf", a citation the scorer
+     * calls fabricated. This marker put all 37 such citations on page 375 across 20 answers, with every
+     * filename right in those and in 10 DataSource answers, and the model never repeated it.
+     * <p>
+     * Always "\n", never the platform line separator, so the prompt is the same in a container and on a
+     * Windows host.
+     */
+    static String passages(List<Document> documents) {
+        return documents.stream()
+                        .map(document -> document.getText() + "\n\n" + PASSAGE_END)
+                        .collect(Collectors.joining("\n\n"));
     }
 
     /**

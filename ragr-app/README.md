@@ -27,6 +27,8 @@ flowchart TD
   fetches a pool of 10 candidates; the prompt gets exactly what the stock `QuestionAnswerAdvisor` would
   have given it - the top 5 at or above the threshold - and the rest of the pool travels with the turn to
   ragr-eval, which measures recall against it. A pool of 10 costs the same as 5 (about 0.8 ms warm).
+  Each passage in the prompt ends with `(end of passage)`: without the marker the model attached a
+  passage's content to the source line of the passage after it, and cited the wrong page.
 - **Every turn has an id.** `turnId` comes back in the response (in `done` for a stream) and is what
   `POST /ai/turns/{turnId}/feedback` rates. ragr-app keeps no record of turns; it publishes the rating
   for ragr-eval to store.

@@ -41,6 +41,27 @@ class PooledQuestionAnswerAdvisorTest {
         assertThat(PooledQuestionAnswerAdvisor.inContextCount(List.of(), 5, 0.6)).isZero();
     }
 
+    @Test
+    @DisplayName("every passage, the last included, is closed by the end marker, with LF on every platform")
+    void passagesAreClosed() {
+        List<Document> chunks = List.of(new Document("[manual.pdf, p. 375]\n\nset server.port"),
+                                        new Document("[manual.pdf, p. 301]\nSection: Management\n\nexample"));
+
+        assertThat(PooledQuestionAnswerAdvisor.passages(chunks)).isEqualTo("""
+                [manual.pdf, p. 375]
+
+                set server.port
+
+                (end of passage)
+
+                [manual.pdf, p. 301]
+                Section: Management
+
+                example
+
+                (end of passage)""");
+    }
+
     private static List<Document> pool(double... scores) {
         return Arrays.stream(scores)
                      .mapToObj(score -> Document.builder().text("chunk " + score).score(score).build())

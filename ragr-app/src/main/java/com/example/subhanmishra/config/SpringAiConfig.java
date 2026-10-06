@@ -93,8 +93,11 @@ public class SpringAiConfig {
     /**
      * A short hash of everything the model is told besides the conversation itself, carried on every
      * chat turn event so evaluation can split a metric at a prompt change rather than average across it.
+     * The passage marker is included because how passages are laid out changes the answers as surely as
+     * the wording does.
      */
-    public static final String PROMPT_VERSION = promptVersion(SYSTEM_PROMPT + QA_PROMPT_TEMPLATE.getTemplate());
+    public static final String PROMPT_VERSION = promptVersion(SYSTEM_PROMPT + QA_PROMPT_TEMPLATE.getTemplate()
+                                                              + PooledQuestionAnswerAdvisor.PASSAGE_END);
 
     private static String promptVersion(String prompts) {
         try {
