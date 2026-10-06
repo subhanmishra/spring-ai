@@ -100,7 +100,7 @@ verdict with the judges', which is the evidence for whether the self-judge is go
 
 ## The golden suite
 
-A fixed set of 9 questions (`src/main/resources/eval/golden-dataset.yaml`), each with the pages known
+A fixed set of 11 questions (`src/main/resources/eval/golden-dataset.yaml`), each with the pages known
 to hold its answer, verified by reading the retrieved chunks rather than guessed, a task category, and -
 for a case listing several pages - whether the answer needs all of them or any one
 (`expectedPagesMode`). `relevantPages` adds the other pages whose chunks state part of the answer,

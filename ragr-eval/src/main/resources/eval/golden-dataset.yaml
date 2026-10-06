@@ -20,7 +20,7 @@ description: >-
 
   Each case carries a category from the same closed task set live turns are classified into
   (CONFIG_LOOKUP, HOW_TO, TROUBLESHOOTING, CONCEPTUAL, GENERAL), so golden and live results break down
-  the same way. There is no TROUBLESHOOTING case yet.
+  the same way.
 
   expectedPagesMode says how page recall reads a case with several expected pages: ALL when the answer
   needs every one, ANY when each answers on its own. Like the pages themselves, it is decided by reading
@@ -147,6 +147,39 @@ cases:
     relevantPages: [294, 300]
     mustContain:
       - management.server
+
+  - id: port-in-use-startup-failure
+    query: My application fails to start because port 8080 is already in use. How do I fix it?
+    description: >-
+      A troubleshooting question phrased the way a user hits it - by the symptom, not the feature. Page
+      64 shows the exact APPLICATION FAILED TO START report a FailureAnalyzer prints for this, and its
+      action: stop the process holding the port or listen on another one. Retrieved first, at 0.70.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [64]
+    category: TROUBLESHOOTING
+    # Verified 6 Oct 2026 by reading the pool: p. 376 gives server.port=0 for a free port - another way
+    # out, ranked 8th and so cut off by top-k.
+    relevantPages: [376]
+    # No mustContain: p. 64 names no property, and "port" would be matched by an answer that only
+    # repeats the question.
+
+  - id: autoconfig-not-applied
+    query: Auto-configuration is not doing what I expect. How can I find out why a particular auto-configuration was or was not applied?
+    description: >-
+      The harder troubleshooting case, kept for what it shows about retrieval. Page 364 answers it
+      directly - the ConditionEvaluationReport, shown with DEBUG logging or by the actuator's conditions
+      endpoint - but ranks 6th (0.699), just outside the prompt, behind pages about writing and testing
+      auto-configurations that share every keyword. Page 590 gives the short version (--debug, or the
+      conditions endpoint) at 4th. A drop here means 590 fell out too; the cut-off of 364 is what the
+      "relevant but cut off" panel exists to show.
+    expectedFile: spring-boot-reference.pdf
+    expectedPages: [364, 590]
+    # Verified 6 Oct 2026: each page names both routes to the report on its own, so either counts as
+    # full recall.
+    expectedPagesMode: ANY
+    category: TROUBLESHOOTING
+    mustContain:
+      - debug
 
   - id: out-of-corpus-no-fabrication
     query: What were the total quarterly revenue figures for Acme Corporation in 2019?
