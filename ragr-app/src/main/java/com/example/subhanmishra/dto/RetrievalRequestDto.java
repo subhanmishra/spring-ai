@@ -30,7 +30,7 @@ public record RetrievalRequestDto(
         @DecimalMax(value = "1.0", message = "similarityThreshold must be between 0.0 and 1.0")
         @Schema(description = "Minimum similarity a chunk must reach to be returned. Defaults to "
                 + "app.rag.similarity-threshold. Set 0.0 to see what the threshold is excluding.",
-                example = "0.6")
+                example = "0.65")
         Double similarityThreshold,
 
         @Schema(description = "Restrict the search to one document. Must be a UUID.",

@@ -13,7 +13,7 @@ for [ragr-eval](../ragr-eval/README.md) to score. For how it fits with the other
 flowchart TD
     req[POST /ai/generate or /ai/generateStream] --> id[resolve the conversation id<br/>X-Conversation-Id header]
     id --> mem[MessageChatMemoryAdvisor<br/>adds the last 10 messages from Redis]
-    mem --> qa[PooledQuestionAnswerAdvisor<br/>embeds the question, fetches a pool of 10,<br/>prompt gets the top 5 above 0.6]
+    mem --> qa[PooledQuestionAnswerAdvisor<br/>embeds the question, fetches a pool of 10,<br/>prompt gets the top 5 above 0.65]
     qa --> gen[gemma4:e2b generates<br/>citing inline as filename, p. N]
     gen --> save[the turn is saved to Redis]
     save --> res[CitationResolver<br/>section numbers rewritten to pages]
@@ -54,8 +54,9 @@ dimensions (`nomic-embed-text`, 768) must match ragr-ingest's - see the
 
 | Property | Default | Purpose |
 |---|---|---|
+| `app.embedding.task-prefix` | `search_query: ` | Prepended to every question before it is embedded. Pairs with ragr-ingest's passage prefix and changes with the model |
 | `app.rag.top-k` | `5` | Chunks retrieved per question |
-| `app.rag.similarity-threshold` | `0.6` | Minimum similarity for a chunk to be retrieved |
+| `app.rag.similarity-threshold` | `0.65` | Minimum similarity for a chunk to be retrieved |
 | `app.rag.pool-size` | `10` | Candidates the one vector query fetches; the rest beyond the prompt go to evaluation |
 | `app.rag.pool-floor` | `0.0` | Minimum similarity to be in the pool at all |
 | `app.ai.max-chat-messages` | `10` | Messages kept per conversation, and replayed to the model on every turn |

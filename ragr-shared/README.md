@@ -9,6 +9,7 @@ applications fit together, see the [root README](../README.md).
 |---|---|---|
 | `chunk` | `ChunkMetadata`: the metadata keys every stored chunk carries (`documentId`, `fileName`, `contentType`, `pageNumber`, `chunkIndex`, `blockType`, `tableIndex`, `tableRows`, `section`, `pipelineVersion`) | ragr-ingest writes them, ragr-app reads them, ragr-eval stores section and pipeline version with each evaluated turn |
 | `citation` | `CitationParser` reads the `[filename, p. N]` line at the start of every chunk, strips it with the `Section:` line under it, and reads the `(filename, p. N)` citations in an answer; `CitationResolver` rewrites a section number cited as a page into that heading's page; `AnswerCitations` decides what counts as a citation, whether it is supported, and strips citations from the answer text | ragr-app to resolve and strip, ragr-eval to score - so the response and the fabrication rate cannot disagree; ragr-ingest to write the header and find section headings, so chunk boundaries and section resolution agree on what a heading is |
+| `embedding` | `TaskPrefixEmbeddingModel`, which wraps the embedding model so every text it embeds carries the model's task prefix (`app.embedding.task-prefix`) - only the request changes, never the stored text | ragr-ingest with the passage prefix, ragr-app with the query prefix |
 | `event` | `ChatTurnCompleted`, the Kafka event for one completed chat turn - the answer, the chunks in the prompt and the rest of the candidate pool, timings, token usage and the prompt version; `ChatFeedbackSubmitted`, a user's rating of one turn; and `TurnOrigin` (`LIVE` or `GOLDEN`) | ragr-app publishes, ragr-eval consumes |
 | `exception` | `ApiExceptionHandler`, the shared `ProblemDetail` error handling, and `ResourceNotFoundException` | all three applications, each through its own `@RestControllerAdvice` subclass |
 
@@ -24,6 +25,9 @@ applications fit together, see the [root README](../README.md).
   still read. Turns already on the topic keep the old shape for up to its three-day retention, which
   matters if the consumer group's offsets are ever reset to replay them. `ChatFeedbackSubmitted` follows
   the same rules on `rag.chat.feedback`.
+- **The task prefixes** (`app.embedding.task-prefix` in ragr-ingest and ragr-app) are a pair: each
+  model is trained with its own passage and query prefixes, so they change together and with the
+  model. Every stored vector was embedded under the passage prefix: re-ingest.
 - **`ChunkMetadata` keys** are stored in each chunk's metadata column, so renaming one strands every
   chunk written under the old name: re-ingest.
 

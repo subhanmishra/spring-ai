@@ -68,7 +68,9 @@ these contracts:
   model and its dimensions must be identical in both applications** (`nomic-embed-text`, 768), because
   chat embeds each query with the same model to search what ingest wrote. A different dimension fails
   loudly at query time; a different model with the same dimension fails silently, returning poor
-  matches with no error.
+  matches with no error. The same holds for the embedding model's task prefixes
+  (`app.embedding.task-prefix`: `search_document: ` in ragr-ingest, `search_query: ` in ragr-app),
+  which are a pair and change with the model.
 - **`ChatTurnCompleted` on Kafka, from chat to eval.** Each completed turn is published carrying the
   question, the resolved answer, the full text, metadata and scores of the chunks in the prompt and of
   the rest of the candidate pool, timings and token usage. So evaluation never queries the vector store,
@@ -110,7 +112,7 @@ sequenceDiagram
     U->>C: POST /ai/generate
     C->>R: load conversation window
     C->>O: embed the question
-    C->>P: similarity search, top 5 above 0.6
+    C->>P: similarity search, top 5 above 0.65
     C->>O: generate with the retrieved chunks
     C->>C: resolve section numbers to pages, strip inline citations
     C->>R: save the turn

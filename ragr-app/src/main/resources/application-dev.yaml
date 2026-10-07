@@ -251,10 +251,19 @@ logging:
 
 #app configurations
 app:
+  embedding:
+    # Prepended to every query sent to the embedding model. MUST pair with ragr-ingest's passage prefix
+    # ("search_document: ") and change with the model - see app.embedding there.
+    task-prefix: "search_query: "
   rag:
     # Retrieval only. What is chunked and stored is configured in ragr-ingest under app.ingestion.
     top-k: 5
-    similarity-threshold: 0.6
+    # Tuned to the task prefixes, which lift every score unevenly. Probing the golden queries at top 10
+    # (7 Oct 2026): the in-corpus cases' 5th hit scores 0.667 at the lowest, while the best hit for a
+    # question the corpus cannot answer reached 0.618 (it was 0.532 without prefixes, under the old 0.6).
+    # 0.65 keeps every in-corpus top-k chunk and still hands out-of-corpus questions no context.
+    # Re-probe after any embedding change - the scores are the model's, not the corpus's.
+    similarity-threshold: 0.65
     # One vector query fetches pool-size candidates above pool-floor; only the leading top-k at or above
     # similarity-threshold reach the prompt, and the rest travel to ragr-eval, which measures recall
     # against them. LIMIT 10 costs the same as LIMIT 5 on this corpus (about 0.8 ms warm, measured

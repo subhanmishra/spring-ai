@@ -77,6 +77,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │   └── src/main/java/.../subhanmishra/
 │       ├── chunk     # ChunkMetadata - the metadata keys every stored chunk carries
 │       ├── citation  # Citation, CitationParser, CitationResolver, AnswerCitations
+│       ├── embedding # TaskPrefixEmbeddingModel - the embedding model's task prefix on every request
 │       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka contracts
 │       │             # between chat and eval
 │       └── exception # ApiExceptionHandler (abstract; each app's advice extends it),
@@ -87,7 +88,7 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # SpringAiConfig, RedisConfig, OpenApiConfig, RagProperties (top-k,
 │       │   │   │               # threshold), SpringAiProperties, KafkaConfig, EventsProperties,
-│       │   │   │               # WebConfig
+│       │   │   │               # WebConfig, EmbeddingConfig (the query task prefix)
 │       │   │   ├── controller  # ChatController, AdminDiagnosticsController,
 │       │   │   │               # ConversationIdInterceptor
 │       │   │   ├── dto
@@ -105,7 +106,8 @@ corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
 │       ├── main
 │       │   ├── java/.../subhanmishra/
 │       │   │   ├── config      # IngestionProperties (app.ingestion), ChunkingConfig,
-│       │   │   │               # ThreadPoolConfig, ModelMapperConfig, OpenApiConfig
+│       │   │   │               # ThreadPoolConfig, ModelMapperConfig, OpenApiConfig,
+│       │   │   │               # EmbeddingConfig (the passage task prefix)
 │       │   │   ├── controller  # DocumentController, BatchUploadStatusAdvice
 │       │   │   ├── dto
 │       │   │   ├── entity

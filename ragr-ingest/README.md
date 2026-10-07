@@ -62,7 +62,8 @@ Each chunk's metadata carries the keys defined in `ragr-shared`'s `ChunkMetadata
 `fileName`, `contentType`, `pageNumber`, `chunkIndex` and `blockType` (`prose` or `table`), plus
 `tableIndex` and `tableRows` for table chunks, and two for evaluation: `section`, the numbered heading the
 chunk falls under (the first heading inside it, else the last one before it), and `pipelineVersion`, a
-hash of the chunk-shaping settings, `IngestionProperties.PARSER_REVISION` and the embedding model. Bump
+hash of the chunk-shaping settings, `IngestionProperties.PARSER_REVISION`, the embedding model and its
+task prefix. Bump
 `PARSER_REVISION` with any parsing change that alters chunk content, so evaluation can tell chunks from
 either side of it apart. The policy is still one pipeline per corpus - re-ingest everything after a
 change; the version records which pipeline that was.
@@ -72,6 +73,10 @@ change; the version records which pipeline that was.
 All of it is in `src/main/resources/application.yaml`; there are no profiles. The embedding model and
 its dimensions (`nomic-embed-text`, 768) must match ragr-app's - see the
 [root README](../README.md#the-applications-never-call-each-other).
+
+`app.embedding.task-prefix` (`search_document: `) is prepended to every chunk sent to the embedding
+model, never stored: nomic-embed-text was trained with it, and Ollama does not add it. It pairs with
+ragr-app's query prefix and changes with the model, and changing it means re-ingesting every document.
 
 Indexing is tuned under `app.ingestion.*`. **Changing any setting that shapes chunks means
 re-ingesting every document**; `batch-size`, `concurrency` and the retry settings only change how

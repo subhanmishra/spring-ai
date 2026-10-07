@@ -38,14 +38,15 @@ public record IngestionProperties(int chunkSize,
 
     /**
      * A short hash of everything that decides a chunk's content and embedding: the chunk-shaping settings,
-     * {@link #PARSER_REVISION} and the embedding model. Batching, concurrency and retry are left out, as
-     * they change only how fast the same chunks are written.
+     * {@link #PARSER_REVISION}, the embedding model and the task prefix it embeds with. The prefix is never
+     * stored, but it moves every vector as surely as a model change. Batching, concurrency and retry are
+     * left out, as they change only how fast the same chunks are written.
      */
-    public String pipelineVersion(String embeddingModel) {
+    public String pipelineVersion(String embeddingModel, String embeddingTaskPrefix) {
         String inputs = String.join("|", String.valueOf(PARSER_REVISION), String.valueOf(chunkSize),
                                     String.valueOf(minChunkSizeChars), String.valueOf(minChunkLengthToEmbed),
                                     String.valueOf(maxEmbedTokens), String.valueOf(tableDetection),
-                                    embeddingModel);
+                                    embeddingModel, embeddingTaskPrefix);
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(inputs.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest, 0, 6);

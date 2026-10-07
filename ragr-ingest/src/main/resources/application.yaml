@@ -124,6 +124,13 @@ logging:
           core: DEBUG
 
 app:
+  embedding:
+    # Prepended to every chunk sent to the embedding model, never stored. nomic-embed-text was trained
+    # with "search_document: " on passages and "search_query: " on queries, and Ollama adds neither.
+    # MUST pair with ragr-app's query prefix and change with the model: EmbeddingGemma's pair is
+    # "title: none | text: " and "task: search result | query: ". It is part of the pipeline version,
+    # so changing it means re-ingesting every document.
+    task-prefix: "search_document: "
   ingestion:
     # Changing any of the chunk-shaping settings below changes what is stored, and means re-ingesting
     # the whole corpus. batch-size, concurrency and the retry settings only change how fast.

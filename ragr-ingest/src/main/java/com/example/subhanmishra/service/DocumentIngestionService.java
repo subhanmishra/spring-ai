@@ -77,7 +77,8 @@ public class DocumentIngestionService {
                                     VectorStoreRepository vectorStoreRepository,
                                     IngestionProperties ingestionProperties,
                                     PlatformTransactionManager transactionManager,
-                                    @Value("${spring.ai.ollama.embedding.model}") String embeddingModel) {
+                                    @Value("${spring.ai.ollama.embedding.model}") String embeddingModel,
+                                    @Value("${app.embedding.task-prefix}") String embeddingTaskPrefix) {
         this.vectorStore = vectorStore;
         this.historyService = historyService;
         this.vectorStoreRepository = vectorStoreRepository;
@@ -85,7 +86,7 @@ public class DocumentIngestionService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.ingestionPermits = new Semaphore(Math.max(1, ingestionProperties.concurrency()));
-        this.pipelineVersion = ingestionProperties.pipelineVersion(embeddingModel);
+        this.pipelineVersion = ingestionProperties.pipelineVersion(embeddingModel, embeddingTaskPrefix);
     }
 
     /**

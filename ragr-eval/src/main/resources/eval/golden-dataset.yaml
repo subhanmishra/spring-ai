@@ -39,7 +39,7 @@ cases:
     query: How are actuator endpoints exposed over HTTP, and what URL prefix do they use?
     description: >-
       Baseline retrieval case. Page 277 states the /actuator prefix and the mapping rule directly, and
-      is retrieved at a comfortable margin (0.81 against a 0.60 threshold), so a failure here means
+      is retrieved at a comfortable margin (0.87 against a 0.65 threshold), so a failure here means
       something has broken in embedding or chunking rather than that the question was marginal.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [277, 278]
@@ -177,10 +177,11 @@ cases:
     description: >-
       The harder troubleshooting case, kept for what it shows about retrieval. Page 364 answers it
       directly - the ConditionEvaluationReport, shown with DEBUG logging or by the actuator's conditions
-      endpoint - but ranks 6th (0.699), just outside the prompt, behind pages about writing and testing
-      auto-configurations that share every keyword. Page 590 gives the short version (--debug, or the
-      conditions endpoint) at 4th. A drop here means 590 fell out too; the cut-off of 364 is what the
-      "relevant but cut off" panel exists to show.
+      endpoint - but ranks only 5th (0.771, probed 7 Oct 2026), the last chunk into the prompt, behind
+      pages about writing and testing auto-configurations that share every keyword. Page 590 gives the
+      short version (--debug, or the conditions endpoint) but is no longer in the top 10. A drop here
+      means 364 fell one place, out of the prompt - which is what the "relevant but cut off" panel
+      exists to show.
     expectedFile: spring-boot-reference.pdf
     expectedPages: [364, 590]
     # Verified 6 Oct 2026: each page names both routes to the report on its own, so either counts as
