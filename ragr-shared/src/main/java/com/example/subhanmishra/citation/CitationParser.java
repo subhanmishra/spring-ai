@@ -33,8 +33,8 @@ public final class CitationParser {
     /**
      * A chunk's citation line: the whole first line, in square brackets. The shape is matched, rather
      * than the text split at the first line break, so a chunk stored without a header never has its real
-     * first line mistaken for one. {@code RetrievalDiagnosticsService} has its own copy of this
-     * pattern; keep the two identical.
+     * first line mistaken for one. {@code RetrievalDiagnosticsService} uses this
+     * constant too.
      */
     public static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 

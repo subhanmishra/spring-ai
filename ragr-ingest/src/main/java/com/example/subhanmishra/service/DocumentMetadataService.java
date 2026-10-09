@@ -49,7 +49,7 @@ public class DocumentMetadataService {
     public DocumentResponseDto uploadAndProcess(MultipartFile file) {
 
         String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "document";
-        String contentType = file.getContentType() != null ? file.getContentType() : "application/octat-stream";
+        String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
 
         // 0. Refuse unsupported types BEFORE anything is written, so they leave no record behind and the
         // caller hears "wrong type" rather than a parsing failure from deep inside Tika.

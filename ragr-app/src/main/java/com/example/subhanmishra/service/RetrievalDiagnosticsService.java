@@ -1,6 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
+import com.example.subhanmishra.citation.CitationParser;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.dto.RetrievalRequestDto;
 import com.example.subhanmishra.dto.RetrievalResponseDto;
@@ -15,7 +16,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Runs the same similarity search the chat path runs, and reports what came back.
@@ -33,12 +33,6 @@ import java.util.regex.Pattern;
 public class RetrievalDiagnosticsService {
 
     private static final Logger log = LoggerFactory.getLogger(RetrievalDiagnosticsService.class);
-
-    /**
-     * The citation line, {@code [manual.pdf, p. 590]}: a copy of {@code CitationParser.CITATION_LINE},
-     * which must stay identical. The shape is matched so a chunk without a header keeps its first line.
-     */
-    private static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
     private final VectorStore vectorStore;
     private final RagProperties ragProperties;
@@ -121,7 +115,7 @@ public class RetrievalDiagnosticsService {
             return new String[]{null, text};
         }
         String firstLine = text.substring(0, firstBreak).stripTrailing();
-        if (!CITATION_LINE.matcher(firstLine).matches()) {
+        if (!CitationParser.CITATION_LINE.matcher(firstLine).matches()) {
             return new String[]{null, text};
         }
         return new String[]{firstLine, text.substring(firstBreak).stripLeading()};
