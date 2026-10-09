@@ -1,236 +1,164 @@
 # CLAUDE.md
 
-Orientation for `spring-ai-ragr`. This file is deliberately short: it is loaded into every session, so
-it carries only what is needed *before* opening any file. Detailed context lives in
-`.claude/context/`, loaded on demand — see **Context documents** below.
+Orientation for `spring-ai-ragr`, loaded into every session - so it holds only what is needed before
+opening any file. Detail lives in the READMEs, in the code's own comments, and in `.claude/context/`,
+loaded on demand (see **Context documents**).
 
 ## Overview
 
-A Spring Boot Retrieval-Augmented Generation (RAG) service. Users upload documents, which are parsed,
-chunked, and stored as embeddings in a Postgres/pgvector store. A chat interface answers questions
-grounded in the content of the uploaded documents, with chat history kept in Redis. Answer quality is
-measured continuously on live traffic and on demand against a curated dataset. Three applications do
-this - `ragr-ingest`, `ragr-app` (chat) and `ragr-eval` - sharing one Postgres and talking through the
-vector store and two Kafka topics, never by calling each other, except the golden suite driving chat
-and ragr-eval reading chat's active-generations gauge so its judges wait for idle chat.
+A Retrieval-Augmented Generation system on Spring Boot and Spring AI. Users upload documents, which are
+parsed, chunked and stored as embeddings in Postgres/pgvector; a chat service answers from them, citing
+pages, with history in Redis; and every answer is scored in a separate service, live and against a
+curated dataset. Three applications - `ragr-ingest`, `ragr-app` (chat), `ragr-eval` - share one Postgres
+and talk through the vector store and two Kafka topics, never by calling each other, except the golden
+suite driving chat and ragr-eval reading chat's active-generations gauge so its judges wait for idle
+chat. The design principles are at the top of `README.md`.
 
 ## Stack & versions
 
 - **Java 26**, **Spring Boot 4.1.0** (parent), **Spring AI 2.0.1** (BOM)
-- **LLM**: Ollama — `gemma4:e2b` for chat, `nomic-embed-text` for embeddings (768 dims). No API key;
-  OpenAI config is present but commented out.
-- **Vector store**: PostgreSQL + `pgvector`
-- **Chat memory**: Redis (`spring-ai-model-chat-memory-repository-redis`)
-- **Events**: Kafka (`spring-boot-starter-kafka`, broker `apache/kafka-native` in compose) — completed chat
-  turns are published for evaluation to consume off the chat path
-- **Migrations**: Flyway (`flyway-database-postgresql`) - ragr-ingest owns `public`, ragr-eval owns `eval`
-- **API docs**: springdoc-openapi 3.1.0 (`springdoc-openapi-starter-webmvc-ui`)
-- **Mapping**: modelmapper 3.2.4 (ragr-ingest)
-- **Document parsing** (ragr-ingest): `spring-ai-pdf-document-reader`, `spring-ai-tika-document-reader`, jsoup
-- **Observability**: actuator, `micrometer-registry-prometheus`, `spring-boot-opentelemetry`,
-  `spring-boot-micrometer-tracing-opentelemetry`, `micrometer-tracing-bridge-otel`,
-  `opentelemetry-exporter-otlp`, `loki-logback-appender` (loki4j 2.0.3)
-- Also: `spring-ai-vector-store-advisor`, optional runtime `spring-boot-docker-compose` /
-  `spring-ai-spring-boot-docker-compose` (auto-starts `compose.yaml`)
+- **Models**: Ollama - `gemma4:e2b` for chat and judging, `nomic-embed-text` for embeddings (768 dims,
+  with task prefixes). No API key; the OpenAI config is commented out.
+- **Data**: PostgreSQL + pgvector; Redis for chat memory; Kafka (`apache/kafka-native`) for turns and
+  ratings; Flyway - ragr-ingest owns `public`, ragr-eval owns `eval`
+- **Parsing** (ragr-ingest): Spring AI's PDF and Tika readers, jsoup; modelmapper 3.2.4
+- **API docs**: springdoc-openapi 3.1.0
+- **Observability**: actuator, Prometheus registry, OpenTelemetry tracing (OTLP), loki4j 2.0.3
+- Spring Boot Docker Compose support (ragr-app only) starts `compose.yaml` on a host run
 
 ## Build / run / test
 
 ```bash
-./mvnw spring-boot:run -pl ragr-app -am    # chat service; auto-starts compose.yaml (pgvector, redis,
-                                          # kafka, observability stack)
-./mvnw spring-boot:run -pl ragr-ingest -am # ingestion, once ragr-app is up; owns the public schema
-./mvnw spring-boot:run -pl ragr-eval -am   # evaluation, once ragr-app is up; every JVM's heap is
-                                          # capped in its pom (IntelliJ configs need it too)
+./mvnw spring-boot:run -pl ragr-app -am    # chat; starts compose.yaml's infrastructure
+./mvnw spring-boot:run -pl ragr-ingest -am # ingestion, after ragr-app; owns the public schema
+./mvnw spring-boot:run -pl ragr-eval -am   # evaluation, after ragr-app
 ./mvnw test
 ./mvnw clean package
 ```
 
-Those `spring-boot:run` lines are for people. Each application also runs as a container
-(`./ragr.ps1 docker up [app|ingest|eval]`, the `apps` compose profile, same ports), one mode per
-application at a time. A Claude session launches them only as containers through `ragr.ps1` or through
-IntelliJ's run configurations, killing any running instance first - the `ragr-run` skill, whose default
-mode is in `.claude/run-mode`. Connection addresses stay `localhost` in the YAML; containers override
-them with environment variables in `compose.yaml`, so a change must keep working in both modes.
+Those lines are for people. **A Claude session launches the applications only through `ragr.ps1` (as
+containers) or IntelliJ's run configurations, killing any running instance first** - the `ragr-run`
+skill, whose default mode is in `.claude/run-mode`. Both modes use the same ports. Connection addresses
+stay `localhost` in the YAML and containers override them in `compose.yaml`, so a change must work in
+both modes. Every JVM has a capped heap and SerialGC.
 
 ```
 /ragr-run                      start/restart what the current change needs, in the default mode
-/ragr-run docker ingest        this run only, as a container (ragr.ps1); names: app, ingest, eval
-/ragr-run intellij app eval    this run only, from IntelliJ's run configurations
+/ragr-run docker ingest        this run only, as a container; names: app, ingest, eval
+/ragr-run intellij app eval    this run only, from IntelliJ
 /ragr-run mode docker          change the default (.claude/run-mode)
 /ragr-run status | stop [apps]
-/ragr-run stack up|stop|down   the whole compose stack: the infrastructure and all three containers
+/ragr-run stack up|stop|down   the whole compose stack: infrastructure and all three containers
 ```
+
+The golden suite - not the obvious command; `-Dgroups=eval` alone does not work:
 
 ```bash
 ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 ```
 
-The eval command is not the obvious one and `-Dgroups=eval` alone does not work — see
-`.claude/context/evaluation.md`. It drives the running ragr-app over HTTP, so that must be up with the
-corpus indexed; stop ragr-eval first on this host (memory), and expect minutes.
+It drives the running ragr-app over HTTP, so that must be up with the corpus stored; stop ragr-eval
+first on this host (memory), send one warm-up chat turn after a ragr-app restart, and expect minutes.
 
 ## Project structure
 
 ```
 .
-├── ragr-shared      # plain library, no Spring Boot; shared by all three applications
-│   └── src/main/java/.../subhanmishra/
+├── ragr-shared      # plain library, no Spring Boot - the contracts between the applications
+│   └── .../subhanmishra/
 │       ├── chunk     # ChunkMetadata - the metadata keys every stored chunk carries
 │       ├── citation  # Citation, CitationParser, CitationResolver, AnswerCitations
-│       ├── embedding # TaskPrefixEmbeddingModel - the embedding model's task prefix on every request
-│       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka contracts
-│       │             # between chat and eval
+│       ├── embedding # TaskPrefixEmbeddingModel - the task prefix on every embedding request
+│       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka messages
 │       └── exception # ApiExceptionHandler (abstract; each app's advice extends it),
 │                     # ResourceNotFoundException
-├── ragr-app         # the chat service (port 8080, actuator 9095); publishes turns to Kafka
+├── ragr-app         # chat (8080, actuator 9095); publishes turns and ratings to Kafka
+│   └── src/main
+│       ├── java/.../subhanmishra/
+│       │   ├── config      # SpringAiConfig (prompt, template, advisors), PooledQuestionAnswerAdvisor,
+│       │   │               # RagProperties, SpringAiProperties, RedisConfig, KafkaConfig,
+│       │   │               # EventsProperties, WebConfig, EmbeddingConfig (query prefix), OpenApiConfig
+│       │   ├── controller  # ChatController, AdminDiagnosticsController, ConversationIdInterceptor
+│       │   ├── dto, exception (ChatExceptionHandler)
+│       │   └── service     # ChatService, ChatTurnPublisher, ChatFeedbackPublisher,
+│       │                   # RetrievalDiagnosticsService
+│       └── resources       # application.yaml (activates dev), application-dev.yaml (everything),
+│                           # logback-spring.xml, docs/ (the reference manual, the golden corpus)
+├── ragr-ingest      # ingestion (8081, actuator 9097): upload, parse, chunk, embed, store
+│   └── src/main
+│       ├── java/.../subhanmishra/
+│       │   ├── config      # IngestionProperties (app.ingestion, pipeline version), ChunkingConfig,
+│       │   │               # ThreadPoolConfig, EmbeddingConfig (passage prefix), ModelMapperConfig,
+│       │   │               # OpenApiConfig
+│       │   ├── controller  # DocumentController, BatchUploadStatusAdvice
+│       │   ├── dto, entity, repository, exception (IngestExceptionHandler, two exceptions)
+│       │   └── service     # DocumentMetadataService, DocumentParserService,
+│       │       │           # DocumentIngestionService, DocumentHistoryService
+│       │       └── parse   # ContentBlock (Prose | Table), the Tika/XHTML path, TableChunker
+│       │           └── pdf # PdfBlockReader, table detection, the footer and contents strippers
+│       └── resources       # application.yaml (all of it), logback-spring.xml,
+│                           # db/migration (Flyway V1: public schema, vector_store)
+├── ragr-eval        # evaluation (9096: actuator and human review)
 │   └── src
-│       ├── main
-│       │   ├── java/.../subhanmishra/
-│       │   │   ├── config      # SpringAiConfig, RedisConfig, OpenApiConfig, RagProperties (top-k,
-│       │   │   │               # threshold), SpringAiProperties, KafkaConfig, EventsProperties,
-│       │   │   │               # WebConfig, EmbeddingConfig (the query task prefix)
-│       │   │   ├── controller  # ChatController, AdminDiagnosticsController,
-│       │   │   │               # ConversationIdInterceptor
-│       │   │   ├── dto
-│       │   │   ├── exception   # ChatExceptionHandler
-│       │   │   └── service     # ChatService, RetrievalDiagnosticsService, ChatTurnPublisher
-│       │   └── resources
-│       │       ├── application.yaml          # active profile = dev
-│       │       ├── application-dev.yaml      # everything else
-│       │       ├── logback-spring.xml        # console + Loki appenders
-│       │       └── docs/                     # spring-boot-reference.pdf, the golden corpus
-│       └── test                              # SpringAiApplicationTests, ChatTurnPublisherTest,
-│                                             # ChatController*Test, PooledQuestionAnswerAdvisorTest
-├── ragr-ingest      # ingestion, its own app (port 8081, actuator 9097): upload, parse, chunk, index
-│   └── src
-│       ├── main
-│       │   ├── java/.../subhanmishra/
-│       │   │   ├── config      # IngestionProperties (app.ingestion), ChunkingConfig,
-│       │   │   │               # ThreadPoolConfig, ModelMapperConfig, OpenApiConfig,
-│       │   │   │               # EmbeddingConfig (the passage task prefix)
-│       │   │   ├── controller  # DocumentController, BatchUploadStatusAdvice
-│       │   │   ├── dto
-│       │   │   ├── entity
-│       │   │   ├── exception   # IngestExceptionHandler, DocumentProcessingException,
-│       │   │   │               # UnsupportedDocumentTypeException
-│       │   │   ├── repository
-│       │   │   └── service     # DocumentParserService, DocumentIngestionService,
-│       │   │       │           # DocumentMetadataService, DocumentHistoryService
-│       │   │       └── parse   # ContentBlock (sealed: Prose | Table) and the Tika/XHTML path
-│       │   │           └── pdf # PdfBlockReader: positioned text, table geometry, the two strippers
-│       │   └── resources
-│       │       ├── application.yaml          # all of it; no profiles; multipart limits
-│       │       ├── logback-spring.xml
-│       │       └── db/migration/             # Flyway V1, public schema incl. vector_store
-│       └── test                              # IngestApplicationTests, parser tests
-├── ragr-eval        # evaluation, its own app: stores and scores turns, judges them while chat is
-│   │                # idle, records ratings and reviews, runs the golden suite
-│   └── src
-│       ├── main
-│       │   ├── java/.../subhanmishra/
-│       │   │   ├── config      # EvalConfig, EvalProperties, ObservationConfig,
-│       │   │   │               # JudgeLineEndingAdvisor (LF judge prompts on every platform)
-│       │   │   ├── controller  # TurnReviewController (PUT /eval/turns/{id}/review)
-│       │   │   ├── dto
-│       │   │   ├── entity      # EvalRun, EvalCaseResult, EvalRunStatus, EvalTurn, EvalTurnChunk
-│       │   │   ├── exception   # EvalExceptionHandler
-│       │   │   ├── repository  # EvalTurnRepository (plain SQL: the judge queue, verdicts, feedback)
-│       │   │   └── service     # OnlineEvalService (turn listener), TurnJudgeWorker (the queue),
-│       │   │       │           # TurnJudgeService (the judge stages), ChatIdleGate, FeedbackService,
-│       │   │       │           # TurnReviewService, EvalRetentionService, EvalScoringService,
-│       │   │       │           # EvalMetricsService, GoldenEvalService
-│       │   │       └── eval    # the judges, RetrievalRanking, TurnVerdicts, TaskType, score records,
-│       │   │                   # the golden dataset model
-│       │   └── resources
-│       │       ├── application.yaml          # all of it; no profiles. Port 9096
-│       │       ├── eval/golden-dataset.yaml  # curated regression cases
-│       │       └── db/migration/             # Flyway V1, eval schema, own history table
-│       └── test                              # EvalApplicationTests, scoring, judge, worker and
-│                                             # idle-gate tests,
-│                                             # EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
-├── docker/          # compose service config (grafana, loki, otel, pgadmin, prometheus, tempo)
-├── docker-volume/   # gitignored runtime volume data, not source
-├── .claude/         # gitignored; context documents + hooks (see below)
-├── pom.xml          # parent POM: versions, module list, surefire eval exclusion
-├── compose.yaml     # stays at the root; ragr-app runs from the root to find it, and owns it.
-│                    # The three applications' containers sit behind the `apps` profile
+│       ├── main/java/.../subhanmishra/
+│       │   ├── config      # EvalConfig (the judges), EvalProperties, ObservationConfig,
+│       │   │               # JudgeLineEndingAdvisor
+│       │   ├── controller  # TurnReviewController (PUT /eval/turns/{id}/review)
+│       │   ├── dto, entity (EvalRun, EvalCaseResult, EvalTurn, EvalTurnChunk), exception
+│       │   ├── repository  # EvalTurnRepository (plain SQL: the queue, verdicts, feedback)
+│       │   └── service     # OnlineEvalService, TurnJudgeWorker, TurnJudgeService, ChatIdleGate,
+│       │       │           # FeedbackService, TurnReviewService, EvalRetentionService,
+│       │       │           # EvalScoringService, EvalMetricsService, GoldenEvalService
+│       │       └── eval    # the judges, RetrievalRanking, TurnVerdicts, TaskType, scores, dataset model
+│       ├── main/resources  # application.yaml, eval/golden-dataset.yaml, db/migration (eval schema)
+│       └── test            # unit tests, and EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
+├── docker/          # config for the compose services (grafana, loki, otel, pgadmin, prometheus, tempo)
+├── docker-volume/   # gitignored runtime data
+├── .claude/         # gitignored: context documents, hooks, skills
+├── pom.xml          # parent: versions, modules, the surefire eval exclusion
+├── compose.yaml     # at the root; infrastructure, plus the applications behind the `apps` profile
 ├── Dockerfile       # one layered image per application, from the jar packaged on the host
-├── ragr.ps1         # docker | intellij | status | logs - picks each application's run mode
-├── CLAUDE.md        # this file
-└── README.md        # the system as a whole; each module has its own README (see below)
+├── ragr.ps1         # stack | docker | intellij | status | logs
+└── README.md        # the system as a whole; each module has its own README
 ```
 
-## Architecture in brief
+## Two facts the router cannot deliver in time
 
-**Upload** (`ragr-ingest`, port 8081): `DocumentController` → `DocumentMetadataService` (creates the metadata record) →
-`DocumentParserService` (file → `List<ContentBlock>` → chunks, on `documentProcessingPool`) →
-`DocumentIngestionService` (enrich + write to pgvector, one virtual thread per batch) → status
-`INDEXED`/`FAILED`, with every transition recorded by `DocumentHistoryService`.
+A fact is here only if the mistake it prevents happens in a file no route in `routes.json` covers.
 
-**Chat** (`ragr-app`, port 8080): `ChatController` (base `/ai`) → `ChatService` → `ChatClient` →
-`PooledQuestionAnswerAdvisor` retrieves a candidate pool from pgvector, of which the top-k reach the
-prompt → Ollama generates → history to Redis → `ChatTurnPublisher` sends the turn, with the whole pool,
-to Kafka (`rag.chat.turn.completed`) without holding up the response. Ratings go to `rag.chat.feedback`.
-
-**Evaluation** (`ragr-eval`, a separate process): `OnlineEvalService` consumes each turn → deterministic
-scores, and the turn with its pool stored in `eval_turn` as PENDING → `TurnJudgeWorker` judges queued
-turns one at a time, each judge call held by `ChatIdleGate` until ragr-app has no generation running →
-verdicts in Postgres, rates in Micrometer (port 9096). The golden suite drives ragr-app's real
-`/ai/generate`, reads its own turns back off the same topic, and judges them with the same stages.
-
-Two facts belong here, by a narrow test: a fact earns a place in this section only if the mistake
-it prevents happens in a file no route in `routes.json` covers. Everything else reaches you through
-the router in time, and repeating it here is pure always-loaded cost.
-
-- **Every chunk's stored text begins with a `[filename, p. N]` citation line**, and a `Section:`
-  line under it when the chunk starts mid-section. Both are embedded and persisted, not metadata.
-  Anything that reads chunks back — export, re-ranking, re-chunking — must strip them, with
-  `CitationParser.stripHeader`. This is the only reason the model can cite page numbers at all. The document that owns
-  this (`chat-and-citations.md`) is keyed to the chat path, so it will not fire for the export or
-  migration code where the mistake actually gets made.
-- **Do not use a bare `parallelStream()` for parse work.** It runs on the common pool and defeats the
-  `documentProcessingPool` bulkhead. That pool is for parsing only; ingestion is I/O-bound and uses
-  virtual threads bounded by a `Semaphore`.
+- **Every chunk's stored text begins with a `[filename, p. N]` citation line**, plus a `Section:` line
+  when it starts mid-section. Both are embedded and stored. Anything reading chunks back - export,
+  re-ranking, re-chunking - must remove them with `CitationParser.stripHeader`.
+- **Never use a bare `parallelStream()` for parse work.** It runs on the common pool and bypasses
+  `documentProcessingPool`, the bounded pool for parsing. Embedding and writing use virtual threads
+  bounded by a `Semaphore`.
 
 ## Context documents
 
-Deep context is split into `.claude/context/`, which is **local and gitignored** — in a fresh clone
-these files will not exist, and the pointers below are the map to rebuild rather than a promise.
-
-A `PreToolUse` hook (`.claude/hooks/context-router.ps1`, mapped by `.claude/hooks/routes.json`)
-injects the matching document the first time a session reads or edits a file in that area, once per
-area per session. **If the hook has not fired, read the relevant file directly** — nothing else loads
-these.
+`.claude/context/` is **local and gitignored** - in a fresh clone these files will not exist, so read
+this table as a map to rebuild, not a promise. A `PreToolUse` hook (`.claude/hooks/context-router.ps1`,
+mapped by `.claude/hooks/routes.json`) injects a document the first time a session touches a file in its
+area. **If it has not fired, read the file directly.**
 
 | document | covers | triggered by |
 |---|---|---|
-| `parsing.md` | `ContentBlock`, Tika/jsoup, PDF table geometry, strippers, the chunk-size budget | `service/parse/**`, `DocumentParserService` |
-| `ingestion.md` | batching, virtual threads, Hikari, retry/compensation, throughput measurements, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `ThreadPoolConfig`, `IngestionProperties` |
-| `chat-and-citations.md` | the citation header, `QA_PROMPT_TEMPLATE`, model choice, conversation semantics, the turn event | `ChatService`, `ChatController`, `SpringAiConfig`, `citation/**`, `event/**`, `ChatTurnPublisher` |
-| `evaluation.md` | where eval runs (ragr-eval, Kafka) and why, online vs golden split, judge selection, metric registration, citation fabrication and resolution | `ragr-eval/**`, `service/eval/**`, `Eval*`, `EvalSuiteIT` |
-| `observability.md` | compose stack, tracing/logging wiring, the four dashboards | `docker/**`, `compose.yaml`, `logback-spring.xml` |
-| `api-and-errors.md` | `ApiExceptionHandler` and its three subclasses, upload validation, bulk upload, history, diagnostics | `controller/**`, `exception/**`, `dto/**` |
+| `parsing.md` | the pipeline's shape, tables, strippers, chunk-size evidence | `service/parse/**`, `chunk/**`, `DocumentParserService` |
+| `ingestion.md` | batching, threads, memory, throughput, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `IngestionProperties`, `ThreadPoolConfig`, `embedding/**`, `EmbeddingConfig` |
+| `chat-and-citations.md` | the path, the citation convention, prompt and model evidence, generation settings | `ChatService`, `ChatController`, `SpringAiConfig`, `PooledQuestionAnswerAdvisor`, `citation/**`, `event/**`, `ChatTurnPublisher` |
+| `evaluation.md` | where eval runs and why, the judges and their cost, calibration, the fabrication history | `ragr-eval/**`, `EvalSuiteIT` |
+| `observability.md` | the compose stack, tracing and logging, dashboards, container measurements | `docker/**`, `compose.yaml`, `Dockerfile`, `ragr.ps1`, `logback-spring.xml` |
+| `api-and-errors.md` | `ApiExceptionHandler` and its subclasses, upload validation, bulk upload, diagnostics | `controller/**`, `exception/**`, `dto/**` |
 
-These documents are deliberately thin. The reasoning behind this codebase lives in its comments —
-roughly a third of `src/main/java` is comment text, and classes like `EvalConfig`,
-`DocumentIngestionService` and `CitationParser` carry the measurements behind each decision in their
-javadoc, as `application-dev.yaml` and the files under `docker/` do for configuration. **The code is
-the source; these documents are a thin index over it**, holding only the cross-file narrative and the
-measurement history that no single class owns. When the two disagree, the code is right.
-
-There is deliberately no document for configuration. `application-dev.yaml` comments itself at
-length — read it directly.
-
-Keeping this current is part of the work: when a package moves, update `routes.json`; when a fact
-changes, edit the document rather than appending a correction to it.
+**Where things live.** The code states each rule and its reason; the READMEs are canonical for flows,
+configuration and endpoints; the context documents hold what no single file owns - the cross-file
+story and the measurements behind the choices. When they disagree, the code is right. When a package
+moves, update `routes.json`; when a fact changes, edit the document rather than appending a correction.
 
 ## See also
 
-The user-facing documentation, canonical for what it covers. Do not duplicate it here:
+- `README.md` - the system: design principles, architecture and flows, running, ports and
+  credentials, dashboards.
+- `ragr-ingest/README.md`, `ragr-app/README.md`, `ragr-eval/README.md`, `ragr-shared/README.md` - each
+  module's flow, design choices, configuration, API and examples.
 
-- `README.md` — the system as a whole: architecture and the flows between applications, running,
-  docker service ports and credentials, dashboards and actuator ports.
-- `ragr-ingest/README.md`, `ragr-app/README.md`, `ragr-eval/README.md`, `ragr-shared/README.md` —
-  each module's own flow, configuration, API endpoint tables and curl examples.
-
-A fact belongs in the README of the module it describes. Only what spans modules goes in the root.
+A fact belongs in the README of the module it describes; only what spans modules goes in the root.
