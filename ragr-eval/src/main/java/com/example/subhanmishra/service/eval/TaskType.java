@@ -7,9 +7,8 @@ import java.util.Locale;
 /**
  * What a question asks for - the "task" every metric is broken down by.
  *
- * <p>A closed set on purpose. It becomes a Prometheus tag, so it must not grow with traffic, and five
- * kinds are as many as a dashboard row can usefully compare. The {@link #word} is what the classifier is
- * asked to reply with: one plain word per type, so a one-word judge can answer it.
+ * <p>A closed set on purpose: it is a Prometheus tag, so it must not grow with traffic, and five is as many
+ * as a dashboard row can compare. The {@link #word} is the classifier's one-word reply.
  */
 public enum TaskType {
 

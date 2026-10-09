@@ -17,16 +17,12 @@ import java.util.regex.Pattern;
 /**
  * Recovers {@link ContentBlock}s from the XHTML Tika emits.
  * <p>
- * Tika's parsers already reconstruct table structure from DOCX, XLSX, PPTX and HTML and emit real
- * {@code <table><tr><td>} markup. Spring AI's {@code TikaDocumentReader} defaults to a
- * {@code BodyContentHandler}, which throws those tags away and hands back flat text - so the structure was
- * available and being discarded.
+ * Tika already turns the tables in DOCX, XLSX, PPTX and HTML into {@code <table>} markup; Spring AI's
+ * default handler just throws the markup away. This reads it instead. Only the {@code <body>} is read -
+ * the {@code <head>} is metadata.
  * <p>
- * Only the {@code <body>} is read: Tika's XHTML skeleton always carries a {@code <head>} with the document
- * title, and that is metadata rather than content.
- * <p>
- * Known, deliberate limitations: {@code colspan} and {@code rowspan} are not expanded, and a nested table
- * is flattened into the text of the cell that contains it rather than becoming a block of its own.
+ * Deliberate limits: {@code colspan} and {@code rowspan} are not expanded, and a table inside a cell
+ * becomes part of that cell's text.
  */
 public final class XhtmlBlockParser {
 
@@ -47,12 +43,9 @@ public final class XhtmlBlockParser {
     /**
      * Flattens one element's descendants to a single whitespace-normalised value.
      * <p>
-     * {@code Element.text()} cannot be used for this. It decides where to insert separators from jsoup's
-     * registry of which HTML tags are block-level, and the XML parser registers no tags at all, so every
-     * element looks inline and sibling blocks run together. DOCX and XLSX wrap each line of a cell in its
-     * own {@code <p>}, so relying on it turns "Overheat" and "in the manifold" into "Overheatin the
-     * manifold". Walking the nodes and separating at the same boundaries the prose walker uses keeps the
-     * two consistent. This also folds a nested table into the text of the cell that holds it.
+     * Not {@code Element.text()}: under the XML parser jsoup treats every tag as inline, so the lines of a
+     * cell run together - "Overheat" and "in the manifold" became "Overheatin the manifold". This walk
+     * separates at the same tags the prose walker does.
      */
     private static String flatten(Element element) {
         StringBuilder text = new StringBuilder();
@@ -75,20 +68,16 @@ public final class XhtmlBlockParser {
     }
 
     /**
-     * Reads Tika's XHTML with jsoup's <b>XML</b> parser. This is not a preference - the HTML parser
-     * silently destroys the document. Tika emits a self-closing {@code <title/>} whenever the source has
-     * no title metadata, which most DOCX, XLSX and PPTX files do not. In HTML {@code title} is an RCDATA
-     * element and cannot self-close, so the HTML parser reads {@code <title/>} as an unclosed
-     * {@code <title>} and swallows the rest of the file as its text content, leaving only a trailing
-     * fragment reachable under {@code <body>} - on a real 8-page resume, 1,358 characters out of 14,718,
-     * with no exception and nothing in the logs. The input comes from an XML serialiser and is always
-     * well-formed, so the XML parser is the correct reader for it.
+     * Reads Tika's XHTML with jsoup's <b>XML</b> parser - the HTML parser silently loses most of the
+     * document. Tika writes {@code <title/>} when a file has no title, which most Office files do not. HTML
+     * does not allow a self-closing title, so the HTML parser treats everything after it as the title's
+     * text, and only a fragment of the document is left. The input is always well-formed XML, so the XML
+     * parser is the right one.
      */
     public static List<ContentBlock> parse(String xhtml) {
         Document document = Jsoup.parse(xhtml, "", Parser.xmlParser());
 
-        // Only the body is content; Tika's <head> carries the title and the document metadata. Falling
-        // back to the whole document keeps a body-less fragment readable rather than silently empty.
+        // Only the body is content. A fragment without one is read whole, rather than coming out empty.
         Element body = document.selectFirst("body");
 
         Collector collector = new Collector();
@@ -153,10 +142,8 @@ public final class XhtmlBlockParser {
     }
 
     /**
-     * The first row becomes the header. Office and HTML authors mark header cells with {@code <th>} only
-     * sometimes, so treating row one as the header regardless behaves the same in both cases - and a table
-     * whose first row really is data still reads correctly, because every chunk shows that row above the
-     * values it is being used to label.
+     * The first row is always the header, since authors use {@code <th>} only sometimes. If row one is
+     * really data, the table still reads correctly: every chunk shows it above the rows below.
      */
     private static Optional<ContentBlock> toTable(Element table) {
         List<List<String>> rows = new ArrayList<>();

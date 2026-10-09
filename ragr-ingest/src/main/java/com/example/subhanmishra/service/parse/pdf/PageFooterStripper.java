@@ -10,31 +10,20 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Removes the printed page number that a PDF prints in its page footer.
+ * Removes the page number a PDF prints in its footer. The footer is ordinary text on the page, so it
+ * arrives at the end of the page's text, and it does two kinds of damage:
+ * <ul>
+ *   <li><b>Wrong citations.</b> The printed number is rarely the PDF page number - front matter shifts it
+ *       - and the model prefers the printed one at the bottom of a passage over the correct one in its
+ *       header. Readers following those citations landed 19 pages early.</li>
+ *   <li><b>Useless chunks.</b> A page whose last block is only the footer makes a chunk holding just a
+ *       number, and those were retrieved in place of real content.</li>
+ * </ul>
  *
- * <p>The footer is part of the page's text layer, so it arrives at the end of the extracted page like
- * any other line, and it does two kinds of damage.
- *
- * <p><strong>It makes the model cite the wrong page.</strong> A document's printed page number rarely
- * equals its PDF page number - front matter offsets them - and the model is offered both: the correct
- * PDF page in the citation header at the top of the passage, and a bare printed number at the bottom
- * of the passage that looks like part of the document. It prefers the latter. Measured on the Spring
- * Boot reference manual, whose offset is exactly 19, the evaluation suite recorded a 0.25 citation
- * fabrication rate and <em>every single instance</em> was this: PDF 299 cited as 280, PDF 404 as 385,
- * PDF 392 as 373. A reader following the citation lands 19 pages early.
- *
- * <p><strong>It manufactures worthless chunks.</strong> When a page's last block holds nothing but the
- * footer, the chunk that results is a page number and nothing else - 192 of that manual's 1,275 chunks,
- * 15% of the corpus, each one embedded, stored and retrievable. They are not inert: the query "what is
- * a Spring Boot starter" returned chunks whose entire text was "46" and "555" at similarity 0.775 and
- * 0.772, taking two of the five slots that should have held real content.
- *
- * <p>Detection is by consensus rather than by pattern alone, because "the last line is a number" is not
- * by itself enough to conclude it is a folio - a code block or a table could end that way. The offset
- * between PDF page and printed number is constant for a document, so the modal offset across its pages
- * identifies the scheme, and only a trailing number matching <em>that</em> offset is removed. A document
- * with no consistent folio yields no consensus and nothing is stripped, which is the safe failure.
- * Roman-numeral front matter simply does not match and is ignored on both sides of the calculation.
+ * <p><b>Found by agreement across the document</b>, not by pattern alone, since a code block or a table
+ * can also end in a number. The gap between PDF page and printed number is the same on every page, so the
+ * most common gap identifies the scheme, and only a final number fitting it is removed. With no
+ * consistent scheme nothing is removed - the safe failure.
  */
 public final class PageFooterStripper {
 
@@ -44,15 +33,14 @@ public final class PageFooterStripper {
     private static final Pattern BARE_NUMBER = Pattern.compile("^\\s*(\\d{1,5})\\s*$");
 
     /**
-     * Below this many pages carrying a trailing number there is no population to take a mode from, and
-     * a two-page document that happens to end both pages with a digit would otherwise establish a
-     * "scheme" from pure coincidence.
+     * Fewer pages ending in a number than this is too few to agree on a scheme; two pages could match by
+     * coincidence.
      */
     private static final int MIN_PAGES_FOR_CONSENSUS = 3;
 
     /**
-     * The modal offset has to account for at least this share of the pages that carry a trailing
-     * number. Below it the numbers are not a folio sequence but incidental, so nothing is stripped.
+     * The most common gap must fit at least this share of the pages ending in a number; otherwise the
+     * numbers are incidental and nothing is removed.
      */
     private static final double MIN_AGREEMENT = 0.5;
 

@@ -66,15 +66,13 @@ services:
     volumes:
       - ./docker-volume/redis:/data
 
-  # Carries completed chat turns from the app to evaluation, so scoring and LLM judging stay off the
-  # chat path. The GraalVM native image rather than apache/kafka: it is labelled experimental and for
-  # local development only, which is exactly this use, and a JVM broker is a heap this memory-tight
-  # host would rather not carry.
+  # Carries finished chat turns and ratings from chat to evaluation, keeping evaluation off the chat
+  # path. The GraalVM native image, not apache/kafka: it is meant for local development, which this is,
+  # and saves a JVM heap on a machine short of memory.
   #
-  # Every setting is spelled out because the image applies its built-in defaults only when NO KAFKA_*
-  # variable is set - set one and the rest vanish. These mirror those defaults except for log.dirs,
-  # which the defaults put in /tmp inside the container, and topic auto-creation, which is off so a
-  # mistyped topic name fails instead of quietly creating an empty topic nothing reads.
+  # Every setting is spelled out because the image drops ALL its defaults once any KAFKA_* variable is
+  # set. These match the defaults except log.dirs (out of /tmp) and topic auto-creation (off, so a
+  # mistyped topic name fails instead of creating an empty topic nothing reads).
   kafka:
     image: apache/kafka-native:4.3.1
     container_name: ai_kafka
@@ -86,10 +84,10 @@ services:
       KAFKA_PROCESS_ROLES: 'broker,controller'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
       KAFKA_LISTENERS: 'PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093'
-      # Two listeners because a client is told to reconnect to whatever address the listener it came in
-      # on advertises. PLAINTEXT serves the three applications on the host, as localhost:9092. INTERNAL,
-      # which is not published, serves containers in this compose network - kafka-console - as
-      # kafka:29092; handed localhost:9092 instead, a container reconnects to itself and fails.
+      # Two listeners, because a client reconnects to whatever address its listener advertises.
+      # PLAINTEXT serves applications on the host as localhost:9092. INTERNAL, not published, serves
+      # containers - the applications and kafka-console - as kafka:29092; given localhost, a container
+      # would connect to itself.
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092,INTERNAL://kafka:29092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
@@ -103,14 +101,11 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
       KAFKA_LOG_DIRS: '/var/lib/kafka/data'
     volumes:
-      # Persisted so the topic's retention window survives a restart: replaying retained turns
-      # through a new judge or metric is one of the reasons for putting a log here at all.
+      # Persisted, so retained turns survive a restart and can be replayed through a new metric.
       - ./docker-volume/kafka:/var/lib/kafka/data
-    # Without a healthcheck `up --wait` counts the broker ready the moment its process starts, while
-    # it is still recovering its log - measured at 62s after a restart and ~75s on a cold start, during
-    # which ragr-app and ragr-eval start and cannot connect. The native image has no Kafka CLI tools,
-    # only BusyBox, so this probes the port: the broker listeners open on the same millisecond the log
-    # reports "Enabling request processing", measured, so an open port means it is serving.
+    # Without this, `up --wait` calls the broker ready while it is still recovering its log (about a
+    # minute), and the applications cannot connect. The image has no Kafka tools, so it probes the port,
+    # which opens exactly when the broker starts serving.
     healthcheck:
       test: [ "CMD", "nc", "-z", "localhost", "29092" ]
       interval: 10s
@@ -119,19 +114,16 @@ services:
       start_period: 120s
       start_interval: 2s
 
-  # A browser view of the broker: topics, the retained chat turns decoded as JSON with their traceparent
-  # header, and the ragr-eval consumer group's offsets. The Grafana Kafka row shows rates and lag; this
-  # shows the messages. Redpanda Console rather than a JVM-based UI because it is a Go binary: measured
-  # at 50 MiB idle and 48-50 MiB while streaming the whole topic five times, with no growth - the
-  # broker itself uses ~190 MiB. The limit is ~2.5x that, so a leak shows up as an OOM kill rather than
-  # as memory quietly taken from the Ollama models. Pinned, not latest, for the same reason.
+  # A browser view of Kafka: the stored turns and ratings as JSON, and the ragr-eval group's offsets.
+  # Grafana shows rates and lag; this shows the messages. Redpanda Console because it is a small Go
+  # binary (~50 MiB), not a JVM. The limit is ~2.5x that, so a leak ends in a kill rather than taking
+  # memory from the models. Pinned, not latest, for the same reason.
   kafka-console:
     image: redpandadata/console:v3.12.0
     container_name: ai_kafka-console
     mem_limit: 128m
-    # It waits for the broker's healthcheck, but gives up after ~31s of retries and exits if the broker
-    # goes away later - a restart of Kafka alone takes about a minute - so it is restarted until the
-    # broker answers again.
+    # It gives up after ~31 s without the broker, and a Kafka restart takes about a minute, so it is
+    # restarted until the broker answers.
     restart: on-failure
     environment:
       KAFKA_BROKERS: 'kafka:29092'
@@ -162,9 +154,8 @@ services:
       # Same dev credentials as the pgvector service above.
       DATA_SOURCE_NAME: "postgresql://myuser:secret@pgvector:5432/ragdatabase?sslmode=disable"
     command:
-      # Per-table and per-index stats are off by default, and vector_store's index-vs-sequential
-      # scan counts are the main reason for running this exporter here.
-      # Note the asymmetric naming: stat_user_tables but statio_user_indexes.
+      # Per-table and per-index stats are off by default, and vector_store's index versus sequential
+      # scans are the main reason for this exporter. Note the names: stat_user_tables, statio_user_indexes.
       - "--collector.stat_user_tables"
       - "--collector.statio_user_indexes"
       - "--collector.stat_activity"
@@ -251,10 +242,8 @@ services:
       - ./docker-volume/tempo-data:/var/tempo
     ports:
       - "3200:3200"   # tempo
-    # No healthcheck, for the same reason as Loki: current grafana/tempo:latest images ship without
-    # /bin/sh, so a CMD-SHELL check can never run, the container reports unhealthy, and `docker compose
-    # up --wait` - which Spring Boot runs on a cold start - fails and aborts startup. Nothing waits on
-    # Tempo being healthy - the collector's and grafana's depends_on are plain ordering.
+    # No healthcheck: the image has no /bin/sh, so a check could never pass, and `up --wait` (which
+    # Spring Boot runs on a cold start) would abort. Nothing waits on Tempo being healthy.
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
@@ -266,40 +255,25 @@ services:
       - ./docker/loki/local-config.yaml:/etc/loki/local-config.yaml
     ports:
       - "3100:3100" # Loki API
-    # No healthcheck: current grafana/loki:latest images ship without /bin/sh, so a CMD-SHELL check can
-    # never run, the container reports unhealthy, and Spring Boot's compose integration aborts startup.
-    # Nothing waits on Loki being healthy - grafana's depends_on is plain ordering.
+    # No healthcheck, as for Tempo: the image has no /bin/sh. Nothing waits on Loki being healthy.
     labels:
       - "org.springframework.boot.readiness-check.skip=true"
 
-  # The three applications, for the Docker run mode. Behind the `apps` profile, so a plain
-  # `docker compose up` - including the one ragr-app's own Docker Compose integration runs when it is
-  # started from IntelliJ - still starts the infrastructure only. Start them with ./ragr.ps1, which
-  # packages the jars on the host first; `docker compose --profile apps up --build` on its own builds
-  # from whatever is already in target/. Never set COMPOSE_PROFILES=apps in a .env file: compose reads
-  # it, and an IntelliJ-launched ragr-app would then start its own container and clash on its ports.
+  # The three applications, for the Docker run mode.
   #
-  # Each publishes the same host ports as its IntelliJ run, so Prometheus's host.docker.internal
-  # targets, the Swagger links and the golden suite work unchanged in either mode, and an application
-  # cannot be up in both at once - the second fails to bind.
+  # - Behind the `apps` profile, so a plain `docker compose up` - including the one ragr-app runs when
+  #   started from IntelliJ - starts only the infrastructure. Start them with ./ragr.ps1, which packages
+  #   the jars first. Never set COMPOSE_PROFILES=apps in a .env file: an IntelliJ ragr-app would then
+  #   start its own container as well.
+  # - The same host ports as an IntelliJ run, so Prometheus, Swagger and the golden suite work in either
+  #   mode, and an application cannot run in both at once.
+  # - Only the addresses differ, as environment variables over the localhost defaults in each YAML.
+  #   Ollama stays on the host for the GPU (host.docker.internal); Kafka is reached on INTERNAL.
+  # - depends_on lists only infrastructure, never another application, so each starts alone. No restart
+  #   policy, so Docker Desktop starting at login does not bring them up behind an IntelliJ session.
   #
-  # Only the addresses differ from an IntelliJ run, as environment variables over the localhost
-  # defaults in each application's YAML. Ollama stays native on Windows for the iGPU, reached through
-  # host.docker.internal; Kafka through the INTERNAL listener.
-  #
-  # Ollama is not containerised, nor replaced by Docker Model Runner. In a container it would run in the
-  # WSL2 VM, which cannot reach the Iris Xe through Vulkan - CPU only. Model Runner runs llama.cpp on
-  # the host and does use the iGPU (Docker Desktop 4.93, Vulkan, every layer offloaded), but measured
-  # 2 Oct 2026 on gemma4 e2b Q4_K_M with a 2.5k-token RAG prompt, one engine loaded at a time:
-  # prompt ingestion 143 tok/s against Ollama's 205, generation level (12.0 vs 12.3 tok/s). It also
-  # defaults to thinking on (off only via chat_template_kwargs.enable_thinking), a 131072-token context
-  # on 4 slots plus the vision projector - 5.5 GB resident against Ollama's 1.7 - and its weights
-  # differ from Ollama's (4.09 GB file vs 7.2), so a switch means a new golden baseline and a full
-  # re-ingest. Worth revisiting only if its prompt ingestion catches up.
-  #
-  # depends_on is the infrastructure each one cannot start without, never another application, so
-  # each can be started and restarted alone. No restart policy: Docker Desktop starting at login must
-  # not bring the applications up behind an IntelliJ session.
+  # Ollama is not in a container (the WSL2 VM cannot use the iGPU) nor replaced by Docker Model Runner
+  # (slower prompt reading and more memory, measured 2 Oct 2026).
   ragr-app:
     profiles: [ "apps" ]
     image: ragr-app:local
@@ -308,22 +282,17 @@ services:
       context: .
       args:
         MODULE: ragr-app
-    # The limits sit above each JVM's worst case - heap cap plus what it uses outside the heap - so a
-    # full heap still ends in an OutOfMemoryError the log explains, never a silent OOM kill; they are
-    # there to stop a native leak taking memory from the Ollama models. Measured 1 Oct 2026 after a
-    # grounded turn, as cgroup anon minus committed heap: 218 MiB outside the heap for ragr-app,
-    # 245 for ragr-ingest, 184 for ragr-eval. A limit reserves nothing, so it costs no memory.
+    # Above the JVM's worst case (heap cap plus ~218 MiB outside the heap, measured), so a full heap is an
+    # OutOfMemoryError the log explains, never a silent kill. The limit stops a native leak taking memory
+    # from the models; it reserves nothing.
     mem_limit: 650m
-    # Without one, Docker (29.8 here) waits only 3 s after SIGTERM before SIGKILL - measured, not the
-    # 10 s often quoted. A chat turn in flight takes far longer, and Boot's graceful shutdown waits up to
-    # 30 s for it, so every stop mid-turn ended in exit 137, the turn cut off and the last logs and
-    # spans never flushed. 40 s covers the 30 s phase and what comes after it.
+    # Docker here waited only 3 s before killing the JVM, cutting off requests, logs and traces. 40 s
+    # covers Spring Boot's 30 s graceful shutdown.
     stop_grace_period: 40s
     environment:
       <<: *ragr-common-env
       JDK_JAVA_OPTIONS: "-Xmx384m -XX:+UseSerialGC"
-      # The compose integration is IntelliJ's way of starting the stack; inside the network it has no
-      # compose.yaml and no docker CLI.
+      # Docker Compose support is how IntelliJ starts the stack; inside a container it has nothing to do.
       SPRING_DOCKER_COMPOSE_ENABLED: "false"
       SPRING_DATASOURCE_URL: "jdbc:postgresql://pgvector:5432/ragdatabase"
       SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
@@ -382,9 +351,7 @@ services:
         MODULE: ragr-eval
     # 256 MB heap cap plus ~184 MiB outside it - see ragr-app above.
     mem_limit: 480m
-    # Docker's 3 s default - see ragr-app - does not cover a judgement in flight: shutdown waits up to
-    # app.eval.judge.shutdown-wait-seconds (20) for it before interrupting, after the Kafka
-    # consumer has left its group. Raising that wait means raising this too.
+    # Covers app.eval.judge.shutdown-wait-seconds (20) for the judgement in flight; raise both together.
     stop_grace_period: 40s
     environment:
       <<: *ragr-common-env

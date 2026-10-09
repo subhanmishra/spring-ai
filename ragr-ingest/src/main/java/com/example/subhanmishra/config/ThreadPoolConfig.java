@@ -15,18 +15,13 @@ public class ThreadPoolConfig {
     private static final Logger log = LoggerFactory.getLogger(ThreadPoolConfig.class);
 
     /**
-     * Creates a dedicated, named thread pool for document processing to enforce a bulkhead pattern.
-     * <p>
-     * This prevents CPU-intensive document parsing from starving other application threads (e.g., web server threads).
-     * The parallelism level is set to half the available processors, ensuring a significant portion of CPU
-     * is left for other tasks. A minimum of one thread is guaranteed for the pool.
-     *
-     * @return A custom, named ForkJoinPool for document processing tasks.
+     * A separate pool for parsing, which is CPU-heavy, so it cannot starve the web threads. Half the
+     * cores, at least one. Parsing only: embedding and writing wait on I/O and use virtual threads.
      */
     @Bean
     public ForkJoinPool documentProcessingPool() {
         int availableProcessors = Runtime.getRuntime().availableProcessors();
-        // Leave at least half the cores for other tasks, but ensure at least 1 thread for the pool
+        // Half the cores, at least one.
         int parallelism = Math.max(1, availableProcessors / 2);
 
         final AtomicInteger threadNumber = new AtomicInteger(0);
@@ -38,7 +33,7 @@ public class ThreadPoolConfig {
 
         Thread.UncaughtExceptionHandler exceptionHandler = (t, e) -> log.error("Uncaught exception in thread: {}", t.getName(), e);
 
-        // false for asyncMode uses LIFO, which is generally better for performance in divide-and-conquer tasks.
+        // asyncMode false: LIFO, which suits divide-and-conquer work.
         return new ForkJoinPool(parallelism, factory, exceptionHandler, false);
     }
 }

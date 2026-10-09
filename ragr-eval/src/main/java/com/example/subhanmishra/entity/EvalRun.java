@@ -10,17 +10,13 @@ import java.util.UUID;
 /**
  * One execution of the curated evaluation suite.
  *
- * <p>A record rather than the builder-and-setters shape the document entities use: these rows are
- * written once and read back for reporting, never mutated in place, so immutability costs nothing and
- * the canonical constructor is what Spring Data JDBC binds to. A null {@code id} marks a new row and
- * lets Postgres supply {@code gen_random_uuid()}.
+ * <p>A record: rows are written once and never changed. A null {@code id} lets Postgres generate one.
  *
- * <p>The configuration columns are the point of the table. A score without the chat model, judge
- * model, top-k and threshold that produced it cannot be compared to any other score.
+ * <p><b>The settings columns are the point of the table.</b> A score without the chat model, judge
+ * model, top-k and threshold behind it cannot be compared with any other.
  *
- * <p>The corpus is not recorded here, but each case's turn in {@code eval_turn} carries the pipeline
- * versions of the chunks it was answered from, and the dashboard marks every re-ingest on the trend
- * lines - two runs either side of one are scoring different chunks.
+ * <p>The corpus is not recorded here, but each case's turn carries its chunks' pipeline versions, and
+ * the dashboard marks every re-ingest: runs either side of one scored different chunks.
  */
 @Table(name = "eval_run")
 public record EvalRun(@Id @Nullable UUID id,
@@ -54,8 +50,8 @@ public record EvalRun(@Id @Nullable UUID id,
                       @Nullable String errorMessage) {
 
     /**
-     * A run about to start. The pipeline's own settings are not known yet - they belong to ragr-app,
-     * which the run drives over HTTP - and are filled in by {@link #withPipeline} from the first turn.
+     * A run about to start. Chat's settings are not known yet; {@link #withPipeline} fills them in from the
+     * first turn.
      */
     public static EvalRun starting(String suite,
                                    int caseCount,
@@ -84,12 +80,10 @@ public record EvalRun(@Id @Nullable UUID id,
     /**
      * @param contextPrecision       reference-based, from the dataset's expected pages. Null when no
      *                               case in the run scored recall.
-     * @param judgedContextPrecision reference-free, from the per-chunk LLM judge. Null on an unjudged
-     *                               run, which is the default - and null rather than zero, for the same
-     *                               reason {@code relevancyRate} is.
-     * @param citedContextPrecision  attribution-based, a chunk counted as used when the answer cites its
-     *                               page. Free and deterministic, so measured on every run; null only
-     *                               when no case retrieved anything.
+     * @param judgedContextPrecision from the per-chunk judge; null (not zero) on an unjudged run, the
+     *                               default
+     * @param citedContextPrecision  a chunk counted as used when the answer cites its page. Free, so on
+     *                               every run; null only when no case retrieved anything.
      * @param recallAtK              page-level recall against expected pages, averaged over the cases that
      *                               declare them; null when none does. {@code ndcgAtK} likewise.
      * @param phraseCoverage         share of expected phrases found, over the cases that declare any.

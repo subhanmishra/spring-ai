@@ -41,14 +41,10 @@ public class DocumentHistoryService {
     /**
      * Reads back the audit trail for one document, oldest entry first.
      *
-     * <p>This deliberately does not require the document to still exist. There is no foreign key from
-     * {@code document_metadata_history} back to {@code document_metadata}, and {@code deleteDocument}
-     * removes only the metadata row, so a deleted document keeps its trail - which is the reason the
-     * table exists. The response reports whether the document is still present so a caller can tell
-     * the two situations apart rather than having to guess from the last status.
+     * <p>The document need not still exist: history has no foreign key to it and outlives a delete, which
+     * is why the table exists. The response says whether the document is still there.
      *
-     * @throws ResourceNotFoundException when no history exists for the id at all, which is the only
-     *                                   case in which there is genuinely nothing to show
+     * @throws ResourceNotFoundException when there is no history for the id at all
      */
     public DocumentHistoryDto getHistory(UUID documentId) {
         List<DocumentMetadataHistory> entries =

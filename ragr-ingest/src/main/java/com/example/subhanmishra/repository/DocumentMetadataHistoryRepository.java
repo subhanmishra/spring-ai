@@ -13,10 +13,8 @@ public interface DocumentMetadataHistoryRepository extends ListCrudRepository<Do
     /**
      * The audit trail for one document, oldest entry first.
      *
-     * <p>There is deliberately no foreign key from {@code document_metadata_history} back to
-     * {@code document_metadata}, so this can return rows for a document that has since been deleted.
-     * That is the point of the table - the migration calls it an immutable audit log - and not a case
-     * to treat as corruption.
+     * <p>May return rows for a deleted document. That is the point of the table - there is deliberately
+     * no foreign key - not corruption.
      */
     List<DocumentMetadataHistory> findByDocumentMetadataIdOrderByCreatedAtAsc(UUID documentMetadataId);
 }

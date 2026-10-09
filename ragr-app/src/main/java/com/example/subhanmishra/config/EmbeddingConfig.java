@@ -12,10 +12,10 @@ import org.springframework.context.annotation.Primary;
 public class EmbeddingConfig {
 
     /**
-     * Ollama's model, wrapped so every query - the chat path's and the diagnostics endpoint's alike - is
-     * embedded with {@code app.embedding.task-prefix}. Primary, so it is the one {@code PgVectorStore} is
-     * built with. Ollama's own bean still exists to be wrapped: its auto-configuration backs off only for
-     * another {@link OllamaEmbeddingModel}.
+     * Ollama's model, wrapped so every question - from chat and from the diagnostics endpoint - is embedded
+     * with {@code app.embedding.task-prefix}. Primary, so {@code PgVectorStore} uses it. Ollama's own bean
+     * is still created, since its auto-configuration backs off only for another
+     * {@link OllamaEmbeddingModel}.
      */
     @Bean
     @Primary

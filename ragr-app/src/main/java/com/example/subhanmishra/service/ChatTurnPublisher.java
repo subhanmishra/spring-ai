@@ -32,20 +32,18 @@ import java.util.concurrent.Executors;
 /**
  * Hands each completed chat turn to Kafka for evaluation to pick up, without ever holding up the answer.
  *
- * <p><strong>The send happens on a virtual thread, not the caller's.</strong> {@code KafkaTemplate.send}
- * looks asynchronous but is not entirely: it blocks the calling thread while it waits for the broker's
- * metadata and whenever its buffer is full, for up to {@code max.block.ms}. That defaults to 60 seconds,
- * so with the broker down every chat response would stall for a minute. It is set to 500 ms in
- * {@code application-dev.yaml} as well, which bounds how long each of these threads can live.
- *
- * <p><strong>Delivery is at most once.</strong> A turn that cannot be sent is counted and dropped, never
- * retried from here or stored for later. Evaluation is sampled observability, and a transactional outbox
- * would put a database write on every chat turn to protect data that does not need it. A rising
- * {@code rag_chat_turn_events_total{outcome="dropped"}} means the broker is unreachable, not that chat
- * is failing.
- *
- * <p>Trace context is captured on the caller's thread and restored on the sending one, so the send - and,
- * through the observation-enabled template, the consumer's processing of it - joins the chat turn's trace.
+ * <ul>
+ *   <li><b>Sent on a virtual thread, not the caller's.</b> {@code KafkaTemplate.send} can block while it
+ *       waits for the broker - 60 s by default, which with Kafka down would stall every answer. It is
+ *       also capped at 500 ms ({@code max.block.ms} in application-dev.yaml).</li>
+ *   <li><b>At most once.</b> A turn that cannot be sent is counted and dropped, never retried or stored.
+ *       Evaluation is observability; an outbox table would add a database write to every chat turn to
+ *       protect data that does not need it. A rising
+ *       {@code rag_chat_turn_events_total{outcome="dropped"}} means Kafka is unreachable, not that chat
+ *       is failing.</li>
+ *   <li><b>Traced.</b> The caller's trace context is carried onto the sending thread, so the send and its
+ *       processing in ragr-eval join the chat turn's trace.</li>
+ * </ul>
  */
 @Service
 public class ChatTurnPublisher {
@@ -90,8 +88,8 @@ public class ChatTurnPublisher {
     }
 
     /**
-     * Publishes one turn. Returns immediately and never throws: the answer has already been generated,
-     * and nothing that goes wrong here is worth turning a successful response into an error.
+     * Publishes one turn. Returns at once and never throws: nothing here is worth turning a good answer
+     * into an error.
      */
     public void publish(Turn turn) {
         if (!properties.enabled()) {

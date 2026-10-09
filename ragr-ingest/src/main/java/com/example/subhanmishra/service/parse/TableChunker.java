@@ -10,15 +10,13 @@ import java.util.regex.Pattern;
 /**
  * Renders a {@link ContentBlock.Table} as one or more Markdown chunks.
  * <p>
- * Two rules make the difference between a table that retrieves well and one that misleads the model:
+ * Two rules make a table retrieve well and read correctly:
  * <ul>
- *   <li><b>Markdown pipe format.</b> The header row sits textually adjacent to every data row, so the
- *       embedding actually sees the column names, and {@code llama3.2} reads the result without being
- *       told how to.</li>
- *   <li><b>The header is repeated on every chunk.</b> A table too large for one chunk is cut between
- *       rows - never within one - and each piece restates the caption, the header and the separator.
- *       Without this, rows in the second chunk carry values with nothing to bind them to, which is the
- *       most common way a RAG answer confidently misreads a table.</li>
+ *   <li><b>Markdown pipe format.</b> The column names sit right above the rows, so the embedding sees them,
+ *       and the chat model reads the format without being told how.</li>
+ *   <li><b>The header is repeated on every chunk.</b> A large table is cut between rows, never inside one,
+ *       and each piece repeats the caption and header. Otherwise later rows are values with no column
+ *       names - the most common way a RAG answer misreads a table.</li>
  * </ul>
  */
 public final class TableChunker {
@@ -55,8 +53,7 @@ public final class TableChunker {
         int prefixTokens = TokenCounter.count(prefix);
 
         if (table.rows().isEmpty()) {
-            // A header-only table still carries its column names, which are often the answer to
-            // "what fields does X have". Emit it rather than dropping it.
+            // A header-only table is kept: its column names often answer "what fields does X have".
             return List.of(new TableChunk(prefix, 0, 0));
         }
 
@@ -83,10 +80,9 @@ public final class TableChunker {
             currentTokens += rowTokens;
 
             if (currentTokens > ceilingTokens) {
-                // One row plus its header already exceeds what the embedding model will read. Splitting
-                // it further would separate the values from the header, which defeats the point of
-                // chunking a table by rows at all, so emit it whole and say so: the stored text is
-                // complete but the vector is derived from a server-side truncation of it.
+                // One row and its header are already more than the embedding model reads. Splitting the
+                // row would part values from their header, so it is kept whole: the stored text is
+                // complete, but its vector comes from a truncated copy.
                 log.warn("Table row {} plus its header is {} tokens, above the {} token embedding ceiling; "
                          + "the chunk is stored whole but its embedding will be truncated",
                          rowNumber, currentTokens, ceilingTokens);
@@ -110,9 +106,8 @@ public final class TableChunker {
     }
 
     /**
-     * Renders one row, padding it out to {@code width} so a ragged row still lines its values up under the
-     * right column names. A row with more cells than the header keeps them: dropping data is worse than an
-     * uneven table, and Markdown renderers simply ignore the surplus.
+     * Renders one row, padded to {@code width} so a short row still lines up under the right column names.
+     * Extra cells beyond the header are kept: losing data is worse than an uneven table.
      */
     private static String renderRow(List<String> cells, int width) {
         StringBuilder row = new StringBuilder("|");

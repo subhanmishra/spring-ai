@@ -58,10 +58,9 @@ public class ChatService {
     /**
      * Generations running right now, published as {@code rag.chat.generations.active}.
      *
-     * <p>ragr-eval reads it before every judge call and waits while it is above zero. The judges and chat
-     * share the one Ollama runner, which serves one request at a time, so a judge call started while a
-     * user is waiting puts that user behind it. Counted from the request into the model to the last token,
-     * which covers retrieval too - a judge call started mid-retrieval would still be ahead in the queue.
+     * <p>ragr-eval reads it before every judge call and waits while it is above zero: the judges and chat
+     * share one Ollama runner that serves one request at a time, so a judge call would make the user
+     * wait. Counted from the start of retrieval to the last token.
      */
     private final AtomicInteger activeGenerations = new AtomicInteger();
 
@@ -84,21 +83,17 @@ public class ChatService {
     /**
      * Answers a prompt, and publishes the turn for evaluation on the way out.
      *
-     * <p>Takes the {@code ChatClientResponse} rather than {@code content()} so the retrieved documents
-     * can be read back. {@link PooledQuestionAnswerAdvisor} puts the chunks it retrieved into the advisor
-     * context under {@link QuestionAnswerAdvisor#RETRIEVED_DOCUMENTS}, which is the only way to see the
-     * context an answer was actually built on without re-running the search - and a second search would
-     * be a different search, since it would not share this one's filters or timing.
-     *
-     * <p>The answer is passed through {@link CitationResolver} before it is published or reported. That
-     * rewrites a section number the model wrote where a page belongs - "(…, p. 5.3)" - into the page of
-     * the retrieved chunk whose heading it names. The model still cites inline, and the evaluation scores
-     * those inline citations; the caller receives them as {@code citations} instead, with the answer text
-     * stripped of them by {@link AnswerCitations}.
-     *
-     * <p>Evaluation happens in a separate application. {@link ChatTurnPublisher} hands the turn to Kafka
-     * on a virtual thread and returns at once, so nothing about scoring or judging is on this method's
-     * critical path - not even when the broker is down.
+     * <ol>
+     *   <li>Asks the model, reading the whole {@code ChatClientResponse} rather than just its text: the
+     *       chunks the answer was built on are in its context, under
+     *       {@link QuestionAnswerAdvisor#RETRIEVED_DOCUMENTS}. Searching again would not be the same
+     *       search.</li>
+     *   <li>{@link CitationResolver} turns section numbers cited as pages back into pages.</li>
+     *   <li>{@link ChatTurnPublisher} hands the turn to Kafka and returns at once, so evaluation is never
+     *       on this path - not even when Kafka is down.</li>
+     *   <li>{@link AnswerCitations} takes the inline citations out of the text; the caller gets them as
+     *       {@code citations}.</li>
+     * </ol>
      */
     public ChatAnswerDto generate(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
@@ -135,21 +130,16 @@ public class ChatService {
     /**
      * Streams an answer as server-sent events, publishing the turn once the stream completes.
      *
-     * <p>The answer text arrives as unnamed events, with its inline citations removed as it goes by
-     * {@link AnswerCitations.StreamingStripper} - which holds back a span only from its opening bracket
-     * until its closing one, so the stream still streams. Two named events follow the last token:
-     * {@code sources}, then {@code done} carrying the citations and usage.
+     * <p>The text arrives as unnamed events, with citations removed as it goes by
+     * {@link AnswerCitations.StreamingStripper}. Then come {@code sources}, and {@code done} with the
+     * citations and usage.
      *
-     * <p>The retrieved documents are read from the advisor context, which
-     * {@code ChatModelStreamAdvisor} copies onto every chunk - not from the response metadata, which
-     * {@code QuestionAnswerAdvisor.after} fills only on the final chunk. That is what lets citations be
-     * recognised mid-stream: a pageless one, "(manual.docx)", is a citation only if that file was
-     * retrieved.
+     * <p>The retrieved chunks are read from the advisor context, which every streamed chunk carries - the
+     * response metadata has them only on the last one. Citations can be recognised mid-stream only because
+     * of this: "(manual.docx)" is a citation only if that file was retrieved.
      *
-     * <p>The answer is still accumulated whole, because the evaluation and the citation report need the
-     * text as the model wrote it. They run only once the tokens have all been delivered: a cancelled or
-     * failed stream is neither published nor reported, since a half-delivered answer is not an answer, and
-     * judging one would report a truncation as a quality problem.
+     * <p>The whole answer is also collected, for evaluation and the citation report, which run once the
+     * stream completes. A cancelled or failed stream is not published: half an answer is not an answer.
      */
     public Flux<ServerSentEvent<?>> generateStream(String prompt, String conversationId, TurnOrigin origin) {
         long started = System.nanoTime();
@@ -241,8 +231,8 @@ public class ChatService {
     }
 
     /**
-     * The chunks the advisor retrieved for this turn, or empty when the turn was not grounded - which
-     * is normal, since the assistant also answers general conversation with no retrieval behind it.
+     * The chunks in this turn's prompt, or empty when nothing was retrieved - normal for a general
+     * question.
      */
     @SuppressWarnings("unchecked")
     private static List<Document> retrievedDocuments(ChatClientResponse response) {
@@ -251,10 +241,9 @@ public class ChatService {
     }
 
     /**
-     * The citations in the answer, one per distinct source cited, checked against the retrieved chunks
-     * by the same rules the evaluation scores them with - followed by any bare section references,
-     * "(5.3)", reported as REPAIRED against the page that heading sits on. Those come last and are not
-     * counted by the evaluation, which scores file citations only.
+     * One entry per distinct source cited, checked by the same rules evaluation uses. Bare section
+     * references such as "(5.3)" come last, as REPAIRED to their heading's page; evaluation does not count
+     * those.
      */
     private static List<CitationDto> citations(Resolution resolution, List<Document> retrieved,
                                                AnswerCitations.Context context) {
@@ -334,8 +323,7 @@ public class ChatService {
     }
 
     /**
-     * Where a retrieved chunk says it comes from: its citation header when it has one - that is what the
-     * model saw and cites - and its metadata otherwise.
+     * Where a chunk comes from: its citation header, which is what the model saw, or else its metadata.
      */
     private record SourceKey(@Nullable String fileName, @Nullable Integer page) {
 
@@ -363,15 +351,12 @@ public class ChatService {
     /**
      * Reads back a stored conversation, oldest message first.
      *
-     * <p>Reads through the repository rather than {@link ChatMemory#get}, because the two answer
-     * different questions even though {@code MessageWindowChatMemory} currently answers them the same
-     * way. The repository reports what is stored; {@code ChatMemory} reports what the next turn would
-     * be given, and a memory implementation that windowed on read instead of on write would silently
-     * truncate this endpoint.
+     * <p>Through the repository, not {@link ChatMemory#get}: the repository says what is stored,
+     * {@code ChatMemory} what the next turn would be given. They agree today, but would not if the
+     * memory ever trimmed on read.
      *
-     * @throws ResourceNotFoundException if nothing is stored under that id - which is also what an
-     *                                   already-cleared conversation looks like, since Redis keeps no
-     *                                   tombstone to tell the two apart
+     * @throws ResourceNotFoundException if nothing is stored under the id - also how a deleted
+     *                                   conversation looks, since Redis keeps no record of deletions
      */
     public ConversationDto getConversation(String conversationId) {
         List<Message> messages = this.chatMemoryRepository.findByConversationId(conversationId);
@@ -385,8 +370,7 @@ public class ChatService {
     }
 
     /**
-     * Drops one conversation. Silent when the id is unknown, so that the endpoint calling this stays
-     * idempotent - deleting an already-deleted conversation is not an error.
+     * Deletes one conversation. An unknown id is not an error, so deleting twice is safe.
      */
     public void clearConversation(String conversationId) {
         this.chatMemory.clear(conversationId);

@@ -3,10 +3,8 @@ package com.example.subhanmishra.entity;
 /**
  * Lifecycle of a golden evaluation run.
  *
- * <p>{@link #RUNNING} is persisted before any case executes, rather than the row being written once at
- * the end. A suite takes minutes - a single grounded answer on this host is 53-70 seconds - so a run
- * that dies partway through would otherwise leave nothing at all behind, and an empty table is
- * indistinguishable from a suite nobody ran.
+ * <p>{@link #RUNNING} is saved before any case runs, not at the end: a run takes minutes, and one that
+ * died part-way would otherwise leave no trace.
  */
 public enum EvalRunStatus {
 

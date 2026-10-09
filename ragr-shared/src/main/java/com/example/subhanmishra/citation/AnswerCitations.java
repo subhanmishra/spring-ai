@@ -13,14 +13,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Decides which bracketed spans in an answer are citations, whether the retrieved context supports
- * them, and removes them from the text a caller reads.
+ * Decides which bracketed spans in an answer are citations, whether the retrieved chunks support them,
+ * and removes them from the text a caller reads.
  *
- * <p>The model is still asked to cite inline, and the evaluation still scores those inline citations -
- * they are the only per-claim attribution there is. What changes is the reader's copy: the chat
- * endpoints return the answer with its citations removed and report them as structured data beside it.
- * Both halves read the rules here, so what the response calls a citation is exactly what the fabrication
- * rate counts.
+ * <p>The model still cites inline, because those citations are the only per-claim attribution there is
+ * and evaluation scores them. The caller gets the answer without them, and the citations as data beside
+ * it. Chat and evaluation both use the rules here, so what the response calls a citation is exactly what
+ * the fabrication rate counts.
  */
 public final class AnswerCitations {
 
@@ -73,16 +72,13 @@ public final class AnswerCitations {
     /**
      * Whether a bracketed candidate is a citation rather than a filename named in prose.
      *
-     * <p>A candidate is a citation when it carries a page number, or when its filename is one of the
-     * documents actually retrieved. Answers about this corpus are full of parentheses holding
-     * filenames - "(application.properties)", "(pom.xml)" - which are the model naming a file in prose,
-     * not claiming a source. Counting those as fabricated would swamp the fabrication rate with false
-     * positives and make the one metric that matters most here unreadable; stripping them would delete
-     * words from the answer.
+     * <p>A candidate is a citation when it has a page number, or when its filename is a retrieved
+     * document. Answers about Spring Boot are full of filenames in brackets - "(application.properties)",
+     * "(pom.xml)" - that name a file, not a source. Counting them would flood the fabrication rate with
+     * false alarms, and stripping them would delete words from the answer.
      *
-     * <p>Note what the rule still catches: a page number attached to a filename that was never
-     * retrieved ("(application.properties, p. 12)") is a citation, and an unsupported one, because
-     * inventing a page for a file the model was not given is exactly the failure being measured.
+     * <p>A page number on a file that was never retrieved - "(application.properties, p. 12)" - is
+     * still a citation, and an unsupported one: inventing a location is exactly what is being measured.
      */
     public static boolean isCitation(Citation candidate, Set<String> availableFileNames) {
         return candidate.pageNumber() != null
@@ -93,22 +89,14 @@ public final class AnswerCitations {
     /**
      * Whether the retrieved context actually supports this citation.
      *
-     * <p>A citation carrying a page number has to match a retrieved chunk exactly - that is the
-     * fabrication check, and the whole point of the metric.
-     *
-     * <p>A citation with <em>no</em> page is judged on its filename alone, and that distinction is
-     * deliberate rather than lax. "(spring-boot-reference.pdf)" names a document that really was
-     * retrieved; it is less precise than it could be, but nothing about it is invented, and lumping it
-     * in with a page number the model made up conflates imprecision with dishonesty. It is also the
-     * only correct form for a Tika source - DOCX, XLSX, PPTX and HTML have no page attribution, so
-     * {@code citationHeader} omits the page half and a pageless citation is exactly right there.
-     *
-     * <p>Found by the evaluation suite itself: a run flagged a bare "[spring-boot-reference.pdf]" as
-     * fabricated, which was the scorer being wrong rather than the model.
-     *
-     * <p>A <em>malformed</em> page reference is the case in between, and it is never supported. "(…, p.
-     * 5.3)" is a section number written where a page belongs: the model did claim a location, so the
-     * leniency above does not apply, and the location it claimed is not one the context offered.
+     * <ul>
+     *   <li><b>With a page:</b> it must match a retrieved chunk exactly. This is the fabrication check.</li>
+     *   <li><b>Without a page:</b> the filename alone must be retrieved. "(spring-boot-reference.pdf)" is
+     *       imprecise but invents nothing - and for DOCX, HTML and the other formats without pages it is
+     *       the only correct form.</li>
+     *   <li><b>With a malformed page</b>, such as "p. 5.3": never supported. The model claimed a location,
+     *       and it is not one it was given.</li>
+     * </ul>
      */
     public static boolean isSupported(Citation citation, List<Citation> available, Set<String> availableFileNames) {
         if (citation.hasMalformedPage()) {
@@ -124,14 +112,13 @@ public final class AnswerCitations {
      * into it - "dependencies (manual.pdf, p. 42)." becomes "dependencies.". A span at the start of a
      * line takes the whitespace after it instead, so the line does not start with a space.
      *
-     * <p>Two kinds of span go: file citations, and bare section references like "(5.3)" - the model
-     * naming a heading it read, without the filename. A bare number is only a reference when it heads a
-     * retrieved page; "(3.14)" is left alone unless 3.14 is one of those headings, because otherwise it
-     * is a version number or a decimal, and deleting it would delete content.
+     * <p>Two kinds of span are removed: file citations, and bare section references like "(5.3)". A bare
+     * number counts only when it heads a retrieved page; otherwise "(3.14)" is a version or a decimal,
+     * and removing it would remove content.
      *
-     * <p>A span holding anything other than citations is left whole. "(see the table on manual.pdf,
-     * p. 42, for defaults)" reads as prose around a citation, and cutting the citation out of it would
-     * leave a sentence fragment; leaving one citation in the text is the smaller defect.
+     * <p>A span with anything else in it is left whole. Cutting the citation out of "(see the table on
+     * manual.pdf, p. 42, for defaults)" would leave a broken sentence; one citation left in the text is
+     * the smaller problem.
      */
     public static String strip(@Nullable String answer, Context context) {
         if (answer == null || answer.isEmpty()) {
@@ -223,14 +210,13 @@ public final class AnswerCitations {
     /**
      * {@link #strip} applied to an answer as it streams in.
      *
-     * <p>A citation arrives split across tokens - "(manual" then ".pdf, p." then " 42)" - so nothing
-     * from an opening bracket onwards can be released until its closing bracket shows whether the span
-     * was a citation. That hold is the only one: text outside a bracket is released as soon as it
-     * arrives, except for trailing spaces, which wait in case a citation follows and takes them with it.
-     * The delay is a handful of tokens, never the whole answer.
+     * <p>A citation arrives split across tokens - "(manual", ".pdf, p.", " 42)" - so text from an opening
+     * bracket is held until its closing bracket shows whether it was a citation. Everything else is
+     * released at once, apart from trailing spaces, which wait in case a citation follows and takes them.
+     * The delay is a few tokens, never the whole answer.
      *
-     * <p>Released text is always a prefix of {@code strip} over everything received so far, cut at a
-     * point no later token can change, so what a client has already rendered is never contradicted.
+     * <p>What is released is always the start of what {@code strip} would return for the whole answer,
+     * so nothing a client has already shown is ever taken back.
      */
     public static final class StreamingStripper {
 

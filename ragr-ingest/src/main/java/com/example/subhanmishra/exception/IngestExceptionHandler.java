@@ -16,10 +16,9 @@ public class IngestExceptionHandler extends ApiExceptionHandler {
     /**
      * An upload whose type the parser does not handle.
      *
-     * <p>Registered on the subclass while {@link DocumentProcessingException} keeps its 422: Spring
-     * resolves to the closest match in the hierarchy, so the two coexist without ambiguity. The
-     * distinction is worth keeping - 422 means the content could not be processed, whereas this means
-     * the type was never accepted, and nothing was written before saying so.
+     * <p>415, while its parent {@link DocumentProcessingException} keeps 422 - Spring picks the closest
+     * match. The difference matters: 422 means the content could not be processed, 415 that the type was
+     * never accepted and nothing was written.
      */
     @ExceptionHandler(UnsupportedDocumentTypeException.class)
     public ProblemDetail handleUnsupportedType(UnsupportedDocumentTypeException ex) {

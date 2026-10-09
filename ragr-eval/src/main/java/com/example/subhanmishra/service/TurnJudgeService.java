@@ -41,29 +41,25 @@ import java.util.concurrent.TimeoutException;
  * <ol>
  *   <li><b>task</b> - the question's {@code TaskType}.</li>
  *   <li><b>chunk grades</b> - every chunk in the pool, 0/1/2, for precision, pooled recall, MRR and NDCG.
- *       The last stage an ungrounded turn gets. Its answer is never judged (a standing rule - judging
- *       general conversation against no context would drag groundedness down in proportion to how much
- *       of it the assistant handles), but its pool is: every chunk fell below the similarity threshold,
- *       and a relevant one among them means the threshold left the model with no context at all when
- *       there was some to give - the most direct sign it is set too tight. Such a turn's recall is 0;
- *       one whose pool holds nothing relevant has no recall, and is simply a question the corpus does
- *       not cover.</li>
- *   <li><b>relevancy</b> and <b>groundedness</b> - Spring AI's two judges, kept as they were so their
- *       history stays comparable.</li>
+ *       The last stage an ungrounded turn gets. Its answer is never judged - a standing rule: judging
+ *       general conversation against no context would drag groundedness down. But its pool is graded: a
+ *       relevant chunk there means the threshold kept useful context from the model, the clearest sign it
+ *       is too tight (recall 0). A pool with nothing relevant is just a question the corpus does not
+ *       cover.</li>
+ *   <li><b>relevancy</b> and <b>groundedness</b> - Spring AI's two judges, unchanged so their history
+ *       stays comparable.</li>
  *   <li><b>claims</b> - extraction, then one batched verification: faithfulness as a fraction.</li>
  *   <li><b>citation support</b> - each valid citation's sentence against its passage.</li>
  *   <li><b>completeness</b> - whether every part of the question was answered.</li>
  * </ol>
  *
- * <p>Budget, from calls timed 6 Oct 2026 on this host (prompt evaluation ~150 tokens/s, verdicts ~0.1 s):
- * ten chunk grades ~25 s, relevancy 9-22 s, groundedness ~5 s, claims ~25 s, two citation checks ~6 s,
- * completeness and task a few seconds - roughly 90-100 s of model time per grounded turn, against
- * 16-75 s for the chat turn itself. The idle gate is what makes that affordable: it is spent only while
- * nobody is waiting.
+ * <p><b>Cost.</b> Whole grounded turns have taken 42-66 s of judge time; adding up each stage's slowest
+ * case gives up to ~90-100 s. Either way the idle gate makes it affordable: it is spent only while nobody
+ * is waiting.
  *
- * <p>A stage that times out or returns something unreadable leaves its fields null and the turn PARTIAL;
- * the stages after it still run. The worker being stopped mid-turn is different: that surfaces as
- * {@link Interrupted} so the turn can be put back in the queue rather than saved half-judged.
+ * <p>A stage that times out or returns nonsense leaves its fields null and the turn PARTIAL, and the
+ * later stages still run. A worker stopped mid-turn is different: it throws {@link Interrupted}, so the
+ * turn goes back in the queue instead of being saved half-judged.
  */
 @Service
 public class TurnJudgeService {

@@ -14,9 +14,9 @@ import java.time.Instant;
  * Deletes evaluated live turns, their pools and feedback once they are older than
  * {@code app.eval.retention.live-days}. Golden turns stay with their runs.
  *
- * <p>Daily, because nothing reads a turn by its age closer than that, and a turn is a few KB of chunk text.
- * The live turns are the only place user questions are kept outside chat memory - which keeps its own
- * 24-hour TTL - so this is also the bound on how long they are kept here.
+ * <p>Daily is precise enough, and a turn is only a few KB. Live turns are the only copy of users'
+ * questions outside chat memory (which expires after 24 hours), so this also bounds how long they are
+ * kept.
  */
 @Service
 public class EvalRetentionService {

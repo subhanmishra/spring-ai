@@ -5,7 +5,7 @@
 .DESCRIPTION
     Each application runs in exactly one of two modes at a time:
 
-      intellij  launched from its IntelliJ run configuration, as it always has been
+      intellij  launched from its IntelliJ run configuration
       docker    the ai_ragr-* container from the `apps` profile in compose.yaml
 
     Both publish the same host ports, so nothing else - Prometheus, Grafana, Swagger, the golden

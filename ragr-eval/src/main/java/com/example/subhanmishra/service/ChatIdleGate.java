@@ -17,18 +17,15 @@ import java.util.Map;
  * Holds each judge call until no chat generation is running.
  *
  * <p>The judges and chat share one Ollama runner that serves one request at a time, so a judge call
- * started while a user waits puts that user behind it. Kafka took judging off the chat <em>thread</em>;
- * this is what takes it off the chat <em>model</em>. Measured 6 Oct 2026 before the gate existed: a chat
- * turn takes 16-75 s alone, and the two judges then running on every turn took 5-22 s each.
+ * makes a waiting user wait longer. Kafka took judging off chat's <em>thread</em>; this takes it off
+ * chat's <em>model</em>.
  *
- * <p>The signal is ragr-app's {@code rag.chat.generations.active} gauge, read from its actuator. This is
- * the second place one application calls another - the first being the golden suite driving chat - and
- * it is read-only. An unreachable ragr-app counts as idle: with no chat running there is nobody to
- * protect, and an eval process that stopped judging whenever ragr-app was down would build a backlog for
- * no reason.
+ * <p>The signal is ragr-app's {@code rag.chat.generations.active} gauge, read from its actuator - one of
+ * only two places an application calls another, and read-only. An unreachable ragr-app counts as idle:
+ * with no chat running there is nobody to protect.
  *
- * <p>What it cannot do is pre-empt. A user who arrives while a judge call is already running waits for
- * that one call - which is why the judges are many short calls rather than a few long ones.
+ * <p>It cannot pre-empt. A user arriving mid-call waits for that one call - which is why the judges are
+ * many short calls, not a few long ones.
  */
 @Service
 public class ChatIdleGate {
@@ -44,8 +41,7 @@ public class ChatIdleGate {
     public ChatIdleGate(EvalProperties properties, RestClient.Builder restClients, MeterRegistry registry) {
         this.properties = properties.judge().idleGate();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
-        // A probe that hangs would hold the judge just as surely as a busy chat; a second is plenty for a
-        // local actuator read.
+        // A hanging probe would hold the judge as surely as busy chat; a second is plenty locally.
         requestFactory.setReadTimeout(Duration.ofSeconds(1));
         this.actuator = restClients.baseUrl(this.properties.chatActuatorUrl().toString())
                                    .requestFactory(requestFactory)

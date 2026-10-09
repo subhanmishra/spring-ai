@@ -56,16 +56,12 @@ public class DocumentIngestionService {
     /** Stamped on every chunk as {@link ChunkMetadata#PIPELINE_VERSION}; see {@link IngestionProperties#pipelineVersion}. */
     private final String pipelineVersion;
 
-    /**
-     * Each batch commits on its own connection, so batch writes cannot join the caller's transaction.
-     * REQUIRES_NEW states that explicitly and stays correct even if a caller ever holds one.
-     */
+    /** Each batch commits on its own, in a new transaction, even if a caller ever holds one. */
     private final TransactionTemplate transactionTemplate;
 
     /**
-     * Bounds how many batches may hold a pooled connection at once. Virtual threads are cheap but Hikari
-     * connections are not, so the permit count - not the thread count - is what protects the pool. The
-     * semaphore lives on this singleton, so the bound is global across concurrent uploads.
+     * Limits how many batches are written at once, across all uploads. Virtual threads are cheap but
+     * database connections are not, so this - not the thread count - protects the connection pool.
      */
     private final Semaphore ingestionPermits;
 
@@ -90,21 +86,18 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Deliberately not {@code @Transactional}: batches are written concurrently, and a JDBC transaction is
-     * bound to one thread and one connection. An enclosing transaction here would pin an idle connection
-     * for the whole run while the real writes committed outside it. The all-or-nothing guarantee is kept
-     * by the compensating delete in {@link #deleteWrittenChunks(DocumentMetadata)} instead.
+     * Deliberately not {@code @Transactional}. Batches are written on several threads, and a transaction
+     * belongs to one thread, so an outer one would only hold an idle connection while the real writes
+     * committed outside it. All-or-nothing is kept by {@link #deleteWrittenChunks} instead.
      */
     public int ingest(DocumentMetadata metadata, Map<String, Object> parseResult) {
         log.info("Starting ingestion process for document [id={}, name={}]", metadata.getId(), metadata.getFilename());
 
-        // Record the PROCESSING milestone. This happens in a new, separate transaction
-        // and will not be rolled back if a batch write fails.
+        // In its own transaction, so a failed batch does not roll it back.
         historyService.recordHistory(metadata.getId(), DocumentStatus.PROCESSING, "Starting to chunk and embed document");
 
         Stream<Document> enrichedStream = getEnrichedStream(metadata, (Stream<Document>) parseResult.get("documentStream"), pipelineVersion);
 
-        // 2. Batch the stream, then write the batches concurrently to the vector store
         List<List<Document>> batches = partition(enrichedStream, ingestionProperties.batchSize()).toList();
         int totalChunks = writeBatches(metadata, batches);
 
@@ -117,27 +110,22 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Runs one virtual thread per batch. {@code StructuredTaskScope} would express this more directly but
-     * is still a preview API on this JDK, and preview class files would pin the build to exactly Java 26
-     * and require --enable-preview on the launcher too.
+     * One virtual thread per batch. ({@code StructuredTaskScope} would fit better, but is still a preview
+     * API on Java 26.)
      */
     private int writeBatches(DocumentMetadata metadata, List<List<Document>> batches) {
         if (batches.isEmpty()) {
             return 0;
         }
 
-        // Captured on the caller's thread so the batch threads inherit the trace context. Without this
-        // their log lines reach Loki with an empty traceId and the logs/traces correlation breaks.
+        // Carries the trace context onto the batch threads, so their logs link to the right trace.
         ContextSnapshot snapshot = contextSnapshotFactory.captureAll();
         AtomicBoolean aborted = new AtomicBoolean(false);
 
         try {
-            // The first batch is written on the calling thread, which both does real work and warms up
-            // Ollama. Ollama loads the embedding model lazily, and requests that arrive while its model
-            // runner is still starting are proxied to a port nothing is listening on yet; that surfaces
-            // as a connection-refused message wrapped in an HTTP 400, which Spring AI treats as
-            // non-transient and will not retry. Fanning out only after one request has completed means
-            // the runner is loaded and listening before any concurrency arrives.
+            // The first batch runs alone, to warm Ollama up. Ollama loads the embedding model on first
+            // use, and requests that arrive while it is still loading fail with "connection refused" (as
+            // an HTTP 400 that Spring AI will not retry). Only after one batch succeeds do the rest start.
             int totalChunks = writeBatch(metadata, batches.getFirst(), aborted);
 
             List<Callable<Integer>> tasks = batches.subList(1, batches.size())
@@ -145,8 +133,7 @@ public class DocumentIngestionService {
                                                    .map(batch -> snapshot.wrap((Callable<Integer>) () -> writeBatch(metadata, batch, aborted)))
                                                    .toList();
 
-            // Virtual threads, so one per batch is fine; the semaphore inside writeBatch is what bounds
-            // the load on the connection pool. close() on the try-with-resources awaits termination.
+            // The semaphore in writeBatchOnce limits the load; closing the executor waits for every batch.
             if (!tasks.isEmpty()) {
                 try (ExecutorService executor = Executors.newThreadPerTaskExecutor(ingestionThreadFactory)) {
                     for (Future<Integer> future : executor.invokeAll(tasks)) {
@@ -171,10 +158,9 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Retries a batch only when the failure is Ollama's model runner being unreachable. Spring AI's own
-     * retry cannot cover this: Ollama reports the unreachable runner as HTTP 400, which maps to
-     * {@code NonTransientAiException} and is deliberately never retried. Re-adding the same batch is safe
-     * because the vector store upserts on chunk id, so a partially applied attempt is overwritten.
+     * Retries a batch only when Ollama's model runner could not be reached. Spring AI's retry never sees
+     * this, because Ollama reports it as an HTTP 400. Writing the same batch again is safe: the vector
+     * store upserts by chunk id.
      */
     private int writeBatch(DocumentMetadata metadata, List<Document> batch, AtomicBoolean aborted) throws InterruptedException {
         long backoffMillis = ingestionProperties.retryBackoff().toMillis();
@@ -199,8 +185,7 @@ public class DocumentIngestionService {
         ingestionPermits.acquire();
         try {
             if (aborted.get()) {
-                // A sibling batch already failed and the whole document is going to be rolled back,
-                // so there is nothing to gain by embedding and writing this one.
+                // Another batch failed and the document will be rolled back; skip the work.
                 return 0;
             }
             log.info("Writing batch of {} vector chunks to PgVectorStore for document: {}", batch.size(), metadata.getFilename());
@@ -213,9 +198,8 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Ollama surfaces an unreachable model runner as a Go dial error embedded in an HTTP 400 body, so the
-     * message text is the only signal available. Matching narrowly keeps genuine 400s (malformed request,
-     * oversized input) failing fast instead of burning the retry budget on a permanent error.
+     * The error message is the only sign of an unreachable runner. Matching it narrowly keeps real 400s,
+     * such as a malformed request, failing at once instead of being retried.
      */
     private static boolean isModelRunnerUnavailable(Throwable failure) {
         for (Throwable cause = failure; cause != null && cause != cause.getCause(); cause = cause.getCause()) {
@@ -231,8 +215,8 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Compensating action for a partially written document. Batches commit independently, so this is what
-     * restores the guarantee that a failed ingestion leaves no chunks behind.
+     * Undoes a partly written document. Batches commit separately, so this is what makes a failed upload
+     * leave no chunks behind.
      */
     private void deleteWrittenChunks(DocumentMetadata metadata) {
         try {
@@ -250,10 +234,9 @@ public class DocumentIngestionService {
             throw new IllegalStateException("Parsing result did not contain a document stream.");
         }
 
-        // 1. Enrich metadata on each chunk lazily as part of the stream
         AtomicInteger chunkIndex = new AtomicInteger(0);
-        // The section a chunk belongs to is carried forward from the chunks before it, which relies on
-        // the stream being sequential and in document order - the same assumption chunkIndex makes.
+        // The current section carries forward from chunk to chunk, so this stream must be sequential and
+        // in document order - as chunkIndex also assumes.
         AtomicReference<@Nullable String> currentSection = new AtomicReference<>();
         return documentStream.map(chunk -> {
             Map<String, Object> newMetadata = new HashMap<>(chunk.getMetadata());
@@ -263,8 +246,8 @@ public class DocumentIngestionService {
             newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
             newMetadata.put(ChunkMetadata.PIPELINE_VERSION, pipelineVersion);
             List<String> headings = CitationResolver.sectionHeadings(chunk.getText());
-            // The section the chunk's first line belongs to, read before this chunk's own headings move it
-            // on - named in the header only when the chunk does not open with that heading itself.
+            // The section the chunk starts in, read before its own headings move it on. Named in the
+            // header only when the chunk does not open with that heading.
             String openedIn = CitationResolver.opensWithSectionHeading(chunk.getText()) ? null : currentSection.get();
             String section = headings.isEmpty() ? currentSection.get() : headings.getFirst();
             if (!headings.isEmpty()) {
@@ -287,47 +270,28 @@ public class DocumentIngestionService {
     }
 
     /**
-     * Builds the citation line prepended to every chunk's text, e.g. {@code [manual.pdf, p. 590]}.
+     * Builds the header at the start of every chunk's text: the citation line {@code [manual.pdf, p. 590]},
+     * and a {@code Section:} line when the chunk starts part-way through a section.
      *
-     * <p>This is deliberately part of the chunk <em>text</em>, not just its metadata, because
-     * {@code QuestionAnswerAdvisor} builds the RAG context with {@code Document::getText} and discards
-     * metadata entirely - so a page number that lives only in metadata can never reach the model, and the
-     * system prompt's request to cite page numbers is unsatisfiable. Three call sites read {@code getText()}
-     * and all three are affected on purpose:
-     * <ul>
-     *   <li>{@code OllamaEmbeddingModel.embed(Document)} - the header is embedded along with the content;</li>
-     *   <li>{@code PgVectorStore} - the stored {@code content} column includes the header;</li>
-     *   <li>{@code QuestionAnswerAdvisor} - the header reaches the prompt, which is the point.</li>
-     * </ul>
+     * <p><b>Why it is part of the text, not only metadata.</b> Spring AI builds the prompt from each
+     * chunk's text and drops its metadata, so a page number kept only in metadata could never reach the
+     * model. Being text, the header is also embedded and stored with the chunk. The costs, accepted: every
+     * vector carries the same filename, which narrows the gap between scores a little, and the stored text
+     * is not the document's own - anything reading chunks back must remove the header with
+     * {@code CitationParser.stripHeader}.
      *
-     * <p>Known costs, accepted when this was chosen over formatting the citation at prompt-assembly time:
-     * the filename is identical on every chunk, so a constant prefix on every vector compresses the spread
-     * between them (the measured top-5 band was 0.8194-0.7927 before this); the page number varies, adding a
-     * numeric signal unrelated to meaning; and the stored text is no longer verbatim what the document said,
-     * so anything reading chunks back must strip this line. Chunks written before this existed carry no
-     * header and cannot be cited - re-ingest a document to make its citations work.
-     *
-     * <p>A chunk that starts part-way through a section gets a second line naming it, {@code Section:
-     * Customizing the Management Server Port}, without its number so the model is not offered a section
-     * number where it should cite a page. Chunk boundaries fall wherever the budget runs out, so a chunk
-     * can hold an example with nothing saying what it configures: on 6 Oct 2026 the page 301 chunk was
-     * "Properties / management.server.port=8081 / Yaml ...", its heading left in the chunk before. Asked
-     * how to fix "port 8080 already in use", gemma4:e2b copied that example as the application's port in
-     * 7 of 10 answers, and a system-prompt rule telling it to check which component an example configures
-     * changed nothing (4 of 5, at both placements tried) - it cannot check what the passage never says.
-     * With the section named beside the passage it did so in 0 of 10, while "how do I move the actuator
-     * to another port" still got management.server.port in 5 of 5. The line is embedded too, so the
-     * chunk's vector carries its subject as well.
+     * <p><b>Why the section line.</b> A chunk can start with an example whose heading fell in the chunk
+     * before, and then nothing in it says what the example configures. Naming the section fixed answers
+     * that took the actuator's {@code management.server.port} for the application's own port, where a
+     * prompt rule had not. The number is left off the title so the model is not offered a section number
+     * where it should cite a page.
      */
     private static String citationHeader(String fileName, Object pageNumber, @Nullable String section) {
-        // Tika sources (DOCX/XLSX/PPTX/HTML) have no page attribution, so the page half is omitted rather
-        // than written as a guess - a wrong citation is worse than an absent one.
+        // Formats without pages get no page: a wrong citation is worse than a missing one.
         String citation = pageNumber != null
                 ? "[%s, p. %s]".formatted(fileName, pageNumber)
                 : "[%s]".formatted(fileName);
-        // "\n\n", not System.lineSeparator(): this string is persisted in the vector store's content column
-        // and embedded, so letting it follow the host OS would make the stored corpus differ between a
-        // Windows dev machine (CRLF) and a Linux deployment for the same source document.
+        // "\n", not System.lineSeparator(): this is stored and embedded, so it must not depend on the OS.
         if (section == null) {
             return citation + "\n\n";
         }
@@ -335,7 +299,7 @@ public class DocumentIngestionService {
         return citation + "\n" + CitationParser.SECTION_LINE_PREFIX + title + "\n\n";
     }
 
-    // Helper method to partition a stream into batches
+    // Splits the chunks into batches. This collects the whole stream first.
     private <T> Stream<List<T>> partition(Stream<T> source, int size) {
         final AtomicInteger counter = new AtomicInteger(0);
         return source.collect(Collectors.groupingBy(_ -> counter.getAndIncrement() / size)).values().stream();

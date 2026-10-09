@@ -5,18 +5,15 @@ import org.jspecify.annotations.Nullable;
 /**
  * One citation, either as the model wrote it in an answer or as a retrieved chunk declared it.
  *
- * <p>{@code pageNumber} is null for a source with no page attribution - Tika reads DOCX, XLSX, PPTX
- * and HTML without any, so {@code DocumentIngestionService.citationHeader} omits the page half rather
- * than guessing one. A citation with no page is therefore legitimate and must not be scored as
- * malformed.
- *
- * <p>{@code pageLabel} is the third case, and it exists because reporting it as either of the other two
- * was wrong. Asked for a page, {@code gemma4:e2b} sometimes writes the <em>section</em> number it read
- * in the passage - "(spring-boot-reference.pdf, p. 5.3)", where 5.3 is the heading "5.3. Endpoints" and
- * the passage came from page 277. Reading that as page 5 reports a fabrication the model never claimed;
- * reading it as no page at all scores it valid, since the file really was retrieved. So the text is kept
- * verbatim, {@code pageNumber} stays null, and the citation can never match a chunk header - headers are
- * generated and always carry a plain integer.
+ * <p>Three cases:
+ * <ul>
+ *   <li><b>A page number</b> - the normal case.</li>
+ *   <li><b>No page</b> - correct for DOCX, XLSX, PPTX and HTML, which have no pages.</li>
+ *   <li><b>A {@code pageLabel}</b> - the model wrote something else where the page belongs, usually a
+ *       section number: "p. 5.3". It is kept as written, with no page number, so it is neither read as
+ *       page 5 nor treated as having no page. It can never match a chunk header, whose page is always a
+ *       plain number.</li>
+ * </ul>
  *
  * @param fileName   the source file, compared case-insensitively
  * @param pageNumber the 1-based page, or null when the source has no pages or the reference was not one
@@ -35,12 +32,9 @@ public record Citation(String fileName, @Nullable Integer pageNumber, @Nullable 
     }
 
     /**
-     * Whether this citation refers to the same place as another. Filenames are compared ignoring case
-     * because the model reproduces them from the prompt and is not reliable about case; page numbers
-     * must match exactly, including both being absent.
-     *
-     * <p>A malformed page reference matches nothing. It is not "no page" - the model did claim a
-     * location, and the one it claimed is not a page.
+     * Whether this citation points at the same place as another: the same filename ignoring case (the
+     * model is careless about case) and exactly the same page, or both without one. A page label matches
+     * nothing.
      */
     public boolean matches(Citation other) {
         if (other == null || !this.fileName.equalsIgnoreCase(other.fileName)) {

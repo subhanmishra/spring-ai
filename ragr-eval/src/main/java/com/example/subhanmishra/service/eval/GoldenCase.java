@@ -9,45 +9,33 @@ import java.util.stream.Stream;
 /**
  * One case in the curated regression dataset.
  *
- * <p>Every field beyond {@code id} and {@code query} is an assertion, and every assertion is optional.
- * That is deliberate: the useful cases are not all the same shape. A recall case declares
- * {@code expectedPages} and cares only about retrieval; a hallucination case declares
- * {@code expectGrounded: false} and asserts that the model declines rather than inventing a citation;
- * a conversational case declares {@code expectRefusal: false} and guards the system prompt's General
- * Knowledge capability against a change that makes the assistant refuse everything off-corpus.
+ * <p>Every field beyond {@code id} and {@code query} is an optional assertion, because useful cases come
+ * in different shapes: a recall case lists {@code expectedPages}; a hallucination case sets
+ * {@code expectGrounded: false} and expects no invented citation; a conversational case sets
+ * {@code expectRefusal: false}, so the assistant keeps answering general questions.
  *
- * @param id             stable identifier, used as the metric tag and the row key, so renaming one
- *                       breaks continuity with earlier runs. Prefer adding a case to renaming one.
- * @param query          the question, sent through the real chat path exactly as a user would send it
- * @param description    why this case exists - what regression it is meant to catch
- * @param expectedFile   the document the answer should come from, matched case-insensitively
- * @param expectedPages  pages that genuinely contain the answer. Retrieving any one of them counts as a
- *                       hit; the rank of the first is what feeds reciprocal rank. Leave empty to skip
- *                       recall scoring for this case rather than asserting a hit against nothing.
- * @param mustContain    strings the answer must include, compared case-insensitively. Intended for
- *                       exact tokens - a property name, a class name, a default value - not prose,
- *                       which a model will paraphrase.
+ * @param id             stable identifier - the metric tag and row key. Renaming one breaks continuity
+ *                       with earlier runs; add a case instead
+ * @param query          the question, sent through the real chat path
+ * @param description    why the case exists - the regression it catches
+ * @param expectedFile   the document the answer should come from, matched ignoring case
+ * @param expectedPages  pages that hold the answer. Retrieving any is a hit; the first one's rank feeds
+ *                       MRR. Empty skips recall scoring for this case
+ * @param mustContain    strings the answer must include, ignoring case. Exact tokens - a property, a
+ *                       class, a default - not prose, which the model paraphrases
  * @param mustNotContain strings the answer must not include
- * @param expectGrounded whether the corpus can actually answer this. False marks a deliberate
- *                       out-of-corpus question, where the correct behaviour is to answer without
- *                       citing anything - so any citation at all is a fabrication.
- * @param expectRefusal  whether the assistant should decline. Almost always false: the system prompt
- *                       explicitly promises to answer general knowledge, and the stock
- *                       QuestionAnswerAdvisor template that forbids it is softened for that reason.
- * @param expectedPagesMode how page recall reads {@code expectedPages}: {@code ALL} (the default) when
- *                       the answer needs every listed page, {@code ANY} when each listed page answers the
- *                       question on its own, so retrieving one is full recall. Hit rate and MRR ignore it.
- * @param category       the {@link TaskType} this case exercises, so golden results can be broken down the
- *                       way live ones are; optional
- * @param relevantPages  further pages whose retrieved chunks state part of the answer, beyond the
- *                       {@code expectedPages} that hold it. Verified by reading chunk text, like those.
- *                       Only the judge's calibration reads them: recall, hit rate and MRR keep asking
- *                       whether the pages known to hold the answer were found, and a page added here
- *                       must not lower the bar for that.
- * @param mustNotMatch   regular expressions the answer must not match, case-insensitively - for a wrong
- *                       answer that shares its words with a right one, where {@code mustNotContain} would
- *                       fail both. Compiled when the dataset loads, so a malformed pattern fails the run
- *                       before any question is asked.
+ * @param expectGrounded whether the corpus can answer this. False marks an out-of-corpus question, where
+ *                       any citation is a fabrication
+ * @param expectRefusal  whether the assistant should decline. Almost always false: it is meant to answer
+ *                       general questions too
+ * @param expectedPagesMode {@code ALL} (default) when the answer needs every listed page, {@code ANY} when
+ *                       each answers on its own. Only page recall reads it
+ * @param category       the {@link TaskType} this case exercises, for the per-task breakdown; optional
+ * @param relevantPages  other pages whose chunks hold part of the answer, checked by reading them. Only the
+ *                       judge's calibration reads these; recall, hit rate and MRR stay on the expected pages
+ * @param mustNotMatch   regular expressions the answer must not match, ignoring case - for a wrong answer
+ *                       that uses the right words. Compiled on load, so a bad pattern fails before any
+ *                       question is asked
  */
 public record GoldenCase(String id,
                          String query,

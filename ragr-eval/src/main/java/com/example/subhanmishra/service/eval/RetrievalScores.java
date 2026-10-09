@@ -5,20 +5,15 @@ import java.util.List;
 /**
  * What the retrieval step produced for one query, scored without reference to any expected answer.
  *
- * @param retrievedCount   chunks the advisor actually retrieved. Fewer than the configured top-k means
- *                         the similarity threshold excluded the rest, and zero means the answer was
- *                         ungrounded no matter how confident it sounds.
- * @param topScore         similarity of the best hit, or 0 when nothing was retrieved
- * @param lowestScore      similarity of the worst hit that still cleared the threshold
- * @param scoreSpread      {@code topScore - lowestScore}. Worth watching as the corpus grows: every
- *                         chunk carries an identical filename prefix in its embedded text, which
- *                         compresses the spread between vectors, and a band that narrows towards zero
- *                         means top-k ranking is becoming arbitrary.
- * @param pagesRetrieved   distinct pages present in the retrieved set, in rank order
- * @param chunksWithHeader how many retrieved chunks carry a citation header. Anything below
- *                         {@code retrievedCount} means the corpus is mixed - some chunks predate the
- *                         header and cannot be cited - and citation metrics are being scored against a
- *                         context that was never fully citable.
+ * @param retrievedCount   chunks in the prompt. Fewer than top-k means the threshold cut the rest; zero
+ *                         means the answer was ungrounded, however confident it sounds
+ * @param topScore         similarity of the best chunk, or 0 when nothing was retrieved
+ * @param lowestScore      similarity of the weakest chunk that cleared the threshold
+ * @param scoreSpread      {@code topScore - lowestScore}. Watch it as the corpus grows: every chunk embeds
+ *                         the same filename, which narrows the gap, and near zero the ranking is arbitrary
+ * @param pagesRetrieved   distinct pages in the prompt, in rank order
+ * @param chunksWithHeader chunks with a citation header. Fewer than {@code retrievedCount} means some were
+ *                         stored before headers existed and cannot be cited
  */
 public record RetrievalScores(int retrievedCount,
                               double topScore,

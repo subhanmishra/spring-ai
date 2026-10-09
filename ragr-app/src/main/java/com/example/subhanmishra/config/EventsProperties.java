@@ -14,18 +14,18 @@ import java.time.Duration;
 public record EventsProperties(ChatTurns chatTurns, Feedback feedback) {
 
     /**
-     * @param enabled   off, no event is built or sent; the chat path is otherwise unchanged
-     * @param topic     created at startup by {@code KafkaConfig}, since the broker does not auto-create
-     * @param retention how long the broker keeps turns. Longer than evaluation needs to keep up, because
-     *                  the retained log is also what lets past traffic be replayed through a new judge
+     * @param enabled   when off, no event is built or sent; chat is otherwise unchanged
+     * @param topic     created at startup by {@code KafkaConfig}; the broker does not create topics itself
+     * @param retention how long Kafka keeps turns - longer than evaluation needs, so past turns can be
+     *                  replayed through a new judge
      */
     public record ChatTurns(boolean enabled, String topic, Duration retention) {
     }
 
     /**
      * @param topic     created at startup by {@code KafkaConfig}
-     * @param retention how long the broker keeps feedback; ragr-eval stores it as it arrives, so this is
-     *                  only the window for an evaluation outage
+     * @param retention how long Kafka keeps ratings; ragr-eval stores them on arrival, so this only has to
+     *                  outlast an evaluation outage
      */
     public record Feedback(String topic, Duration retention) {
     }

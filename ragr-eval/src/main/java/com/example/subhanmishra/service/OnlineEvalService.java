@@ -22,21 +22,17 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Scores real chat traffic as it arrives from Kafka, stores it, and queues it for the judges.
  *
- * <p>Running in its own application means nothing here can delay a response - the answer has been
- * returned before the event is even sent. What it still shares with the chat path is Ollama, and that is
- * why the judges no longer run here: this listener only stores the turn as PENDING, and
- * {@link TurnJudgeWorker} judges it later, while chat is idle.
+ * <p>The answer was returned before the event was even sent, so nothing here can delay one. What this
+ * application still shares with chat is the model, so the listener never calls it: it stores the turn
+ * as PENDING, and {@link TurnJudgeWorker} judges it later, while chat is idle.
  *
- * <p>On every turn, on the listener thread:
+ * <p>On every turn:
  * <ul>
- *   <li><b>Deterministic scores</b> - a few regex passes over the answer and a comparison against the
- *       chunks it was given; no network, no model. They go to Prometheus at once and into the row, so
- *       they stay at 100% coverage and within seconds of real time however far the judges lag.</li>
- *   <li><b>One stored row</b> per turn plus one per pool chunk - the queue entry, and the evidence a
- *       reviewer or a drill-down panel needs.</li>
- *   <li><b>Rephrase detection</b> - if the previous turn of the same conversation, moments ago, landed on
- *       largely the same chunks, the user asked again: that previous answer is marked {@code rephrased},
- *       the implicit thumbs-down.</li>
+ *   <li><b>Rule-based scores</b> - regex over the answer and a comparison with its chunks, no model. They
+ *       reach Prometheus at once, so they cover every turn within seconds however far the judges lag.</li>
+ *   <li><b>One row</b> per turn plus one per pool chunk - the queue entry, and what a reviewer reads.</li>
+ *   <li><b>Asked again?</b> If the conversation's previous turn, moments ago, landed on mostly the same
+ *       chunks, that answer is marked {@code rephrased} - the implicit thumbs-down.</li>
  * </ul>
  *
  * <p>Golden-suite turns are skipped: the suite reads its own turns back and stores them with its run.

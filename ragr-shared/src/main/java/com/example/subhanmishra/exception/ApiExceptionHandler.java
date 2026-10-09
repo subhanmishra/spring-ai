@@ -20,11 +20,9 @@ import java.util.Map;
  * The error handling every HTTP-facing application here shares: each one extends this with its own
  * {@code @RestControllerAdvice} and adds the handlers only it needs.
  *
- * <p>Deliberately not annotated itself. Every application component-scans
- * {@code com.example.subhanmishra}, so an annotated advice in this library would register in all of
- * them - including one that serves nothing but actuator endpoints - and a subclass would then run
- * alongside it rather than instead of it. Spring resolves {@code @ExceptionHandler} methods on
- * superclasses, so a subclass inherits all of these.
+ * <p>Deliberately not annotated. Every application scans {@code com.example.subhanmishra}, so an
+ * annotated advice here would register in all of them and run beside each subclass instead of being
+ * replaced by it. Subclasses inherit these {@code @ExceptionHandler} methods.
  */
 public abstract class ApiExceptionHandler {
 
@@ -71,14 +69,9 @@ public abstract class ApiExceptionHandler {
      * A path variable or query parameter that could not be converted to the type the handler declares -
      * most often a malformed UUID in a path such as {@code /api/v1/documents/not-a-uuid}.
      *
-     * <p>Another one outside the {@link ErrorResponse} family:
-     * {@code MethodArgumentTypeMismatchException} descends from {@code BeansException}, so without this
-     * it falls through to the catch-all and a plainly malformed id reads as a server failure.
-     *
-     * <p>Handled at this narrow type rather than at {@code TypeMismatchException} deliberately.
-     * {@code ConversionNotSupportedException} is also a {@code TypeMismatchException} but means the
-     * server has no converter configured, which genuinely is a 500 - catching the parent would report
-     * that server-side misconfiguration as the caller's fault.
+     * <p>It is not an {@link ErrorResponse}, so without this handler a malformed id would be a 500. It is
+     * caught at this narrow type on purpose: its parent, {@code TypeMismatchException}, also covers a
+     * missing converter, which really is a server fault.
      */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
@@ -92,13 +85,9 @@ public abstract class ApiExceptionHandler {
      * A request body that could not be parsed - malformed JSON, or a value of the wrong shape for the
      * field it lands in.
      *
-     * <p>This needs its own handler rather than riding on the {@link ErrorResponse} delegation below,
-     * because {@code HttpMessageNotReadableException} extends {@code NestedRuntimeException} and is one
-     * of the few Spring MVC exceptions with no {@code ErrorResponse} anywhere in its hierarchy - so it
-     * would otherwise fall through and be reported as a 500 for what is plainly a bad request.
-     *
-     * <p>The parse error itself is not returned: it quotes the offending byte offset and the Jackson
-     * internals around it, which tells a caller more about the server than about their own mistake.
+     * <p>One of the few Spring MVC exceptions that is not an {@link ErrorResponse}, so it needs its own
+     * handler or it would be a 500. The parser's own message is not returned: it describes Jackson's
+     * internals more than the caller's mistake.
      */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleUnreadableBody(HttpMessageNotReadableException ex) {
@@ -111,22 +100,14 @@ public abstract class ApiExceptionHandler {
     /**
      * Last resort for anything not handled above.
      *
-     * <p>Spring's own MVC exceptions are passed through rather than flattened. Most of them implement
-     * {@link ErrorResponse} and already carry the correct status and detail - 405 for a wrong method,
-     * 415 for an unsupported {@code Content-Type}, 406, missing path variable, and so on - but they are
-     * also {@code Exception}s, so this handler claims them and, before this check existed, reported
-     * every one as a 500 titled "Unexpected error". The visible symptom was {@code GET /ai/generate}
-     * answering {@code 500 "Request method 'GET' is not supported"} after that endpoint moved to POST,
-     * which tells a caller almost the opposite of what happened.
-     *
-     * <p>"Most", not all: the {@code HttpMessageNot(Readable|Writable)Exception} pair descends from
-     * {@code NestedRuntimeException} and implements no {@code ErrorResponse}, so the unreadable-body
-     * case is handled explicitly above. Check the hierarchy before assuming a given Spring exception
-     * is covered here.
-     *
-     * <p>Anything genuinely unexpected gets a fixed detail. {@code ex.getMessage()} on a real failure
-     * is a JDBC, Ollama or internal message that a caller can neither act on nor should see; it is
-     * already logged above with its stack trace, which is where it belongs.
+     * <ul>
+     *   <li><b>Spring MVC's own exceptions pass through</b> with their own status - 405 for a wrong
+     *       method, 415 for a wrong {@code Content-Type}, and so on - because most are an
+     *       {@link ErrorResponse}. Without this check every one became a 500. Not all of them are, so
+     *       check before assuming one is covered: the unreadable-body case above is the exception.</li>
+     *   <li><b>Anything else is a 500 with a fixed message.</b> The real message (JDBC, Ollama, internal)
+     *       is no use to a caller and should not reach one; it is logged with its stack trace.</li>
+     * </ul>
      */
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneric(Exception ex) {

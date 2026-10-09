@@ -14,16 +14,14 @@ import java.util.stream.Collectors;
  * What every judge does to its input and output: passages shown without their citation header and
  * bounded in length, and one-word or one-digit verdicts read strictly.
  *
- * <p>Strict reading is the rule throughout. A reply that is neither of the expected words is a failed
- * measurement, recorded as null - never coerced into the nearer answer, because a judge that rambled has
- * not said anything about the answer.
+ * <p>Strict throughout: a reply that is not one of the expected words is a failed measurement (null),
+ * never rounded to the nearer answer - a judge that rambled has said nothing.
  */
 public final class JudgeText {
 
     /**
-     * Comfortably above the chunk-size budget in {@code application-dev.yaml} - chunks average 279
-     * tokens and are capped below 445 - so this truncates nothing in practice and exists only so that
-     * an unsplittable oversized table row cannot blow the judge's context window.
+     * Well above any chunk (ragr-ingest's chunk-size is 400 tokens), so it truncates nothing in practice.
+     * It exists so one huge table row cannot overflow the judge's context.
      */
     static final int MAX_PASSAGE_CHARS = 4_000;
 
@@ -36,10 +34,9 @@ public final class JudgeText {
     }
 
     /**
-     * The chunk as a judge should see it: citation header removed, since it is identical in shape on
-     * every chunk and carries no evidence, and truncated so a passage cannot overrun
-     * {@code judge-num-ctx}. Ollama truncates an over-long prompt from the left, which would silently
-     * drop the instruction and leave the judge answering a question it was never asked.
+     * The chunk as a judge sees it: without its citation header, which carries no evidence, and cut so it
+     * cannot overrun {@code judge-num-ctx} - Ollama would drop the start of the prompt, instruction
+     * included.
      */
     public static String passage(Document document) {
         String stripped = CitationParser.stripHeader(document.getText());

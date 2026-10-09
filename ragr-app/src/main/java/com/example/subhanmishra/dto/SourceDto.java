@@ -5,8 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * One retrieved chunk the answer was given as context, in the order the vector store ranked it.
  *
- * <p>Every chunk retrieved is listed, not only the ones the answer cites: together they are what the
- * answer was grounded on. {@code cited} marks the ones it actually relied on.
+ * <p>Every chunk in the prompt is listed, cited or not - together they are what the answer was based on.
+ * {@code cited} marks the ones it cites.
  */
 public record SourceDto(
 

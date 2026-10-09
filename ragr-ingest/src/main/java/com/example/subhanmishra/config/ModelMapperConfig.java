@@ -16,12 +16,8 @@ public class ModelMapperConfig {
         modelMapper.getConfiguration()
                 .setMatchingStrategy(MatchingStrategies.STRICT);
 
-        // Custom mapping for DocumentMetadata to DocumentMetadataDto (Record).
-        //
-        // Note this is a hand-written converter calling the canonical constructor, NOT a field-name
-        // mapping - so a component added to the record does not flow through on its own. Forgetting to
-        // extend this returns null for the new field with no error anywhere, which is the easiest way
-        // to ship a half-working change here. Add to both sides together.
+        // DocumentMetadata to DocumentMetadataDto, by hand through the record's constructor - NOT by field
+        // name. A field added to the record is null until it is added here too, with no error anywhere.
         modelMapper.createTypeMap(DocumentMetadata.class, DocumentMetadataDto.class)
                 .setConverter(context -> {
                     DocumentMetadata source = context.getSource();

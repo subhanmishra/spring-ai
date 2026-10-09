@@ -15,14 +15,11 @@ import java.util.regex.Pattern;
 /**
  * Whether each citation's page actually says what the sentence citing it claims.
  *
- * <p>Citation <em>validity</em> - what {@code EvalScoringService} scores deterministically - means only
- * that the cited page was one the model was shown. A valid citation can still be wrong: the model cites
- * the page it took one fact from beside a sentence stating another. This is the "properly linked" half of
- * citation correctness, and the only way to see it is to read the two side by side.
+ * <p>A <em>valid</em> citation only names a page the model was shown. It can still be wrong - the page of
+ * one fact beside a sentence stating another - and only reading the two side by side shows that.
  *
- * <p>Only valid citations are checked. A fabricated one has no passage to compare against and is already
- * counted as fabricated. Each check is the citing sentence and that one passage - a short prompt - and at
- * most {@code maxChecks} of them per answer, in answer order.
+ * <p>Only valid citations are checked (a fabricated one has no passage, and is already counted). Each
+ * check is one sentence and one passage, at most {@code maxChecks} per answer.
  */
 public class CitationSupportEvaluator {
 

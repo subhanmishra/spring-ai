@@ -5,19 +5,16 @@ import org.jspecify.annotations.Nullable;
 import java.util.List;
 
 /**
- * One structural unit of a source document, as recovered by a reader before any chunking happens.
+ * One piece of a document as a reader found it, before chunking: prose, or a table.
  * <p>
- * The pipeline used to hand raw {@code String} text from the reader straight to the chunker, which then
- * split it on blank lines. That representation cannot express "these lines belong to one table", so a
- * table was free to be merged with the prose around it and, once over budget, cut mid-table by
- * {@code TokenTextSplitter} - leaving rows in a chunk with no header row to bind their values to.
- * Making the block kind explicit is what lets the chunker treat a table as an atomic unit.
+ * Plain text cannot say "these lines are one table", so tables used to be merged with the prose around
+ * them and cut in half, leaving rows without their header. Marking the kind lets the chunker keep a
+ * table together.
  */
 public sealed interface ContentBlock {
 
     /**
-     * Free-flowing text. Paragraph boundaries within it are still expressed as blank lines, so prose
-     * blocks are coalesced exactly as before this type existed.
+     * Running text, with blank lines between paragraphs.
      */
     record Prose(String text) implements ContentBlock {
     }

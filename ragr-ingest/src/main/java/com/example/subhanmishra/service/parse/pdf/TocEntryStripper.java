@@ -12,39 +12,23 @@ import java.util.regex.Pattern;
 /**
  * Removes table-of-contents entries - a heading, a run of dot leaders, and the page it sits on.
  *
- * <p>This is the second half of the same defect {@link PageFooterStripper} fixes, in a different place.
- * The footer put a <em>printed</em> page number at the bottom of every page; a contents entry puts one
- * at the end of every line, and the model reads it the same way. Measured on the Spring Boot reference
- * manual after footers were stripped, the evaluation suite still recorded a fabricated citation to page
- * 263 - the model had retrieved PDF page 11, a contents page, read
- * {@code "5.2.4. Configuring Endpoints . . . . . . . 263"} and cited 263. Nothing on the page it cited
- * had been retrieved at all.
+ * <p>Two reasons, the same as {@link PageFooterStripper}'s:
+ * <ul>
+ *   <li><b>Wrong citations.</b> An entry ends with a printed page number, and the model cites it - having
+ *       read "5.2.4. Configuring Endpoints . . . . 263" on a contents page, it cited page 263.</li>
+ *   <li><b>Useless chunks.</b> An entry repeats a heading from the body, so it competes with the body for
+ *       the same questions while holding none of the answer.</li>
+ * </ul>
  *
- * <p>The entries are also worthless to retrieve. A contents line duplicates a heading that appears
- * verbatim in the body, so it competes with the body for the same query while carrying none of the
- * answer: that same chunk came back at rank 4 for an actuator question and contributed nothing. In this
- * corpus they are 137 of 1,083 chunks - an eighth of everything stored - and all 137 are navigation.
+ * <p><b>Found by the shape of a line</b>, not by its page: at least five dot leaders, then a number ending
+ * the line. That is specific enough to skip the near misses in the manual, such as the Spring Boot banner.
  *
- * <p>Detection is by line shape rather than by page, because page position proves nothing: a contents
- * section can run to any length and a chapter can open with its own summary list. The shape is specific
- * enough to be safe. Requiring the dot leader to be at least five dots and the number to end the line
- * excludes the two things in this corpus that come closest - the Spring Boot banner's
- * {@code "....... . . ."} (no trailing number) and its
- * {@code "........ Started Example in 2.536 seconds (JVM running for 2.864)"} (dots leading, not
- * trailing). Verified against the whole stored corpus: the pattern matches on pages 2 to 19, the contents
- * section, and on no other page of 645.
- *
- * <p>A contents page loses its entries and keeps its heading, which would leave a chunk holding the words
- * "Table of Contents" and nothing else - the junk-chunk problem this is partly meant to remove. So a
- * block whose lines were <em>mostly</em> entries is dropped whole rather than emptied. Two guards keep
- * that from eating real text: the block must hold several entries, not one or two, and entries must be at
- * least half of it.
- *
- * <p>The document-level guard is the mirror of {@link PageFooterStripper}'s consensus rule. A file that
- * is <em>predominantly</em> contents entries is an index or a contents extract, and its entries are its
- * content; stripping it would index an empty document and answer nothing, silently. On the reference
- * manual entries are 705 of 19,715 non-blank lines, 3.6%, so the guard is nowhere near firing on a
- * document that merely has a contents section.
+ * <p><b>Two guards keep it from removing real text:</b>
+ * <ul>
+ *   <li>A block that is <em>mostly</em> entries is dropped whole, so a contents page does not leave a chunk
+ *       saying only "Table of Contents". It must hold several entries, at least half its lines.</li>
+ *   <li>A document that is <em>mostly</em> entries - an index - is left alone. Its entries are its content.</li>
+ * </ul>
  */
 public final class TocEntryStripper {
 
@@ -149,8 +133,8 @@ public final class TocEntryStripper {
         if (entries >= MIN_ENTRIES_TO_DROP_BLOCK && entries >= nonBlank * BLOCK_DOMINANCE) {
             return "";
         }
-        // Removing a line leaves the blank lines that surrounded it back to back, so collapse them -
-        // this text is persisted and embedded, and a paragraph boundary is what a blank line means.
+        // A removed line leaves its blank lines back to back; collapse them, since a blank line marks a
+        // paragraph boundary in stored text.
         return String.join("\n", kept).replaceAll("\n{3,}", "\n\n").strip();
     }
 

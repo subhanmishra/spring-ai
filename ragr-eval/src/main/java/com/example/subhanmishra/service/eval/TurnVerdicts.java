@@ -9,10 +9,9 @@ import java.util.List;
 /**
  * Everything the judges concluded about one turn, filled stage by stage.
  *
- * <p>Mutable because the stages run one at a time with chat able to interrupt between any two of them,
- * and each stage's result is worth keeping even if a later one never runs. Every field starts null and
- * stays null for a stage that was skipped, timed out or returned something unreadable - "not measured",
- * which no aggregate may treat as a failure.
+ * <p>Mutable: the stages run one at a time, chat can make any of them wait, and each result is worth
+ * keeping even if a later stage never runs. A field stays null for a stage that was skipped, timed out or
+ * returned nonsense - "not measured", which no aggregate may count as a failure.
  */
 public final class TurnVerdicts {
 
@@ -46,8 +45,8 @@ public final class TurnVerdicts {
         this.grades.clear();
         this.grades.addAll(grades);
         if (grades.stream().anyMatch(grade -> grade == null)) {
-            // A hole in the pool's grades leaves no defensible ranking: recall and NDCG both depend on
-            // every grade. The grades that did arrive are still stored per chunk.
+            // One missing grade leaves no honest ranking - recall and NDCG need them all. The grades that
+            // arrived are still stored.
             this.ranking = null;
             anyStageUnmeasured = true;
         } else {

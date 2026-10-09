@@ -5,17 +5,12 @@ import java.util.List;
 /**
  * Reference-free properties of the answer text itself.
  *
- * @param answerChars    length of the answer. A collapse towards zero is the signature of the
- *                       {@code num-predict} / thinking-token interaction documented in
- *                       {@code application-dev.yaml}, where answers were truncated mid-sentence.
- * @param refused        whether the assistant declined to answer. Worth tracking continuously because
- *                       the stock QuestionAnswerAdvisor template forbids answering beyond the context,
- *                       and anyone restoring that wording would make the assistant refuse the general
- *                       conversation its system prompt explicitly promises.
- * @param echoedInstruction whether the answer parrots the citation instruction back instead of obeying
- *                       it. Not hypothetical: llama3.2 answered "Remember to cite your sources when
- *                       referencing configuration values from documents" in place of citing anything,
- *                       and that failure reads as a normal answer to every other metric here.
+ * @param answerChars    length of the answer. A collapse towards zero means answers are being cut off
+ *                       (the {@code think} setting in ragr-app's application-dev.yaml)
+ * @param refused        whether the assistant declined. Tracked because restoring Spring AI's stock
+ *                       template wording would make it refuse general questions it is meant to answer
+ * @param echoedInstruction whether the answer repeats the citation instruction instead of following it -
+ *                       which has happened, and looks like a normal answer to every other metric
  * @param matchedPhrases expected phrases found, for a golden case that declared them
  * @param missingPhrases expected phrases absent
  * @param forbiddenFound forbidden phrases present

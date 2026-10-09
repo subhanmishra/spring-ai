@@ -12,38 +12,23 @@ import java.util.List;
 /**
  * Asks the judge, chunk by chunk, whether a retrieved passage actually contributed to the answer.
  *
- * <p>This is the reference-free half of context precision - RAGAS's
- * {@code LLMContextPrecisionWithoutReference}. It needs no ground truth at all, which is what makes it
- * the only one of the two that could in principle score live traffic, and what makes it a genuine
- * cross-check on the other: {@code EvalScoringService} scores relevance from a golden case's
- * {@code expectedPages}, and that list was curated as <em>pages that contain the answer</em> rather
- * than as an exhaustive relevance labelling. Every page it omits is scored as noise. Where this judge
- * calls a chunk useful that {@code expectedPages} does not cover, the dataset is the thing that is
- * probably wrong.
+ * <p>RAGAS's reference-free context precision. It needs no known answer, so it cross-checks the
+ * expected-page version in {@code EvalScoringService}: the expected pages hold the answer but are not
+ * every useful page, so where this judge calls an unlisted chunk useful, the dataset is probably the one
+ * that is wrong.
  *
- * <p><strong>The cost is why this is gated behind {@code app.eval.golden.judged} and will not run
- * online.</strong> Precision is defined per retrieved chunk, so a case costs {@code top-k} judge calls
- * rather than one - at the configured top-k of 5 that is 45 extra calls across the 9-case suite, on
- * top of the 18 the relevancy and groundedness judges already make. Ollama serialises on a single
- * runner slot, so those are strictly sequential. The online path samples judgements at 0.1 with a
- * concurrency bound of 1 precisely because a judge call delays the next user's generation; multiplying
- * that by top-k is not something the chat path can absorb.
+ * <p><b>Golden suite only, judged runs only.</b> It costs one judge call per chunk - five per case - which
+ * is why live turns use {@link ChunkGradeEvaluator} (one short call per chunk, graded for the question)
+ * instead.
  *
- * <p><strong>Where this departs from RAGAS, deliberately.</strong> RAGAS asks its judge for a JSON
- * object carrying a reason and a verdict, and parses it. That assumes a judge that emits reliable
- * structured output, which {@code gemma4:e2b} is not - and {@code EvalConfig} caps the judge at
- * {@code num-predict: 8} with thinking disabled, because a judge that starts explaining itself holds
- * the single runner slot for minutes. So the prompt asks for one word, exactly as the relevancy and
- * groundedness judges do, and the reason is not collected. The verdict is the part that is scored; the
- * reason would be a field nothing reads.
+ * <p><b>One word, not RAGAS's JSON.</b> RAGAS asks for a reason and a verdict as JSON; this model does not
+ * produce reliable JSON, and a judge that explains itself holds the model runner. So, like the other
+ * judges, it answers YES or NO.
  *
- * <p>The judge sees the passage with its {@code [filename, p. N]} citation header stripped. The header
- * is identical in shape on every chunk and carries no evidence of usefulness, so leaving it in would
- * spend context on a constant.
+ * <p>The passage is shown without its citation header, which says nothing about usefulness.
  *
- * <p>A single failed or unparseable verdict abandons the whole case rather than being guessed at.
- * Precision is a property of the ranked list as a whole, and a list with a hole in it has no defensible
- * score - recording one would be inventing data at exactly the point where the measurement failed.
+ * <p>One failed verdict abandons the whole case: precision belongs to the whole ranked list, and a list
+ * with a hole in it has no honest score.
  */
 public class ContextPrecisionEvaluator {
 
@@ -52,11 +37,8 @@ public class ContextPrecisionEvaluator {
     /**
      * One word out, and the question phrased around <em>use</em> rather than <em>topic</em>.
      *
-     * <p>"Is this passage relevant to the question" is the wording to avoid: every chunk the retriever
-     * returned cleared a 0.6 similarity threshold against that same question, so it is topically
-     * relevant almost by construction, and the judge answers YES to everything. Asking whether the
-     * passage supplied information the answer used is the distinction that has any discriminating power
-     * left in it.
+     * <p>Not "is this passage relevant": every retrieved chunk cleared the similarity threshold for that
+     * question, so the judge says YES to all of them. "Did the answer use it" still tells chunks apart.
      */
     private static final String PROMPT = """
             You are checking whether a retrieved passage was used to produce an answer.
@@ -82,15 +64,13 @@ public class ContextPrecisionEvaluator {
     /**
      * Judges every retrieved chunk in rank order.
      *
-     * @return the scores, or null when the case could not be judged - no context to score, or any
-     *         single verdict failing. Null means "not measured" and must never be folded into an
-     *         aggregate as a zero.
+     * @return the scores, or null when the case could not be judged - nothing retrieved, or a verdict
+     *         failed. Null means "not measured", never zero.
      */
     public @Nullable ContextPrecisionScores judge(String question, String answer, List<Document> retrieved) {
         if (retrieved.isEmpty()) {
-            // Nothing to order, and an out-of-corpus case retrieving nothing is behaving correctly.
-            // Scoring it 0.0 would fail a case for doing the right thing - the same trap
-            // GoldenEvalService avoids by not judging ungrounded answers at all.
+            // Nothing to order. An out-of-corpus case that retrieves nothing is behaving correctly, and
+            // 0.0 would fail it for that.
             return null;
         }
 
@@ -108,10 +88,8 @@ public class ContextPrecisionEvaluator {
 
     private @Nullable Boolean verdict(String question, String answer, String passage) {
         try {
-            // Passed as template parameters rather than concatenated into the prompt, which is what
-            // Spring AI's own evaluators do and for a reason that bites here specifically: the corpus is
-            // full of property placeholders, and a substituted value is not re-rendered whereas prompt
-            // text is.
+            // Template parameters, not concatenation: the corpus is full of ${...} placeholders, and a
+            // substituted value is not re-rendered whereas prompt text is.
             String response = chatClient.prompt()
                                         .user(spec -> spec.text(PROMPT)
                                                           .param("question", question)

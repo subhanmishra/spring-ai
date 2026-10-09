@@ -7,11 +7,9 @@ import java.util.List;
 /**
  * A stored conversation, oldest message first.
  *
- * <p>{@code messageCount} can be smaller than the number of turns the conversation actually had:
- * {@code MessageWindowChatMemory} trims to {@code app.ai.max-chat-messages} when it <em>writes</em>,
- * so anything older has already been dropped from Redis and cannot be recovered. That limit is
- * reported as {@code maxRetainedMessages} so a caller can tell a short conversation apart from a
- * truncated one.
+ * <p>Memory keeps only the last {@code app.ai.max-chat-messages}, trimmed on every write, so older
+ * messages are gone. {@code maxRetainedMessages} lets a caller tell a short conversation from a trimmed
+ * one.
  */
 public record ConversationDto(
 

@@ -13,8 +13,8 @@ public class EmbeddingConfig {
 
     /**
      * Ollama's model, wrapped so every chunk is embedded with {@code app.embedding.task-prefix}. Primary,
-     * so it is the one {@code PgVectorStore} is built with. Ollama's own bean still exists to be wrapped:
-     * its auto-configuration backs off only for another {@link OllamaEmbeddingModel}.
+     * so {@code PgVectorStore} uses it. Ollama's own bean is still created, since its auto-configuration
+     * backs off only for another {@link OllamaEmbeddingModel}.
      */
     @Bean
     @Primary

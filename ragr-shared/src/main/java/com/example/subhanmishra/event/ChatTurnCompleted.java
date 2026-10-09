@@ -13,15 +13,13 @@ import java.util.stream.Stream;
 /**
  * One completed chat turn, as the chat path hands it to evaluation.
  *
- * <p>It carries everything the scorer and the judges need, so the consumer never has to query the
- * vector store. That is a correctness property, not only a convenience: a document can be deleted or
- * re-indexed between the turn and its evaluation, and a turn has to be scored against the chunks the
- * model actually saw, not whatever the store holds by the time the event is read. It is also what
- * makes a retained turn replayable through a new metric or judge later.
+ * <p>It carries everything evaluation needs, so evaluation never queries the vector store. That matters
+ * for correctness: a document can be deleted or re-indexed before the turn is scored, and a turn must be
+ * scored against the chunks the model actually saw. It also lets a stored turn be replayed through a
+ * new metric later.
  *
- * <p>Shared between the publisher and the consumer so the two cannot disagree about its shape. It
- * travels as JSON with no type headers, which keeps it readable by a consumer that deserializes into
- * its own copy of this record - add fields freely, but renaming or removing one breaks the other side.
+ * <p>It travels as JSON without type headers. Adding a field is safe; renaming or removing one breaks
+ * the other side.
  *
  * @param turnId              unique per turn; the consumer's idempotency key
  * @param origin              whether a real user asked, or the golden suite - which the online
@@ -29,24 +27,21 @@ import java.util.stream.Stream;
  * @param occurredAt          when the answer finished, not when the event was sent
  * @param conversationId      also the Kafka record key, so one conversation's turns stay in order
  * @param query               the user's prompt
- * @param answer              the answer after {@code CitationResolver}, with its inline citations still
- *                            in place: the text the evaluation scores, not the stripped text the caller
- *                            reads
+ * @param answer              the answer after {@code CitationResolver}, inline citations still in place -
+ *                            what evaluation scores, not the stripped text the caller reads
  * @param citationsRepaired   section-number citations the resolver rewrote into pages
  * @param citationsAbstained  section-number citations it could not place, and left as written
  * @param unresolved          the citations behind {@code citationsAbstained}
- * @param retrieved           the chunks the answer was built on, in rank order; empty for an ungrounded
- *                            turn, which evaluation skips rather than scores
+ * @param retrieved           the chunks in the prompt, in rank order; empty for an ungrounded turn
  * @param chatModel           the model that answered, when the response reported it
  * @param topK                how many chunks retrieval was asked for
  * @param similarityThreshold the minimum score a chunk needed to be retrieved
  * @param schemaVersion       {@link #SCHEMA_VERSION} when sent; null on a version-1 event, which has
  *                            none of the fields below
- * @param excluded            the rest of the candidate pool: chunks the same vector query returned that
- *                            the model was <em>not</em> shown, because they fell below the threshold or
- *                            past top-k. Pool rank is implicit - {@code retrieved} holds ranks
- *                            1..m and this list m+1..n, both in score order - which is what lets
- *                            evaluation measure recall against chunks retrieval cut off
+ * @param excluded            the rest of the candidate pool: chunks the same query returned that the
+ *                            model was <em>not</em> shown, below the threshold or past top-k. Together
+ *                            with {@code retrieved} it is the pool in rank order, which is how
+ *                            evaluation measures what retrieval left out
  * @param poolSize            how many candidates the pool query asked for
  * @param timings             where the turn's time went
  * @param usage               what the generation cost and how it ended
@@ -74,9 +69,8 @@ public record ChatTurnCompleted(UUID turnId,
                                 @Nullable String promptVersion) {
 
     /**
-     * Version 2 added the candidate pool, timings, usage and the prompt version. Every field it added is
-     * a nullable box rather than a primitive: an event already on the topic when the consumer upgrades
-     * has none of them, and Jackson 3 fails on a missing primitive rather than defaulting it to zero.
+     * Version 2 added the candidate pool, timings, usage and the prompt version - all as nullable boxed
+     * types, because a version-1 event has none of them and Jackson 3 fails on a missing primitive.
      */
     public static final int SCHEMA_VERSION = 2;
 
@@ -114,9 +108,8 @@ public record ChatTurnCompleted(UUID turnId,
     }
 
     /**
-     * Token counts and the finish reason the model reported, each null when the response did not.
-     * A finish reason of {@code length} is a truncated answer, which reads as an incomplete one to every
-     * judge and is cheaper to catch here.
+     * Token counts and the finish reason the model reported, each null when it did not. A finish reason
+     * of {@code length} means the answer was cut off.
      */
     public record GenerationUsage(@Nullable Integer promptTokens,
                                   @Nullable Integer completionTokens,
@@ -124,8 +117,8 @@ public record ChatTurnCompleted(UUID turnId,
     }
 
     /**
-     * One retrieved chunk. Its text keeps the {@code [filename, p. N]} citation header it was stored
-     * with, because that header is what the model saw and what citations are checked against.
+     * One retrieved chunk, with its {@code [filename, p. N]} header kept: that is what the model saw,
+     * and what citations are checked against.
      */
     public record RetrievedChunk(String id, String text, Map<String, Object> metadata, @Nullable Double score) {
 

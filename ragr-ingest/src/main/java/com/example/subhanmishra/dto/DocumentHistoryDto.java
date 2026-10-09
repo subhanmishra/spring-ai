@@ -8,11 +8,9 @@ import java.util.UUID;
 /**
  * The audit trail for one document, oldest entry first.
  *
- * <p>{@code documentExists} is reported because history deliberately outlives the document it
- * describes: there is no foreign key from {@code document_metadata_history} to
- * {@code document_metadata}, and {@code deleteDocument} removes only the latter. Without the flag, a
- * trail ending in {@code INDEXED} for a document that has since been deleted is indistinguishable
- * from one for a document still present and healthy.
+ * <p>History outlives a deleted document, so {@code documentExists} says whether it is still there.
+ * Without it, a trail ending in {@code INDEXED} would look the same for a deleted document and a healthy
+ * one.
  */
 public record DocumentHistoryDto(
 

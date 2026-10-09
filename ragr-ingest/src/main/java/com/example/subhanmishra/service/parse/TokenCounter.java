@@ -7,12 +7,9 @@ import com.knuddels.jtokkit.api.EncodingType;
 /**
  * Counts tokens the way {@code TokenTextSplitter} does.
  * <p>
- * Deliberately {@code CL100K_BASE}, the same as {@code TokenTextSplitter.DEFAULT_ENCODING_TYPE}, so the
- * budget counted while chunking and the budget the splitter enforces cannot drift apart. A character-count
- * approximation is not a substitute: PDF tables are space-padded, so characters per token varies wildly.
- * <p>
- * jtokkit encodings are stateless, so the shared instance is safe across the threads of
- * {@code documentProcessingPool}.
+ * The same encoding as the splitter ({@code CL100K_BASE}), so the budget counted while joining paragraphs
+ * is the budget the splitter enforces. Counting characters instead would not work: characters per token
+ * varies too much. The encoding is stateless, so one instance is safe on every thread.
  */
 public final class TokenCounter {
 

@@ -17,14 +17,12 @@ import java.util.regex.Pattern;
  * definition, where {@code FactCheckingEvaluator} gives one YES/NO for the whole answer. A single
  * unsupported sentence fails that judge exactly as a fabricated answer does; this one tells them apart.
  *
- * <p>Two calls, not one per claim. The first lists the claims from the answer alone (a short prompt). The
- * second shows the passages once and asks for a verdict per numbered claim. Measured 6 Oct 2026, prompt
- * evaluation is ~150 tokens/s on this host and five passages are ~1,400 tokens, so verifying claim by
- * claim would cost ~10 s per claim against ~10 s for all of them together.
+ * <p>Two calls, not one per claim: first list the claims from the answer alone, then show the passages
+ * once and ask for a verdict per numbered claim. Reading the passages costs ~10 s, so once per claim would
+ * cost ~10 s per claim.
  *
- * <p>The price of batching is a longer reply the small judge has to keep in order. Any claim the reply
- * leaves without a verdict abandons the measurement (null) rather than being guessed at - the same rule
- * {@link ContextPrecisionEvaluator} applies to a hole in its verdict vector.
+ * <p>The price is a longer reply to keep in order. A claim left without a verdict abandons the
+ * measurement (null) rather than being guessed.
  */
 public class ClaimFaithfulnessEvaluator {
 

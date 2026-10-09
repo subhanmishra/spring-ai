@@ -15,13 +15,11 @@ import java.util.stream.Collectors;
 /**
  * What one golden case produced on one run.
  *
- * <p>The answer text is stored deliberately. A score tells you a case regressed; only the answer tells
- * you how, and re-running the case to find out gives a different answer, because generation is not
- * deterministic even at a low temperature.
+ * <p>The answer is stored on purpose: a score says a case regressed, only the answer says how - and
+ * re-running gives a different answer.
  *
- * <p>{@code relevancyPass} and {@code groundednessPass} are boxed because null means "not judged",
- * which is not the same as FALSE meaning "judged and failed". Any aggregate has to exclude nulls
- * rather than coalesce them, or a run with judging switched off reads as a run that failed everything.
+ * <p>{@code relevancyPass} and {@code groundednessPass} are boxed: null is "not judged", not "failed".
+ * Aggregates must skip nulls, or an unjudged run reads as failing everything.
  */
 @Table(name = "eval_case_result")
 public record EvalCaseResult(@Id @Nullable UUID id,
@@ -61,16 +59,13 @@ public record EvalCaseResult(@Id @Nullable UUID id,
     /**
      * @param contextPrecision       scored against the case's expected pages, or null when it declares
      *                               none
-     * @param judgedContextPrecision scored by the per-chunk LLM judge, or null on an unjudged run.
-     *                               Its verdict vector is stored alongside it: comparing that vector
-     *                               against {@code pagesRetrieved} is what shows whether the dataset's
-     *                               expected-page list is too narrow, and it is the one thing here that
-     *                               cannot be reconstructed later from the dataset and the other
-     *                               columns.
-     * @param citedContextPrecision  a chunk counted as used when the answer cites its page, or null when
-     *                               nothing was retrieved. Its vector is stored for the same comparison:
-     *                               where it and the judge's disagree, the citations are the model's own
-     *                               account of what it used and the judge is the likelier one wrong.
+     * @param judgedContextPrecision from the per-chunk judge, or null on an unjudged run. Its verdict
+     *                               vector is stored too - set against {@code pagesRetrieved} it shows
+     *                               whether the expected pages are too narrow, and it cannot be rebuilt
+     *                               later
+     * @param citedContextPrecision  a chunk counted as used when the answer cites its page; null when
+     *                               nothing was retrieved. Where it and the judge disagree, the citations
+     *                               are the model's own account, and the judge is likelier wrong
      */
     public static EvalCaseResult from(UUID runId,
                                       String caseId,

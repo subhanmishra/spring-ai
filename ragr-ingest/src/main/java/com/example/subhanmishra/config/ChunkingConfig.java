@@ -12,10 +12,9 @@ public class ChunkingConfig {
         return TokenTextSplitter.builder()
                 .withChunkSize(ingestionProperties.chunkSize())
                 .withMinChunkSizeChars(ingestionProperties.minChunkSizeChars())
-                // Deliberately 1, not app.ingestion.min-chunk-length-to-embed. TokenTextSplitter enforces
-                // that floor by DISCARDING a short piece, and the short pieces are ones it manufactures by
-                // cutting an over-budget chunk - which silently deleted real content. The floor is applied
-                // in DocumentParserService instead, by merging a short piece into the one before it.
+                // Deliberately 1, not app.ingestion.min-chunk-length-to-embed: the splitter applies its
+                // floor by DELETING short pieces, which are often real content left over from its own
+                // cuts. DocumentParserService applies the floor instead, by merging.
                 .withMinChunkLengthToEmbed(1)
                 .withMaxNumChunks(ingestionProperties.maxNumChunks())
                 .withKeepSeparator(true)

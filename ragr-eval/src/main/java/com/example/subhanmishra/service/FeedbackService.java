@@ -8,9 +8,9 @@ import org.springframework.stereotype.Service;
 /**
  * Stores users' ratings of answers as they arrive from ragr-app.
  *
- * <p>Joined to their turns only at query time: a rating can arrive before its turn has been stored (the
- * two travel on different topics) or after the turn has been purged, and in both cases it is still a
- * rating. The listener overrides the consumer's default value type, which is the chat-turn event.
+ * <p>Matched to turns only when queried: a rating can arrive before its turn (they travel on different
+ * topics) or after it was purged, and is still a rating. The listener overrides the consumer's default
+ * value type, which is the turn event.
  */
 @Service
 public class FeedbackService {

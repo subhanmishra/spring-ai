@@ -8,10 +8,9 @@ import java.util.List;
 /**
  * Everything scored for one query, whether it came from live traffic or from the golden suite.
  *
- * <p>The judged fields are boxed and null until the LLM judges have run - which on the live path may
- * be never, because judging is sampled and may be dropped under load. Null therefore means "not
- * judged", distinct from {@code FALSE} meaning "judged and failed", and anything aggregating these
- * must keep the two apart or a dropped judgement will read as a failure.
+ * <p>The judged fields are boxed and null until the judges have run - which for a live turn may be never:
+ * it may not be sampled, or may wait too long and be skipped. Null is "not judged", not "failed", and
+ * aggregates must keep the two apart.
  *
  * @param relevancy    whether the answer addressed the question given the context, per the LLM judge
  * @param groundedness whether the answer's claims are supported by the context, per the LLM judge

@@ -20,10 +20,9 @@ import java.util.UUID;
 /**
  * {@code eval_turn}, {@code eval_turn_chunk} and {@code eval_feedback}, in plain SQL.
  *
- * <p>Plain SQL rather than Spring Data because of how these tables are written: a turn is inserted once
- * with forty-odd columns and then updated a few columns at a time by the judge stages, and the queue
- * claim needs {@code FOR UPDATE SKIP LOCKED}, which no derived query expresses. Mapping all of that onto
- * an aggregate would mean re-saving the whole row - chunk texts included - after every judge call.
+ * <p>Plain SQL, not Spring Data: a turn is inserted once with forty-odd columns, then updated a few at a
+ * time by the judges, and claiming from the queue needs {@code FOR UPDATE SKIP LOCKED}. As an aggregate,
+ * every judge call would re-save the whole row, chunk texts and all.
  */
 @Repository
 public class EvalTurnRepository {

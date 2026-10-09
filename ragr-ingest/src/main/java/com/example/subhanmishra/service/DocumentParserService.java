@@ -64,9 +64,8 @@ public class DocumentParserService {
     }
 
     /**
-     * One unit of source content that chunking may not span: a single PDF page, or a whole Tika document.
-     * Its metadata is inherited by every chunk produced from it, which is why groups may never cross the
-     * boundary - chunk metadata carries {@code pageNumber} and the system prompt asks the model to cite it.
+     * What a chunk may never span: one PDF page, or one whole Tika document. Every chunk inherits its
+     * metadata, page number included, so a chunk crossing pages would cite the wrong one.
      */
     private record SourceUnit(List<ContentBlock> blocks, Map<String, Object> metadata) {
     }
@@ -107,10 +106,9 @@ public class DocumentParserService {
     }
 
     /**
-     * With {@code app.ingestion.table-detection} off, PDFs go through {@code PagePdfDocumentReader}, which yields
-     * flat page text with no structure, so every page becomes a single prose block. Routing them through
-     * Tika instead would not help: Tika's default PDF handler has no table support either, and its
-     * marked-content handler works only on tagged PDFs, which neither sample document is.
+     * With {@code app.ingestion.table-detection} off, PDFs go through {@code PagePdfDocumentReader}: plain
+     * page text, one prose block per page. (Tika would not do better - it finds tables only in tagged
+     * PDFs.)
      */
     private Map<String, Object> parsePdf(Resource resource) throws IOException {
         if (ingestionProperties.tableDetection() != IngestionProperties.TableDetection.OFF) {
@@ -125,10 +123,8 @@ public class DocumentParserService {
         PagePdfDocumentReader documentReader = new PagePdfDocumentReader(resource, config);
         List<Document> pageDocs = documentReader.get();
 
-        // Both the printed page-number footer and the table-of-contents entries have to be removed here
-        // as well as in PdfBlockReader, or turning table detection off silently reinstates the
-        // wrong-citation bug. Each is a line of the page's text layer, so this reader picks them up
-        // exactly as the geometric one does.
+        // The page-number footers and table-of-contents entries must be removed on this path too, as in
+        // PdfBlockReader. Left in, they hand the model a second, wrong page number to cite.
         PageFooterStripper stripper = PageFooterStripper.detect(
                 pageDocs.stream()
                         .filter(page -> pageNumberOf(page) != null)
@@ -147,9 +143,8 @@ public class DocumentParserService {
                                                      List.of(new ContentBlock.Prose(tocStripper.strip(text))),
                                                      page.getMetadata());
                                          })
-                                         // A page holding nothing but its footer or its contents entries
-                                         // becomes empty, and an empty prose block would still produce a
-                                         // chunk.
+                                         // A page that held only a footer or contents entries is now empty,
+                                         // and would still make a chunk.
                                          .filter(unit -> unit.blocks().stream()
                                                              .anyMatch(b -> !(b instanceof ContentBlock.Prose p)
                                                                      || !p.text().isBlank()))
@@ -159,11 +154,8 @@ public class DocumentParserService {
     }
 
     /**
-     * The 1-based page number {@code PagePdfDocumentReader} put on a page document, or null when it
-     * carries none.
-     *
-     * <p>The metadata round-trips through readers that are not consistent about the value's type, so it
-     * is read defensively rather than cast - the same reason {@code getEnrichedStream} normalises it.
+     * The 1-based page number {@code PagePdfDocumentReader} put on a page, or null. Read defensively,
+     * not cast, because readers are inconsistent about the value's type.
      */
     private static Integer pageNumberOf(Document page) {
         Object value = page.getMetadata().get(PagePdfDocumentReader.METADATA_START_PAGE_NUMBER);
@@ -181,9 +173,8 @@ public class DocumentParserService {
     }
 
     /**
-     * Reads the PDF from its page geometry instead, so a table's columns survive. {@code PDFTextStripper}
-     * pads the gaps between cells with spaces before {@code PagePdfDocumentReader} ever sees the page, by
-     * which point the columns cannot be recovered.
+     * Reads the PDF from the position of its text, so a table's columns survive. The plain reader pads
+     * the gaps between cells with spaces, after which the columns cannot be recovered.
      */
     private Map<String, Object> parsePdfWithTableDetection(Resource resource) throws IOException {
         PdfTableDetector.Mode forced = switch (ingestionProperties.tableDetection()) {
@@ -214,15 +205,12 @@ public class DocumentParserService {
     }
 
     /**
-     * Everything that is not a PDF is read through Tika, but with our own SAX handler in place of the
-     * {@code BodyContentHandler} that {@code TikaDocumentReader} defaults to. Tika already recovers table
-     * structure from DOCX, XLSX, PPTX and HTML; the default handler simply discards the markup.
+     * Everything that is not a PDF goes through Tika, with a handler that keeps the XHTML markup. Tika
+     * already finds the tables in DOCX, XLSX, PPTX and HTML; its default handler throws the markup away.
      */
     private Map<String, Object> parseGenericFile(Resource resource) throws TransformerConfigurationException {
-        // An identity transformer is a ContentHandler that serialises the SAX events back to XML, so
-        // TikaDocumentReader's own toString() of it is the XHTML document. Using the JDK's serialiser
-        // rather than Tika's ToXMLContentHandler keeps tika-core out of our compile dependencies, where
-        // pinning it ourselves would risk holding back the version spring-ai brings.
+        // The JDK's identity transformer writes the SAX events back out as XHTML. Using it rather than
+        // Tika's own handler keeps tika-core out of our dependencies, so Spring AI decides its version.
         StringWriter xhtml = new StringWriter();
         TransformerHandler serializer =
                 ((SAXTransformerFactory) SAXTransformerFactory.newInstance()).newTransformerHandler();
@@ -243,19 +231,17 @@ public class DocumentParserService {
 
     private Stream<Document> chunk(List<SourceUnit> units) {
         try {
-            // To correctly use the custom thread pool, the entire parallel stream operation
-            // must be submitted as a task. Calling .parallelStream() by itself would use the
-            // common ForkJoinPool, defeating the purpose of our bulkhead.
-            // We collect the results into a list within the pool to ensure the stream is fully
-            // processed before returning.
+            // Submitted to documentProcessingPool as a whole, so the parallel stream runs on that pool.
+            // A bare parallelStream() would run on the common pool and bypass the limit on parse threads.
+            // Collected inside the pool so all the work is done there.
             List<Document> chunks = documentProcessingPool.submit(() ->
-                    units.parallelStream() // This will now execute within the documentProcessingPool
+                    units.parallelStream()
                          .flatMap(unit -> coalesceBlocks(unit.blocks(), unit.metadata()).stream())
                          .flatMap(this::splitIfOverBudget)
-                         .collect(Collectors.toList()) // Execute the stream and collect results
+                         .collect(Collectors.toList())
             ).get();
 
-            return chunks.stream(); // Return a new stream over the collected chunks
+            return chunks.stream();
 
         } catch (InterruptedException | ExecutionException e) {
             Thread.currentThread().interrupt(); // Preserve the interrupted status
@@ -264,10 +250,8 @@ public class DocumentParserService {
     }
 
     /**
-     * Only prose still needs the splitter, and only when coalescing could not keep it under budget. A table
-     * chunk is already final: {@code TokenTextSplitter} would cut its Markdown at some sentence-like
-     * boundary partway through a row and would not repeat the header on the remainder, which is precisely
-     * the failure the table path exists to prevent.
+     * Only prose goes through the splitter, and only when it is over budget. A table chunk is already
+     * final: the splitter would cut a row in half and drop the header from the rest.
      */
     // Package-private so the chunking tests can drive the splitter path directly.
     Stream<Document> splitIfOverBudget(Document chunk) {
@@ -278,18 +262,12 @@ public class DocumentParserService {
     }
 
     /**
-     * Applies {@code app.ingestion.min-chunk-length-to-embed} by <em>merging</em> a short piece into the one
-     * before it, rather than deleting it.
+     * Applies {@code app.ingestion.min-chunk-length-to-embed} by <em>merging</em> a short piece into the
+     * one before it, never by deleting it.
      * <p>
-     * {@code TokenTextSplitter} enforces that floor by discarding, and the pieces it discards are ones it
-     * manufactured itself: cutting an over-budget group leaves a remainder that is short precisely because
-     * it is a remainder. On an 8-page resume that silently deleted three whole skill lines - 68 tokens of
-     * real content, with nothing logged. The floor is meant to drop parser noise such as a stray {@code
-     * • WARN}, not content the splitter created by cutting. The splitter bean is therefore built with no
-     * floor of its own (see {@code SpringAiConfig}) and the decision is made here.
-     * <p>
-     * A single piece that is under the floor is kept: it is the whole of its block, so dropping it would
-     * lose content rather than tidy it.
+     * The splitter's own floor deletes short pieces - and the short pieces are usually the leftovers of its
+     * own cuts, which is real content. So the splitter is built with no floor (see {@code ChunkingConfig})
+     * and the floor is applied here. A lone short piece is kept: it is the whole of its block.
      */
     private List<Document> absorbShortPieces(List<Document> pieces) {
         List<Document> kept = new ArrayList<>(pieces.size());
@@ -309,12 +287,12 @@ public class DocumentParserService {
     /**
      * Groups one source unit's blocks into chunks that fill {@code app.ingestion.chunk-size} tokens.
      * <p>
-     * Prose is coalesced paragraph by paragraph until the next paragraph would overflow the budget -
-     * without this, every short paragraph became its own chunk and the configured chunk size was never
-     * reached - or until a numbered section heading opens a new section (see {@link ProseGroups#add}). A table interrupts that run: the open prose group is closed first, then the table is emitted
-     * as its own chunk, or its own run of chunks split between rows with the header repeated on each.
-     * Prose and table content therefore never share a chunk, so a table is never truncated by the prose
-     * that happened to follow it.
+     * Paragraphs are joined until the next one would go over the budget, or until a numbered section
+     * heading starts a new section (see {@link ProseGroups#add}). Without joining, every short paragraph
+     * was a chunk of its own.
+     * <p>
+     * A table closes the open prose group and becomes its own chunk, or several, split between rows with
+     * the header repeated. Prose and tables never share a chunk.
      *
      * @param blocks         the blocks of one page or one Tika document, in reading order
      * @param sourceMetadata metadata carried onto every chunk produced from this unit
@@ -372,8 +350,8 @@ public class DocumentParserService {
     }
 
     /**
-     * Accumulates paragraphs into budgeted prose chunks. A mutable helper rather than inline state because
-     * a table can interrupt the run at any point and force the open group closed.
+     * Collects paragraphs into prose chunks within the budget. A separate object because a table can
+     * close the open group at any point.
      */
     private static final class ProseGroups {
 
@@ -391,31 +369,19 @@ public class DocumentParserService {
         }
 
         /**
-         * A numbered section heading closes the open group, so the section leads a chunk of its own.
+         * A numbered section heading closes the open group, so each section starts its own chunk. An
+         * embedding is the average of its chunk, so a section buried half-way into a chunk about
+         * something else is hard to find.
          * <p>
-         * Filling to the budget alone put most sections part-way into a chunk about something else: on
-         * 6 Oct 2026 only 39 of the manual's 374 section headings opened a chunk, and 172 sat in the
-         * second half of one. An embedding is the average of its chunk, so such a section was retrievable
-         * only as far as its neighbours' topic allowed. "9.3.3. Change the HTTP Port", the manual's answer
-         * to setting server.port, trailed a chunk of Gradle dependency substitution and ranked 13th for
-         * "How do I change the HTTP port of my application?" - behind the actuator's
-         * management.server.port, which the chat model then recommended for the application's own port.
-         * <p>
-         * Not below {@link #SECTION_BREAK_MIN_TOKENS}: a short tail of the previous section left as a chunk
-         * of its own would embed as little more than noise, so the heading joins it instead.
+         * Only once the open group has {@link #SECTION_BREAK_MIN_TOKENS}: a shorter tail would embed as
+         * little more than noise, so the heading joins it instead.
          */
         private static final int SECTION_BREAK_MIN_TOKENS = 80;
 
         /**
-         * The budget is measured on the <em>joined</em> text, never on the sum of the parts.
-         * <p>
-         * Summing each paragraph's own token count understates the group: joining paragraphs with a blank
-         * line adds tokens that the running total never sees. The error is only a few percent, but it was
-         * enough to put every multi-paragraph group just over the budget - 417, 415, 411 tokens against a
-         * configured 400 - and an over-budget group is re-split by {@code TokenTextSplitter}, which sheds
-         * a small trailing piece. That piece either became a chunk holding a single line or, when it fell
-         * under {@code min-chunk-length-to-embed}, was silently discarded: an 8-page resume lost three
-         * whole skill lines that way.
+         * The budget is measured on the <em>joined</em> text, never on the sum of the parts: the line
+         * breaks between paragraphs add tokens too. Summing put groups just over the budget, and the
+         * splitter then cut a small, useless piece off each.
          */
         private void add(String paragraph) {
             if (paragraph.isBlank()) {
@@ -438,8 +404,8 @@ public class DocumentParserService {
 
             int joinedTokens = TokenCounter.count(current + PARAGRAPH_SEPARATOR + paragraph);
 
-            // Close the current group rather than overshoot. A paragraph bigger than the whole budget
-            // lands in a group of its own, and textSplitter cuts it just as it did before.
+            // Close the group rather than go over. A paragraph bigger than the whole budget gets a group
+            // of its own, which the splitter then cuts.
             if (joinedTokens > budgetTokens) {
                 flush();
                 current.append(paragraph);

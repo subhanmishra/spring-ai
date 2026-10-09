@@ -42,38 +42,25 @@ import java.util.UUID;
 /**
  * Replays a curated dataset through the real chat path and scores what comes back.
  *
- * <p>This is the half of evaluation that online scoring cannot do. Recall - did retrieval find the
- * passage that actually contains the answer, and at what rank - is unanswerable without knowing which
- * pages were the right ones, and no amount of live traffic supplies that. Everything else here is also
- * measured online; what a golden run adds is a fixed question set, so two runs are comparable and a
- * regression is visible as a number moving rather than as traffic changing shape.
+ * <p>It does what live scoring cannot: with known-correct pages it can measure whether retrieval found
+ * the answer, and at what rank. And a fixed question set makes two runs comparable, so a regression shows
+ * as a number moving.
  *
- * <p>Five things about how a run executes are load-bearing:
- *
+ * <p>How a run works, and why:
  * <ul>
- *   <li><strong>It goes through the running {@code ragr-app}'s real endpoint.</strong> Each case is a
- *       {@code POST /ai/generate}, so it gets the same advisors, prompt template, model, retrieval
- *       settings and citation resolution a user gets - the point is to measure the pipeline, not a
- *       replica of it that can drift away from the thing it claims to describe. This application has
- *       no chat path of its own to drift.</li>
- *   <li><strong>Each case reads its own turn back from Kafka.</strong> The HTTP response is what a
- *       user reads, with citations stripped out; scoring needs the answer as the model cited it and
- *       the chunks it was built on, and the {@code ChatTurnCompleted} event carries exactly that. The
- *       request is marked {@link TurnOrigin#GOLDEN} so the online evaluation leaves it out of the live
- *       metrics.</li>
- *   <li><strong>Each case gets a fresh conversation id, deleted afterwards.</strong>
- *       {@code MessageWindowChatMemory} would otherwise feed case N's answer into case N+1's prompt,
- *       so cases would contaminate each other and the order of the dataset would change the scores.
- *       Deleting afterwards also keeps runs out of the conversation list the chat API exposes.</li>
- *   <li><strong>Cases run serially.</strong> Ollama pins one runner slot, so parallel cases would not
- *       finish any sooner and would only contend - the same reasoning that keeps bulk document upload
- *       a serial loop.</li>
- *   <li><strong>Generation and judging are two separate phases.</strong> See {@link #execute}.</li>
+ *   <li><b>Through ragr-app's real endpoint.</b> Each case is a {@code POST /ai/generate}, so it measures
+ *       exactly what a user gets, not a copy that could drift.</li>
+ *   <li><b>Each case reads its own turn back from Kafka.</b> The HTTP response has its citations taken
+ *       out; the event has the answer as the model cited it and the chunks it used. The request is marked
+ *       {@link TurnOrigin#GOLDEN}, so live metrics leave it out.</li>
+ *   <li><b>A new conversation per case, deleted afterwards.</b> Otherwise chat memory would feed one
+ *       case's answer into the next, and the dataset's order would change the scores.</li>
+ *   <li><b>One case at a time.</b> Ollama serves one request at a time; parallel cases would only queue.</li>
+ *   <li><b>All answers first, then all judging.</b> See {@link #execute}.</li>
  * </ul>
  *
- * <p>There is deliberately no HTTP endpoint for this. A run takes minutes - a single grounded answer
- * on this host is 53-70 seconds - which would need async submission, polling and single-flight
- * machinery to expose safely, for something the tagged integration test triggers in one command.
+ * <p>Deliberately no HTTP endpoint: a run takes minutes, and exposing that safely would need async
+ * submission and polling, for something one test command already does.
  */
 @Service
 public class GoldenEvalService {
@@ -81,9 +68,8 @@ public class GoldenEvalService {
     private static final Logger log = LoggerFactory.getLogger(GoldenEvalService.class);
 
     /**
-     * A grounded answer on this host takes 53-70 seconds and a cold model load adds ~35 more, so the
-     * read timeout has to sit well clear of both. It exists at all so that a hung app fails the run
-     * instead of hanging it.
+     * Well above a grounded answer (about a minute) plus a cold model load (~35 s). It exists so a hung
+     * chat service fails the run instead of hanging it.
      */
     private static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(5);
 
@@ -139,9 +125,8 @@ public class GoldenEvalService {
     /**
      * Executes every case and reports the aggregate.
      *
-     * @param judged whether to also ask the LLM judges. Judging roughly triples a run's wall clock, so
-     *               a quick regression check on retrieval and citations can skip it entirely and still
-     *               get every deterministic metric.
+     * @param judged whether to also ask the AI judges. That takes several times longer; without it a run
+     *               still gets every rule-based metric.
      */
     public GoldenRunResult run(GoldenDataset dataset, boolean judged) {
         EvalRun run = EvalRun.starting(dataset.suite(),
@@ -149,9 +134,7 @@ public class GoldenEvalService {
                                        judged ? evalProperties.judgeModel() : null,
                                        judged);
 
-        // Persisted before any case executes. A suite takes minutes, and a run that dies partway
-        // through would otherwise leave nothing behind at all - an empty table looks exactly like a
-        // suite nobody ran.
+        // Saved before any case runs, so a run that dies part-way still leaves a trace.
         EvalRun persisted = persist(run);
         UUID runId = persisted.id();
 
@@ -161,8 +144,7 @@ public class GoldenEvalService {
         try {
             List<CaseOutcome> outcomes = execute(dataset, judged, runId);
 
-            // The chat model and retrieval settings belong to ragr-app, so they are recorded from what
-            // its first turn reported rather than from any configuration here.
+            // Chat's model and retrieval settings are taken from its first turn, not from config here.
             if (!outcomes.isEmpty()) {
                 ChatTurnCompleted first = outcomes.getFirst().turn();
                 persisted = persist(persisted.withPipeline(first.chatModel(), first.topK(),
@@ -212,16 +194,12 @@ public class GoldenEvalService {
     /**
      * The two phases.
      *
-     * <p>Every answer is generated first, and only then is every answer judged. Interleaving them -
-     * generate, judge, generate, judge - is the obvious implementation and the wrong one whenever the
-     * judge is a different model from the chat model, because Ollama would swap the two models in and
-     * out of memory twice per case rather than once per run. With the judge currently being the chat
-     * model itself the swap cost is zero, so this ordering buys nothing today; it is kept because the
-     * judge model is configurable, and the day someone points it at a dedicated judge this is the
-     * difference between one model load and 2N of them.
+     * <p>Every answer first, then every judgement. With a separate judge model, interleaving them would
+     * swap the two models in and out of memory twice per case instead of once per run. Today the judge is
+     * the chat model, so it costs nothing either way; the order is kept for the day it is not.
      *
-     * <p>Judging is also synchronous here, unlike the online path. There is no caller waiting on a
-     * response to protect, and a run's numbers are only meaningful once every case has been judged.
+     * <p>Judging is synchronous here, unlike live: no user is waiting, and a run's numbers mean nothing
+     * until every case is judged.
      */
     private List<CaseOutcome> execute(GoldenDataset dataset, boolean judged, @Nullable UUID runId) {
         List<CaseOutcome> outcomes = new ArrayList<>();
@@ -262,17 +240,13 @@ public class GoldenEvalService {
             ChatTurnCompleted turn = feed.await(conversationId, evalProperties.golden().turnTimeout());
             List<Document> retrieved = turn.retrievedDocuments();
 
-            // Already resolved by ragr-app, exactly as the user's copy was: the suite has to measure the
-            // answer a user receives, not an intermediate one no caller ever sees. The stored answer is
-            // the resolved text too, so a failure investigated months later shows the citations as they
-            // were delivered.
+            // Already resolved by ragr-app, like the user's copy: the suite measures what users receive.
             String answer = turn.answer();
 
             EvalScores scores = scoringService.score(answer, retrieved, goldenCase);
             int rank = scoringService.firstRelevantRank(retrieved, goldenCase);
 
-            // Free - no LLM call, no embedding, just the citation headers the rank above already
-            // parsed - so it runs on every case whether or not the run is judged.
+            // Free - no model call - so it runs on every case, judged or not.
             ContextPrecisionScores precision = scoringService.contextPrecision(retrieved, goldenCase);
             // Free as well - the answer's own citations against the retrieved headers.
             ContextPrecisionScores cited = scoringService.citedPrecision(answer, retrieved);
@@ -300,9 +274,8 @@ public class GoldenEvalService {
     }
 
     /**
-     * Always attempted, including when the case threw, so a failed run does not leave eval
-     * conversations behind in Redis for the chat API to list. A failure to delete is logged rather than
-     * thrown: it would otherwise replace whatever exception made the case fail.
+     * Always attempted, even when the case failed, so no suite conversations are left in Redis. A failed
+     * delete is logged, not thrown, so it cannot hide the case's own error.
      */
     private void deleteConversation(String conversationId) {
         try {
@@ -315,14 +288,12 @@ public class GoldenEvalService {
     /**
      * The golden run's own view of the chat-turn topic.
      *
-     * <p>Assigned rather than subscribed, and never committed: it is not a member of the online
-     * consumer's group, so it neither takes that group's partition away nor moves its offsets. It is
-     * positioned at the end of the topic when opened, so it sees this run's turns and no earlier ones.
+     * <p>Assigned, not subscribed, and never committed: it is outside the live consumer's group, so it
+     * neither takes its partition nor moves its offsets. It starts at the end of the topic, so it sees only
+     * this run's turns.
      *
-     * <p>Every golden turn that arrives is kept by conversation id, not only the one being waited for.
-     * Cases run one at a time, so in practice the next record is the one wanted, but nothing about the
-     * topic guarantees that - and a turn left over from a previous case that timed out must not be
-     * mistaken for the current one.
+     * <p>Every golden turn is kept by conversation id, not just the one awaited, so a late turn from an
+     * earlier case that timed out is never mistaken for the current one.
      */
     private final class TurnFeed implements AutoCloseable {
 
@@ -337,8 +308,7 @@ public class GoldenEvalService {
                                                       .toList();
             consumer.assign(partitions);
             consumer.seekToEnd(partitions);
-            // seekToEnd is lazy. Resolving the positions now pins "the end" to before the first request,
-            // rather than to whenever the first poll happens to run.
+            // seekToEnd is lazy; reading the position now fixes "the end" before the first request.
             partitions.forEach(consumer::position);
         }
 
@@ -370,14 +340,13 @@ public class GoldenEvalService {
     }
 
     /**
-     * The same judges, in the same order, that live turns get from {@link TurnJudgeWorker} - so a golden
-     * number and a live one mean the same thing. An ungrounded case gets only its task classified and its
-     * pool graded, for the reason live ungrounded turns do: the answer judges score an answer against its
-     * context, and an out-of-corpus case would fail them for behaving correctly.
+     * The same judges, in the same order, as live turns get from {@link TurnJudgeWorker}, so golden and
+     * live numbers mean the same. An ungrounded case gets only its task classified and its pool graded:
+     * the answer judges compare an answer with its context, and an out-of-corpus case would fail them for
+     * behaving correctly.
      *
-     * <p>Then, for grounded cases only, the answer-use context precision judge, which has no live
-     * counterpart. Last, and deliberately: it is top-k calls, so a run interrupted partway through a case
-     * has already recorded everything else.
+     * <p>Then, for grounded cases, the judged context precision, which has no live counterpart. Last on
+     * purpose: it is several calls, so an interrupted run has already recorded the rest.
      */
     private void judge(CaseOutcome outcome) {
         TurnVerdicts verdicts = turnJudge.judge(JudgeInput.of(outcome.evalTurn()));
@@ -409,11 +378,9 @@ public class GoldenEvalService {
         int groundednessPassed = 0;
         List<String> failures = new ArrayList<>();
 
-        // The two precisions are averaged over DIFFERENT denominators, which is why they cannot share
-        // an accumulator. The reference-based one applies only to cases declaring expectedPages; the
-        // judged one applies to any case that retrieved something, including the out-of-corpus cases
-        // that declare no pages at all. Averaging either over caseCount would silently divide by cases
-        // it never scored.
+        // The two precisions average over DIFFERENT sets of cases: expected-page precision over cases that
+        // list pages, judged precision over any case that retrieved something. Dividing either by
+        // caseCount would count cases it never scored.
         int precisionCases = 0;
         double precisionTotal = 0;
         double precisionAtKTotal = 0;
@@ -490,8 +457,7 @@ public class GoldenEvalService {
                                      .filter(citation -> !citation.hasMalformedPage())
                                      .count();
 
-            // Counted separately from caseCount: a null verdict means the case was not judged, and
-            // folding those into the denominator would report unjudged cases as judged failures.
+            // Not caseCount: a null verdict means not judged, which must not count as a failure.
             if (scores.relevancy() != null) {
                 relevancyJudged++;
                 if (scores.relevancy()) {
@@ -584,8 +550,7 @@ public class GoldenEvalService {
     /**
      * One case's outcome while a run is in progress.
      *
-     * <p>Mutable, unlike everything else here, because the judgements arrive in a second pass over the
-     * same list. A class rather than a record for exactly that reason.
+     * <p>A mutable class, not a record, because the judgements are added in a second pass.
      */
     public static final class CaseOutcome {
 
@@ -690,40 +655,26 @@ public class GoldenEvalService {
     /**
      * The aggregate of one run.
      *
-     * <p>{@code relevancyRate} and {@code groundednessRate} are null when the run did not judge, rather
-     * than zero - a suite run without judging has not scored zero on groundedness, it has not measured
-     * it, and the two must not render the same way on a dashboard.
+     * <p>{@code relevancyRate} and {@code groundednessRate} are null, not zero, when the run did not
+     * judge: "not measured" must not look like "scored zero".
      *
-     * @param contextPrecision    RAGAS's rank-weighted context precision, averaged over the cases that
-     *                            declare expected pages, with {@code precisionAtK} the plain
-     *                            relevant/k beside it. Null when no case in the run scored recall.
-     *                            Both are a <em>floor</em>: relevance comes from the dataset's expected
-     *                            pages, which were curated as the pages containing the answer rather
-     *                            than as every page that could inform one, so a genuinely useful chunk
-     *                            from an unlisted page counts against the score. Compare runs, not
-     *                            levels.
-     * @param judgedContextPrecision the same two numbers with relevance decided per chunk by the LLM
-     *                            judge instead, and so free of that dataset bias - but subject to the
-     *                            self-judging bias {@code EvalConfig} documents, and null unless the
-     *                            run judged. Where the two disagree on a chunk, the dataset is the more
-     *                            likely thing to be wrong.
-     * @param citedContextPrecision the same two numbers with a chunk counted as used when the answer
-     *                            cites its page - free, deterministic and measured on every run, so the
-     *                            steadier cross-check on the judge. Under-counts by construction: a
-     *                            passage used but not cited scores as unused. Null only when no case
-     *                            retrieved anything.
-     * @param citationValidity    1.0 when no citations were emitted at all, which is why
-     *                            {@code citationsEmitted} sits beside it. An assistant that stopped
-     *                            citing entirely would otherwise show perfect validity.
-     * @param inventedPageCount   fabricated citations that named a plain page number the context never
-     *                            offered - the failure the citation header, the prompts and the parser
-     *                            strippers all exist to prevent. Reported separately from
-     *                            {@code citationFabrication} because the two behave nothing alike: this
-     *                            has been 0 on every run since the footer and contents strippers
-     *                            landed, whereas the rate beside it is dominated by the model writing
-     *                            section numbers where pages belong, which varies from 0.22 to 0.33 run
-     *                            to run on an unchanged pipeline. A regression guard needs the stable
-     *                            one; see {@code EvalSuiteIT}.
+     * @param contextPrecision    rank-weighted context precision over the cases that list expected pages,
+     *                            with {@code precisionAtK} (relevant / k) beside it; null when no case
+     *                            lists pages. A <em>floor</em>: the lists hold the pages with the answer,
+     *                            not every useful page. Compare runs, not levels.
+     * @param judgedContextPrecision the same, with the judge deciding each chunk - free of that bias but
+     *                            not of self-judging; null unless the run judged. Where the two disagree,
+     *                            the dataset is more often the one that is wrong.
+     * @param citedContextPrecision the same, with a chunk counted as used when the answer cites its page -
+     *                            free, exact and on every run, so a steady check on the judge. It
+     *                            under-counts: a passage used but not cited scores as unused.
+     * @param citationValidity    1.0 when nothing was cited at all, which is why {@code citationsEmitted}
+     *                            sits beside it.
+     * @param inventedPageCount   citations naming a plain page number the context never offered - the
+     *                            failure the citation header and the strippers exist to prevent. Kept
+     *                            apart from {@code citationFabrication}, which moves from run to run with
+     *                            the model's section-number habit; this one is stable, so the build fails
+     *                            on it (see {@code EvalSuiteIT}).
      */
     public record GoldenRunResult(String suite,
                                   int caseCount,

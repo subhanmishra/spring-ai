@@ -8,10 +8,8 @@ management:
       application: ${spring.application.name}
   server:
     port: 9095
-  # The Boot 4 key. Its predecessor, management.otlp.tracing.endpoint, is still accepted without a
-  # warning but ignored. This application kept exporting under it only because the Docker Compose
-  # service connection supplies the collector's address; ragr-ingest and ragr-eval, which do not use
-  # compose, exported nothing. Set explicitly so tracing does not depend on how the stack was started.
+  # The Spring Boot 4 key; the old management.otlp.tracing.endpoint is silently ignored. Set explicitly
+  # so tracing does not depend on Docker Compose support supplying the address.
   opentelemetry:
     tracing:
       export:
@@ -33,41 +31,25 @@ management:
       application: ${spring.application.name}
       env: local
     distribution:
-      # Histograms only for the four timers the Grafana dashboard actually runs histogram_quantile
-      # against (and http.server.requests additionally carries the dashboard's only exemplars).
-      # `all: true` published buckets for every timer in the app: 2,407 bucket lines out of 2,623
-      # exported lines, i.e. 92% of a 528 KB scrape body every 15s, for eighteen bucket families of
-      # which the dashboard queried four. Everything dropped here still exports _count, _sum and
-      # _max, so rates and averages are unaffected - only quantiles need buckets.
+      # Histograms only for the timers the dashboard takes percentiles from. Buckets for every timer
+      # were 92% of each scrape; everything else still exports _count, _sum and _max, which is all
+      # rates and averages need.
       #
-      # These keys are PREFIX matches, not exact ones: Micrometer's PropertiesMeterFilter walks a
-      # meter's name from most specific to least, so `spring.ai.advisor` also matches the separate
-      # `spring.ai.advisor.active` LongTaskTimer. Those .active meters are not on the dashboard and
-      # were 319 bucket lines between them, so each is switched off explicitly. Removing a `false`
-      # line silently re-enables it via its parent.
+      # The keys match by PREFIX, so `spring.ai.advisor` also turns on `spring.ai.advisor.active`.
+      # Each `.active` twin is switched off explicitly - removing a `false` line turns it back on.
       percentiles-histogram:
         "[http.server.requests]": true
         "[gen_ai.client.operation]": true
         "[spring.ai.advisor]": true
         "[db.vector.client.operation]": true
-        # Added for the AI/RAG dashboard's "ChatClient end-to-end latency" panel, which had been
-        # querying histogram_quantile against a timer that published no buckets and was therefore
-        # permanently empty. This is the user-facing number - the whole turn including retrieval and
-        # generation - so quantiles on it are worth the bucket cost.
-        "[spring.ai.chat.client]": true
+        "[spring.ai.chat.client]": true    # the whole turn, as the user waits for it
         "[http.server.requests.active]": false
         "[gen_ai.client.operation.active]": false
         "[spring.ai.advisor.active]": false
         "[db.vector.client.operation.active]": false
-        # Required alongside the `true` above, NOT optional: these keys are PREFIX matches, so
-        # `spring.ai.chat.client` also switches on the separate `spring.ai.chat.client.active`
-        # LongTaskTimer, which no panel queries and which was 319 bucket lines for its siblings.
         "[spring.ai.chat.client.active]": false
-      # Where the histogram's buckets stop. Micrometer's default is 30s, and a chat turn takes 76-84s
-      # (gemma4:e2b, up to num-predict 1024 tokens), so half of all turns landed in the +Inf bucket and
-      # histogram_quantile reported p95 as exactly 30s - a number that was never measured. 300s leaves
-      # headroom above the slowest answer the num-predict ceiling allows. Prefix matches, like the keys
-      # above.
+      # Where the buckets stop. The default, 30s, is shorter than a chat turn (up to ~85s), so slow turns
+      # all read as 30s. 300s is above the slowest answer num-predict allows.
       maximum-expected-value:
         "[http.server.requests]": 300s
         "[gen_ai.client.operation]": 300s
@@ -86,15 +68,10 @@ spring:
   docker:
     compose:
       lifecycle-management: START_AND_STOP
-      # No `file:` here on purpose. compose.yaml stays at the repository root, next to the docker/ and
-      # docker-volume/ directories its mounts point at, and is found by the default lookup in the
-      # working directory - which is the repository root under IntelliJ's default and, via the
-      # spring-boot-maven-plugin setting in ragr-app/pom.xml, under ./mvnw spring-boot:run too. A
-      # relative path here would tie startup to whichever working directory each run config happens
-      # to use.
-  # Spring Boot has no Docker Compose service connection for Kafka, so unlike Postgres and Redis the
-  # broker's address is set here rather than discovered. It matches the advertised listener in
-  # compose.yaml.
+      # No `file:` on purpose. compose.yaml sits at the repository root and is found in the working
+      # directory, which is the root both from IntelliJ and from ./mvnw (see ragr-app/pom.xml).
+  # Spring Boot cannot discover Kafka through Docker Compose as it does Postgres and Redis, so the
+  # address is set here. It matches the advertised listener in compose.yaml.
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -102,27 +79,21 @@ spring:
       # The payload is mostly retrieved chunk text, which compresses well.
       compression-type: zstd
       properties:
-        # How long send() may block the calling thread for metadata or buffer space. The default is
-        # 60s, which with the broker down would stall whatever called it. ChatTurnPublisher already
-        # sends off the chat thread; this bounds how long each of those sends can linger.
+        # How long a send may wait for broker metadata. The default, 60s, would hold a thread for a
+        # minute while Kafka is down. Sends are already off the chat thread; this bounds each one.
         max.block.ms: 500
-        # Ceiling on the producer's reconnect backoff to an unreachable broker. The default 1s logs a
-        # "Bootstrap broker ... disconnected" WARN about twice a second, all of it shipped to Loki:
-        # measured over the same 40s outage, 80 lines at the default and 21 at 10s. The backoff ramps
-        # up exponentially from 50ms, so a short outage spends much of itself in the ramp and the saving
-        # grows with the outage's length. The cost is up to ~10s before sends resume once the broker
-        # is back - turns sent in that gap are dropped and counted like any other outage. Measured
-        # after an outage, the first turn sent ~8s after the broker returned was published.
+        # Longest wait between reconnect attempts to a broker that is down. At the default, 1s, the
+        # disconnect warning floods the logs; 10s cuts it by about four. The cost: up to ~10s after
+        # the broker returns before sends resume, and turns in that gap are dropped and counted.
         reconnect.backoff.max.ms: 10000
-        # Plain JSON, no __TypeId__ header naming this app's class: the consumer is a different
-        # application and deserializes into its own type.
+        # Plain JSON, with no header naming this application's class: the consumer has its own type.
         spring.json.add.type.headers: false
     template:
       # Propagates the chat turn's trace into the record headers.
       observation-enabled: true
     admin:
-      # KafkaAdmin waits this long at startup to create the topic before giving up and carrying on.
-      # The default 30s would add half a minute to every start with the broker down.
+      # How long startup waits to create the topics before carrying on; the default 30s would slow
+      # every start with Kafka down.
       operation-timeout: 5s
   datasource:
     url: jdbc:postgresql://localhost:5432/ragdatabase
@@ -130,14 +101,13 @@ spring:
     password: secret
     hikari:
       pool-name: rag-hikari-pool
-      # Chat only reads: one similarity search per turn. Ingestion's writes, and the pool sized for
-      # them, are ragr-ingest's.
+      # Chat only reads: one similarity search per turn.
       maximum-pool-size: 5
-      minimum-idle: 2                # must be < maximum-pool-size, otherwise idle-timeout never reaps
-      connection-timeout: 30000      # 30s - fail rather than queue forever on an exhausted pool
+      minimum-idle: 2                # below maximum-pool-size, or idle connections are never closed
+      connection-timeout: 30000      # 30s - fail rather than wait forever for a connection
       idle-timeout: 300000           # 5m
-      keepalive-time: 120000         # 2m - stops idle connections being silently dropped by NAT/firewalls
-      max-lifetime: 1800000          # 30m - must stay below any DB-side or proxy-side connection lifetime
+      keepalive-time: 120000         # 2m - keeps idle connections from being dropped by the network
+      max-lifetime: 1800000          # 30m - below any lifetime the database or a proxy enforces
       validation-timeout: 5000
       leak-detection-threshold: 60000
   ai:
@@ -147,17 +117,17 @@ spring:
         max-interval: 10000
         multiplier: 2
       max-attempts: 3
-    # The embedding model and dimensions MUST match ragr-ingest's: each query is embedded with the
-    # same model to search what ingestion wrote. A different dimension fails loudly at query time; a
-    # different model with the same dimension fails silently, returning poor matches with no error.
+    # The embedding model and dimensions MUST match ragr-ingest's: each question is embedded with the
+    # same model to search what ingestion wrote. A different dimension fails loudly; a different model
+    # with the same dimension fails silently, with poor matches.
     vectorstore:
       pgvector:
         table-name: vector_store
         schema-name: public
         initialize-schema: false     # created by ragr-ingest's Flyway V1
-        index-type: HNSW # Reverted to HNSW as it works with 768 dimensions
+        index-type: HNSW
         distance-type: COSINE_DISTANCE
-        dimensions: 768 # Set to 768 for nomic-embed-text
+        dimensions: 768              # nomic-embed-text
     #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
     #        remove-existing-vector-store-table: true
     #    openai:
@@ -173,66 +143,37 @@ spring:
       base-url: http://localhost:11434
       embedding:
         model: nomic-embed-text
-        keep-alive: "-1"   # pin the embedding model in memory: avoids the ~28s cold start, and the
-                           # runner-startup race that concurrent batches would otherwise hit
+        keep-alive: "-1"   # keep the model loaded: no ~28s cold start on the first question
       chat:
-        # Gemma 4 E2B, switched from llama3.2 for CITATION FIDELITY - the thing the citation header
-        # in DocumentIngestionService and QA_PROMPT_TEMPLATE in SpringAiConfig exist to produce.
-        # Measured on three retrieval-grounded queries against the 645-page manual, with both models
-        # given identical prompts, context and options: llama3.2 cited NOTHING three times out of
-        # three, once parroting the instruction back ("Remember to cite your sources") instead of
-        # obeying it. gemma4:e2b cited seven pages across the same three, every one genuinely in the
-        # retrieved context. A follow-up five-query run cited 18 pages, all valid, none fabricated.
-        #
-        # It is NOT cheap, whatever /api/ps says. Ollama reports it at 1.59-1.70 GB against llama3.2's
-        # 2.81-2.88 GB, but that is only the share placed on the iGPU: its llama-server commits ~8.1 GB
-        # (the scheduler predicts 6.9 GiB), most of it cold in the pagefile, and a cold load of it
-        # evicts nomic-embed-text once - see .claude/context/ingestion.md. llama3.2 was never measured
-        # the same way, so which of the two costs more is unknown. Once both are loaded it coexists
-        # with nomic-embed-text indefinitely (five consecutive turns, 0s load every time), and it
-        # generated FASTER - 12.8-13.9 tok/s against 10.7-12.1, i.e. 53-70s per answer against 58-91s.
+        # Chosen for citations, the thing the whole pipeline exists to produce: with the same prompts
+        # and context, llama3.2 cited nothing and gemma4:e2b cited only pages it was given. It is
+        # heavier than Ollama reports, but once loaded it stays alongside nomic-embed-text.
         model: gemma4:e2b
-        # Gemma 4 advertises a `thinking` capability and Spring AI 2.0.1 returns that separately, in
-        # OllamaApi.Message.thinking, which ChatService never reads. Left enabled it is pure waste in
-        # BOTH directions: 1,790-2,331 characters per answer of reasoning we discard, AND it pushed
-        # all three answers into the num-predict ceiling below, truncating them mid-sentence. With it
-        # off, the same answers finish on their own in 656-837 tokens. Do not remove this.
-        #
-        # QUOTED deliberately. This binds to the enum OllamaThinkProperties (TRUE/FALSE/HIGH/MEDIUM/
-        # LOW), not to a boolean - so an unquoted `false` is parsed by YAML as a Boolean and only
-        # reaches the enum via Spring Boot's lenient Object-to-enum coercion. The quotes make it a
-        # String and remove the dependency on that coercion.
+        # Do not remove. Thinking output is returned separately and never read, and with it on, answers
+        # ran into num-predict and were cut off mid-sentence. Quoted because it binds to an enum, not
+        # a boolean.
         think: "false"
-        # Gemma 4's own Modelfile sets temperature 1, top_k 64, top_p 0.95, and - exactly as with
-        # repeat-penalty below - Spring AI sends NO value unless one is set here, so omitting this
-        # silently runs grounded RAG at temperature 1.0. llama3.2 shipped no temperature at all, so
-        # this is a difference the model swap introduces rather than one inherited from it.
+        # The model's own default is 1.0, and Spring AI sends nothing unless it is set here. Grounded
+        # answers want a low temperature.
         temperature: 0.2
-        # Nothing else bounds an answer: without num-predict the only stop condition is the context
-        # window, so a looping generation runs to (num-ctx - prompt) tokens. One request generated
-        # 13,468 tokens over 29 minutes before it was killed, holding the HTTP thread the whole time.
-        # 1024 is comfortably above what this model needs once `think` is off (max measured 837).
+        # The only limit on answer length. Without it a looping generation once ran for 29 minutes.
+        # Answers need at most ~840 tokens with thinking off.
         num-predict: 1024
-        # Ollama's API default is 1.1, but Spring AI sends no value unless one is set here, and
-        # llama.cpp's own default is 1.0 - i.e. repetition penalty DISABLED. The runaway above ran
-        # with `repeat_penalty = 1.000` in the sampler params. Do not remove this.
+        # Do not remove. Spring AI sends nothing unless set, and the runner's own default disables the
+        # repetition penalty - the 29-minute loop above ran with it off.
         repeat-penalty: 1.1
-        # 8192, far below the 131072 this model reports as its native context: the KV cache is what
-        # made Ollama predict 3.6 GiB for the previous chat model and evict nomic-embed-text to fit
-        # it. Must stay well above the worst-case prompt - system prompt + top-k(5) chunks of up to
-        # 445 tokens + max-chat-messages(10) of history - because Ollama truncates an over-long
-        # prompt from the left, which silently drops the system prompt and the RAG context rather
-        # than failing. Measured prompts on the manual reach ~2,430 tokens, so there is ample room.
+        # Far below the model's native 131072, to keep memory down (a bigger context cache once evicted
+        # the embedding model). Must stay well above the largest prompt (~2,430 tokens measured):
+        # Ollama cuts an over-long prompt from the START, silently dropping the system prompt.
         num-ctx: 8192
     chat:
-      # ChatModel-level: the FINAL prompt sent to Ollama, i.e. after QuestionAnswerAdvisor
-      # has injected the retrieved document context. This is where the RAG context shows up.
+      # The final prompt sent to Ollama, after the retrieved passages were added.
       observations:
         log-prompt: true
         log-completion: true
         include-error-logging: true
       client:
-        # ChatClient-level: the prompt as the caller wrote it, before advisors run.
+        # The prompt as the caller wrote it, before the advisors ran.
         observations:
           log-prompt: true
           log-completion: true
@@ -249,37 +190,31 @@ logging:
         jdbc:
           core: DEBUG
 
-#app configurations
 app:
   embedding:
-    # Prepended to every query sent to the embedding model. MUST pair with ragr-ingest's passage prefix
+    # Added to every question before it is embedded. MUST pair with ragr-ingest's passage prefix
     # ("search_document: ") and change with the model - see app.embedding there.
     task-prefix: "search_query: "
   rag:
-    # Retrieval only. What is chunked and stored is configured in ragr-ingest under app.ingestion.
+    # Retrieval only. What is chunked and stored is set in ragr-ingest, under app.ingestion.
     top-k: 5
-    # Tuned to the task prefixes, which lift every score unevenly. Probing the golden queries at top 10
-    # (7 Oct 2026): the in-corpus cases' 5th hit scores 0.667 at the lowest, while the best hit for a
-    # question the corpus cannot answer reached 0.618 (it was 0.532 without prefixes, under the old 0.6).
-    # 0.65 keeps every in-corpus top-k chunk and still hands out-of-corpus questions no context.
-    # Re-probe after any embedding change - the scores are the model's, not the corpus's.
+    # Sits between the weakest useful chunk (0.667) and the best chunk for a question the corpus cannot
+    # answer (0.618), measured over the golden questions with the task prefixes on. Re-measure after
+    # any embedding change: the scores belong to the model, not the corpus.
     similarity-threshold: 0.65
-    # One vector query fetches pool-size candidates above pool-floor; only the leading top-k at or above
-    # similarity-threshold reach the prompt, and the rest travel to ragr-eval, which measures recall
-    # against them. LIMIT 10 costs the same as LIMIT 5 on this corpus (about 0.8 ms warm, measured
-    # 6 Oct 2026); LIMIT 20 about 3.8 ms. See PooledQuestionAnswerAdvisor.
+    # One query fetches this many chunks above pool-floor. The top-k above the threshold go into the
+    # prompt; the rest go to ragr-eval, to measure what retrieval left out. 10 costs the same as 5.
     pool-size: 10
     pool-floor: 0.0
-  ai: # New section for Spring AI properties
+  ai:
     max-chat-messages: 10
 
   events:
     chat-turns:
       enabled: true
       topic: rag.chat.turn.completed
-      # Evaluation normally keeps up within seconds; the rest of the window is for replaying past
-      # traffic through a new judge or metric. At a few KB per turn, three days of dev traffic is
-      # nothing on disk.
+      # Evaluation keeps up within seconds; the rest of the window allows replaying past turns through
+      # a new metric. A few KB per turn.
       retention: 3d
     feedback:
       topic: rag.chat.feedback

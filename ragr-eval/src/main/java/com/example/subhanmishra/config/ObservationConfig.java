@@ -9,17 +9,13 @@ import org.springframework.http.server.observation.ServerRequestObservationConte
 /**
  * Keeps actuator requests out of tracing and out of {@code http.server.requests}.
  *
- * <p>This application has no API, so actuator shares the main port (9096) rather than getting a
- * management port of its own as ragr-app and ragr-ingest do - and there, a request to it is an ordinary
- * server request. Every Prometheus scrape, one every 15 seconds, was therefore traced, exported to Tempo
- * and recorded with an exemplar: 234 of the roughly 285 exemplars on the overview dashboard's HTTP
- * panels in one measured hour. None of those traces has a log line, so almost every dot there led to a
- * "Related logs" query that returned nothing. The other two applications never observe their scrapes
- * because a separate management server is not instrumented; this predicate gives ragr-eval the same
- * behaviour without running a second server for it.
+ * <p>Here the actuator shares the main port (9096) with the small review API, instead of having its own
+ * management port as in ragr-app and ragr-ingest - so every Prometheus scrape was an ordinary, traced
+ * request. Those traces drowned the dashboard's exemplars and none had a log line. The other two never
+ * trace their scrapes, because a separate management server is not instrumented; this gives ragr-eval the
+ * same behaviour without a second server.
  *
- * <p>Deliberately outside {@link EvalConfig}, which is switched off with {@code app.eval.enabled} - the
- * scrapes continue either way.
+ * <p>Outside {@link EvalConfig}, which {@code app.eval.enabled} can switch off; scrapes continue anyway.
  */
 @Configuration
 public class ObservationConfig {

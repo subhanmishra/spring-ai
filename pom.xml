@@ -15,11 +15,9 @@
     <name>spring-ai-ragr</name>
     <description>Retrieval-augmented generation service and the modules it shares</description>
 
-    <!-- ragr-shared holds what the chat path and evaluation must agree on exactly. The citation code,
-         because ChatService resolves and strips citations to build every answer and the scorer counts
-         them afterwards - scores computed by a copy of the parser that had drifted would describe
-         nothing. And the ChatTurnCompleted event, so the publisher and the consumer cannot disagree
-         about its shape. -->
+    <!-- Three applications and one library. ragr-shared holds what they must agree on exactly - chunk
+         metadata keys, the citation code, the embedding task prefix, the Kafka events and the error
+         handling - so no two copies can drift apart. -->
     <modules>
         <module>ragr-shared</module>
         <module>ragr-app</module>
@@ -32,18 +30,18 @@
         <spring-ai.version>2.0.1</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
         <modelmapper.version>3.2.4</modelmapper.version>
-        <!-- Matches the version spring-ai-tika-document-reader already pulls in, so the explicit
-             declaration in ragr-app does not introduce a second copy on the classpath. -->
+        <!-- The version spring-ai-tika-document-reader already brings, so ragr-ingest's explicit
+             declaration adds no second copy. -->
         <jsoup.version>1.22.2</jsoup.version>
-        <!-- Test tags excluded from the ordinary build. Cleared on the command line to run the
-             evaluation suite: ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT -->
+        <!-- Test tags excluded from the ordinary build; cleared on the command line to run the golden
+             suite (see surefire below). -->
         <surefire.excludedGroups>eval</surefire.excludedGroups>
-        <!-- So that the command above still works from the root. -Dtest is applied to every module in
-             the reactor, and without this each module that has no EvalSuiteIT fails the build for
-             matching nothing. The cost is that a mistyped -Dtest now runs nothing and passes. -->
+        <!-- So the command above works from the root: -Dtest applies to every module, and each one
+             without EvalSuiteIT would fail for matching nothing. The cost: a mistyped -Dtest runs nothing
+             and passes. -->
         <surefire.failIfNoSpecifiedTests>false</surefire.failIfNoSpecifiedTests>
-        <!-- Only ragr-app has a main class. Skipped everywhere else so ./mvnw spring-boot:run works
-             from the root; ragr-app sets it back to false. -->
+        <!-- ragr-shared has no main class, so spring-boot:run is skipped by default; each application
+             sets this back to false. -->
         <spring-boot.run.skip>true</spring-boot.run.skip>
     </properties>
 
@@ -70,19 +68,14 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- EvalSuiteIT replays the curated evaluation dataset through the real chat path.
-                         It needs Postgres, Redis and Ollama up with the reference manual already
-                         indexed, and it takes minutes - one grounded answer on the dev host is 53-70
-                         seconds - so it must not run as part of the ordinary build.
+                    <!-- EvalSuiteIT replays the golden dataset through the running ragr-app, with the
+                         corpus stored, and takes minutes - so it is not part of the ordinary build.
+                         Run it with:
 
-                         Run it deliberately with:
+                             ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
 
-                             ./mvnw test -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
-
-                         Note -Dgroups=eval on its own does NOT work, which is the obvious thing to
-                         try: in JUnit 5 tag filtering an exclusion beats an inclusion, so the tag
-                         stays excluded however it is included. The exclusion itself has to be cleared,
-                         which is why it is bound to an overridable property rather than hardcoded. -->
+                         -Dgroups=eval alone does NOT work: in JUnit 5 an exclusion beats an inclusion,
+                         so the exclusion itself must be cleared - hence a property, not a fixed value. -->
                     <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>

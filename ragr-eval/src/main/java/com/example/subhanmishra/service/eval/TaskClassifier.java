@@ -4,9 +4,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 
 /**
- * Labels a question with its {@link TaskType}, from the question alone - it runs on ungrounded turns too,
- * which keeps "how much of the traffic is general conversation" measurable without judging those
- * answers. The cheapest call there is: a question and a one-word reply.
+ * Labels a question with its {@link TaskType}, from the question alone, so it runs on ungrounded turns
+ * too - "how much traffic is general conversation" stays measurable without judging those answers. The
+ * cheapest call there is.
  */
 public class TaskClassifier {
 

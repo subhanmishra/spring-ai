@@ -16,20 +16,15 @@ import java.util.UUID;
 /**
  * Drains the judge queue: one PENDING turn at a time, oldest first, on a single virtual thread.
  *
- * <p>The queue is {@code eval_turn} itself rather than Kafka. Judging a turn takes a minute or more of
- * model time and waits on idle chat for as long as users keep it busy; holding a Kafka record that long
- * would mean pausing the consumer and fighting {@code max.poll.interval.ms}, and a restart would lose its
- * place. A row survives restarts, its age is one query away, and the deterministic scores are already
- * stored beside it by the time it waits.
+ * <p><b>The queue is the {@code eval_turn} table, not Kafka.</b> Judging takes a minute or more and waits
+ * for chat to be idle; holding a Kafka record that long would fight the consumer's poll timeout and lose
+ * its place on a restart. A row survives restarts, and its age is one query away.
  *
- * <p>This replaces the drop-on-contention admission the online path used to have. Dropping kept judging
- * from piling up behind live chat, but it also meant a busy hour was the least judged one. Queueing behind
- * the idle gate judges every sampled turn, and {@code max-backlog-age} is the bound that dropping used to
- * provide: a turn still waiting after that is SKIPPED and counted, so the backlog never describes traffic
- * from hours ago.
+ * <p>Every sampled turn is judged, however busy chat is. {@code max-backlog-age} is the bound: a turn
+ * still waiting after it is SKIPPED and counted, so the queue never describes traffic from hours ago.
  *
- * <p>One worker, so judge calls stay strictly sequential - Ollama would serialise them anyway, and a second
- * worker would only add a second call for chat to queue behind.
+ * <p>One worker, so judge calls are strictly one at a time - Ollama would serialise them anyway, and a
+ * second worker would only give chat a second call to wait behind.
  */
 @Service
 public class TurnJudgeWorker implements SmartLifecycle {
@@ -87,8 +82,7 @@ public class TurnJudgeWorker implements SmartLifecycle {
                 Thread.currentThread().interrupt();
                 return;
             } catch (RuntimeException e) {
-                // The database blinked, or something unforeseen; a dead worker would silently stop all
-                // judging, so back off and carry on.
+                // A dead worker would silently stop all judging, so back off and carry on.
                 log.warn("Judge worker iteration failed; retrying", e);
                 try {
                     Thread.sleep(properties.judge().pollInterval());
@@ -118,8 +112,8 @@ public class TurnJudgeWorker implements SmartLifecycle {
             turns.requeue(turnId);
             throw e;
         } catch (RuntimeException e) {
-            // Saved as PARTIAL with whatever it has, rather than requeued: a turn that breaks the judges
-            // once will break them again, and retrying it forever would block the queue behind it.
+            // Saved as PARTIAL, not requeued: a turn that breaks the judges once will again, and would block
+            // the queue forever.
             TurnVerdicts empty = new TurnVerdicts();
             empty.markUnmeasured();
             turns.saveVerdicts(turnId, empty, null, (System.nanoTime() - startedAt) / 1_000_000,

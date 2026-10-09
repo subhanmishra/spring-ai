@@ -11,9 +11,8 @@ public class VectorStoreEntity {
     @Id
     private UUID id; // Assuming 'id' is the primary key of the vector_store table
 
-    // Spring Data JDBC requires an @Id, even if we don't use it for our custom delete query.
-    // We don't need to map 'embedding' or 'metadata' directly for the delete operation
-    // as we'll use a custom query targeting metadata->>'documentId'.
+    // Mapped only for the delete-by-document query, which reads metadata->>'documentId'. Spring Data
+    // JDBC needs an @Id; the other columns are not mapped.
 
     public UUID getId() {
         return id;

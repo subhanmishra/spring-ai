@@ -22,27 +22,17 @@ import java.util.HexFormat;
 public class SpringAiConfig {
 
     /**
-     * Mirrors {@code QuestionAnswerAdvisor}'s own default template, with the citation rule restated
-     * immediately after the context. {@link PooledQuestionAnswerAdvisor} renders it.
-     *
-     * <p>The rule is already in the system prompt, but llama3.2 ignored it there: it sits in item 1 of a
-     * four-item capability list, thousands of tokens away from the passages it refers to, and a 3B model
-     * does not reliably carry an instruction that far. With the headers present and correctly attached in
-     * the prompt, the model still answered "According to the reference documentation" and cited nothing.
-     * Restating the rule adjacent to the data is what makes it stick.
-     *
-     * <p>The default template's closing line ("not prior knowledge ... inform the user that you can't
-     * answer") is deliberately softened here, because it contradicts the system prompt's Hybrid Synthesis
-     * and General Knowledge capabilities - the stock wording would forbid answers this assistant is
-     * explicitly meant to give.
-     *
-     * <p>The passages are said to come from the library, not the user, because the advisor appends them
-     * to the <em>user</em> message. Introduced as plain "context information", the model took them for
-     * text the user had pasted and opened answers with "Thank you for providing the specific context ...
-     * based only on the text you supplied" - four of five turns in one stored conversation, each
-     * imitating the last through chat memory. With no passages retrieved it asked the user to "provide
-     * the context" instead of answering. The no-preamble rule is repeated here, beside the passages, for
-     * the same reason as the citation rule.
+     * Spring AI's default RAG template, changed in three ways. {@link PooledQuestionAnswerAdvisor}
+     * renders it.
+     * <ul>
+     *   <li><b>The citation rule is repeated right after the passages.</b> In the system prompt alone it
+     *       sat thousands of tokens away, and the model ignored it.</li>
+     *   <li><b>The closing line is softened.</b> The default ("not prior knowledge ... say you can't
+     *       answer") forbids the general-knowledge answers the system prompt allows.</li>
+     *   <li><b>The passages are said to come from the library, not the user.</b> They are added to the
+     *       <em>user</em> message, so the model thanked the user for "providing the context" - and, with
+     *       nothing retrieved, asked for some. The no-preamble rule sits here too, beside the passages.</li>
+     * </ul>
      */
     private static final PromptTemplate QA_PROMPT_TEMPLATE = new PromptTemplate("""
             {query}
@@ -76,9 +66,8 @@ public class SpringAiConfig {
             """);
 
     /**
-     * Indented 24 spaces inside the text block on purpose: that is what the model has always been sent,
-     * since the block was first written inline with its closing delimiter 24 columns left of its text.
-     * Re-indenting it would change every prompt and with it every measurement taken so far.
+     * Indented 24 spaces inside the text block on purpose: that is what the model has always been sent.
+     * Re-indenting would change every prompt, and with it every measurement so far.
      */
     private static final String SYSTEM_PROMPT = """
                                 You are DocAI, an intelligent, versatile AI document intelligence assistant.
@@ -91,10 +80,9 @@ public class SpringAiConfig {
         """;
 
     /**
-     * A short hash of everything the model is told besides the conversation itself, carried on every
-     * chat turn event so evaluation can split a metric at a prompt change rather than average across it.
-     * The passage marker is included because how passages are laid out changes the answers as surely as
-     * the wording does.
+     * A short hash of everything the model is told besides the conversation, sent with every turn so
+     * evaluation can split a metric at a prompt change. It includes the passage marker: layout changes
+     * answers as much as wording does.
      */
     public static final String PROMPT_VERSION = promptVersion(SYSTEM_PROMPT + QA_PROMPT_TEMPLATE.getTemplate()
                                                               + PooledQuestionAnswerAdvisor.PASSAGE_END);

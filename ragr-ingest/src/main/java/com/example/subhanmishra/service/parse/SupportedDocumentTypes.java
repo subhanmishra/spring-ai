@@ -3,23 +3,14 @@ package com.example.subhanmishra.service.parse;
 import java.util.Set;
 
 /**
- * The file types the parser can actually handle.
+ * The file types {@code DocumentParserService} can handle: PDF itself, the rest through Tika.
  *
- * <p>This lives beside the parser because it is a statement about {@code DocumentParserService}:
- * {@code parsePdf} handles the first entry and {@code parseGenericFile} hands the rest to Tika. DOCX,
- * XLSX, PPTX and HTML are on the list deliberately - the table-recovery path exists specifically to
- * read their {@code <table>} markup - even though the endpoint's documentation long claimed a
- * narrower set.
+ * <p><b>A constant, not a setting, on purpose.</b> The list is what the parser has been checked to
+ * handle, tables included. Adding a format should mean checking it works, which a setting would skip.
  *
- * <p>It is a constant rather than an {@code app.ingestion.*} property on purpose. The set is determined by
- * what the parser has been verified to carry through chunking and the table paths, not by deployment
- * preference; adding a format should require someone to check that it works, which a configuration
- * knob would let them skip.
- *
- * <p><strong>This is a type filter, not a content scanner.</strong> Renaming {@code payload.exe} to
- * {@code payload.pdf} gets it past this check and into PDFBox, which then rejects it as a corrupt
- * PDF. The point here is to refuse files that were never candidates before any database row is
- * written, not to validate that a file is what it claims to be.
+ * <p><b>A type filter, not a content scanner.</b> {@code payload.exe} renamed to {@code payload.pdf}
+ * passes, and is then rejected by the PDF reader as corrupt. The point is to refuse files that were never
+ * candidates before anything is written to the database.
  */
 public final class SupportedDocumentTypes {
 
@@ -34,9 +25,8 @@ public final class SupportedDocumentTypes {
             ".csv");
 
     /**
-     * Consulted only when the filename carries no extension to judge by. Clients routinely send
-     * {@code application/octet-stream} for types they cannot guess, so a declared content-type is
-     * treated as a fallback rather than as evidence.
+     * Used only when the filename has no extension. Clients often send {@code application/octet-stream}
+     * for everything, so the declared type is a fallback, not evidence.
      */
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "application/pdf",

@@ -8,22 +8,17 @@ import java.util.List;
 /**
  * Rank metrics for one turn's retrieval, computed from a graded candidate pool.
  *
- * <p>The pool is every chunk the one vector query returned, in score order; the first
- * {@code inContext} of them were in the prompt. Each carries a grade - 0 not relevant, 1 partly, 2
- * relevant - from the judge on live traffic, or from the dataset's expected pages on a golden case
- * (2 on an expected page, else 0). The same arithmetic serves both, which is what makes the two
- * comparable at all.
+ * <p>The pool is every chunk the vector query returned, in score order; the first {@code inContext} were
+ * in the prompt. Each has a grade - 0 not relevant, 1 partly, 2 relevant - from the judge on live traffic,
+ * or from the expected pages on a golden case (2 on an expected page, else 0). The same arithmetic for
+ * both is what makes them comparable.
  *
- * <p><strong>A chunk counts as relevant at grade 2 only.</strong> Every pool chunk is topically close to
- * the question by construction - it was retrieved for it - and a three-level scale gives that topical
- * closeness somewhere to go other than "relevant". Grade 1 still earns gain in NDCG, so it is not thrown
- * away; it just cannot make a turn's retrieval "right".
+ * <p><b>Relevant means grade 2 only.</b> Every pool chunk is on topic by construction; grade 1 gives that
+ * somewhere to go. It still earns some gain in NDCG, but cannot make retrieval "right".
  *
- * <p><strong>Recall is pooled, and an upper bound.</strong> Its denominator is the relevant chunks in the
- * pool, not in the corpus: a relevant chunk that ranked below the pool is invisible to it. So a recall of
- * 1.0 means retrieval kept everything relevant it found, not everything relevant that exists. It is
- * {@code null} when the pool holds nothing relevant - "nothing to recall" is not a recall of zero, and
- * {@link #relevantInPool} = 0 is the signal for that case (an uncovered question, or a pool too shallow).
+ * <p><b>Recall is pooled, an upper bound.</b> It divides by the relevant chunks in the pool, not the
+ * corpus, so 1.0 means retrieval kept everything relevant it found. It is {@code null} when the pool holds
+ * nothing relevant - that is "nothing to recall", not zero - and {@link #relevantInPool} = 0 flags it.
  *
  * @param precisionAtK      relevant chunks in the prompt / chunks in the prompt; null when the prompt had none
  * @param recallAtK         relevant chunks in the prompt / relevant chunks in the pool; null when the pool

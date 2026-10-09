@@ -17,22 +17,19 @@ import java.util.Optional;
 /**
  * Reads a PDF into per-page {@link ContentBlock}s, recovering tables from the page geometry.
  * <p>
- * This replaces {@code PagePdfDocumentReader} only when table detection is switched on. That reader
- * returns each page as flat text, with {@code PDFTextStripper} having already padded the gaps between
- * cells with spaces - by which point a table's columns are unrecoverable.
+ * Used in place of {@code PagePdfDocumentReader} when table detection is on: that reader pads the gaps
+ * between cells with spaces, after which the columns cannot be recovered.
  * <p>
- * Which strategy a page uses is decided per page, not per document: a manual can rule its appendix tables
- * and leave the rest borderless. A page is treated as ruled when it carries enough vertical rules to form
- * columns; otherwise the text's own alignment is used.
+ * The strategy is chosen per page, since a document can rule some tables and not others. A page with
+ * enough vertical lines to form columns is read as ruled; any other by the text's alignment.
  */
 public final class PdfBlockReader {
 
     private static final Logger log = LoggerFactory.getLogger(PdfBlockReader.class);
 
     /**
-     * Below this many distinct vertical rules there is nothing to build columns from, and the page is read
-     * as unruled. Deliberately not "are there any line operations": the 645-page manual draws tens of
-     * thousands of them for code-block backgrounds and rules no table at all.
+     * Fewer distinct vertical lines than this and the page is read as unruled. Not "are there any lines":
+     * the manual draws thousands for code-block backgrounds and rules no table at all.
      */
     private static final int MIN_RULES_FOR_LATTICE = 3;
 
@@ -43,10 +40,8 @@ public final class PdfBlockReader {
     /**
      * The pages that carry content, and how many pages the file actually has.
      *
-     * <p>The two differ, which is why the count is carried rather than taken from the list. A page with
-     * no text runs is skipped, and a page whose every block turns out to be a page-number footer or a
-     * table-of-contents entry is dropped - 18 pages of the reference manual are contents. Reporting the
-     * surviving pages as the document's page count would tell a caller a 645-page PDF has 627.
+     * <p>The two differ - pages with no text, or only a footer or contents entries, are dropped - so the
+     * count is kept separately. Otherwise the 645-page manual would report 627 pages.
      */
     public record Pdf(int pageCount, List<Page> pages) {
     }
@@ -83,11 +78,9 @@ public final class PdfBlockReader {
     /**
      * Removes table-of-contents entries, and any block left holding nothing but a contents heading.
      *
-     * <p>Runs before {@link #stripPageFooters}, though the order does not in fact matter here: a
-     * contents line ends in a page number but is not <em>only</em> a page number, so the footer
-     * stripper never sees one as a footer. Tables are passed through untouched - a contents section is
-     * not ruled, and clipping a trailing cell out of a real table would be a worse bug than the one
-     * being fixed.
+     * <p>The order against {@link #stripPageFooters} does not matter: a contents line is never
+     * <em>only</em> a number. Tables are left alone - a contents section is not a table, and clipping a
+     * real table's last cell would be worse than the problem being fixed.
      */
     private static List<Page> stripTocEntries(List<Page> pages) {
         TocEntryStripper stripper = TocEntryStripper.detect(
@@ -130,15 +123,11 @@ public final class PdfBlockReader {
     /**
      * Removes the printed page number from the end of each page.
      *
-     * <p>Runs after every page has been read, because {@link PageFooterStripper} identifies the footer
-     * by the offset that holds across the whole document rather than by the shape of one line - see its
-     * javadoc for why a trailing number alone is not evidence enough.
+     * <p>Runs once every page is read, because {@link PageFooterStripper} needs the whole document to
+     * find the numbering scheme.
      *
-     * <p>Only the page's <strong>last</strong> block is considered, and only when it is prose. The
-     * footer is spatially last, so nothing earlier can be it; and it is never inside a table, which was
-     * verified rather than assumed - of 305 table chunks in the reference manual, zero ended with a bare
-     * number, while 625 of 970 prose chunks did. Clipping a real trailing cell out of a table would be a
-     * worse bug than the one being fixed.
+     * <p>Only a page's <strong>last</strong> block is checked, and only when it is prose: the footer is
+     * last on the page, and is never inside a table (checked on the manual).
      */
     private static List<Page> stripPageFooters(List<Page> pages) {
         Map<Integer, String> tails = new LinkedHashMap<>();
@@ -168,15 +157,13 @@ public final class PdfBlockReader {
 
             List<ContentBlock> blocks = new ArrayList<>(page.blocks());
             if (text.isBlank()) {
-                // The footer was the whole block. Keeping it would store a chunk holding nothing but a
-                // page number - 15% of this manual's chunks were exactly that.
+                // The footer was the whole block; keeping it would store a chunk that is just a number.
                 blocks.remove(last);
                 removedBlocks++;
             } else {
                 blocks.set(last, new ContentBlock.Prose(text));
             }
-            // A page left with no blocks at all is dropped; it contributes nothing to chunk or to page
-            // attribution, and an empty page would otherwise floor the chunk count at one per page.
+            // A page left with no blocks is dropped; it has nothing to chunk.
             if (!blocks.isEmpty()) {
                 stripped.add(new Page(page.pageNumber(), List.copyOf(blocks)));
             }

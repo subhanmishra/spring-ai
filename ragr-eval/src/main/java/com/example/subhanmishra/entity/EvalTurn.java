@@ -16,9 +16,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * One chat turn as ragr-eval stores it on arrival: what was asked and answered, how, and its
- * deterministic scores. The judged columns of {@code eval_turn} are filled later by the judge worker and
- * are not part of this record; {@code EvalTurnRepository} writes them stage by stage.
+ * One chat turn as stored on arrival: what was asked and answered, how, and its rule-based scores. The
+ * judged columns are filled in later, stage by stage, by {@code EvalTurnRepository}; they are not part of
+ * this record.
  *
  * @param chunks the whole candidate pool in rank order; the first {@code retrievedCount} were in the prompt
  */
@@ -144,9 +144,8 @@ public record EvalTurn(UUID turnId,
     /**
      * Where a turn is in the judge queue.
      *
-     * <p>{@code NOT_QUEUED} is a turn the sample rate left out: stored and deterministically scored, never
-     * judged. {@code PARTIAL} means at least one stage could not be measured - a timeout or an unreadable
-     * verdict - and its columns are null, not failed.
+     * <p>{@code NOT_QUEUED}: left out by the sample rate - stored and scored, never judged.
+     * {@code PARTIAL}: at least one stage could not be measured; its columns are null, not failed.
      */
     public enum JudgeStatus {
         PENDING,

@@ -8,22 +8,18 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Recovers tables from one page's positioned text, using the drawn rules when there are any and the text's
- * own column alignment when there are not.
+ * Finds tables in one page's positioned text, from the drawn lines when there are any (lattice) and from
+ * how the text lines up when there are not (stream).
  * <p>
- * Sampling two real PDFs showed that a single strategy cannot cover both, because they fail in opposite
- * ways:
+ * Two strategies, because real PDFs fail in opposite ways:
  * <ul>
- *   <li>An Asciidoctor manual draws <em>no</em> table borders - its 47,000 line operations are code-block
- *       backgrounds - but lays cells out left-aligned on constant x positions.</li>
- *   <li>An SSRS invoice rules every cell, but centres and right-aligns their contents, so a cell's start x
- *       moves with the length of its text and alignment tells you nothing.</li>
+ *   <li>The Spring Boot manual draws <em>no</em> table borders, but starts every cell at the same x.</li>
+ *   <li>A ruled invoice draws every cell, but centres or right-aligns the text in it, so alignment says
+ *       nothing.</li>
  * </ul>
- * Rows always come from banding text by y. Only the columns differ, and in the ruled case they come from
- * the rules <em>crossing that band</em>, never from the page as a whole: an invoice draws several
- * unrelated grids on one page, and pooling their rules invents boundaries that belong to none of them.
- * Binning a run by which column interval contains it is also what makes the ruled path immune to the
- * alignment problem.
+ * Rows always come from grouping text by its y position. In the ruled case the columns come from the lines
+ * crossing <em>that row</em>, never the whole page: a page can hold several unrelated grids, and pooling
+ * their lines would invent columns belonging to none of them.
  */
 public final class PdfTableDetector {
 
@@ -165,10 +161,9 @@ public final class PdfTableDetector {
     }
 
     /**
-     * A later band belongs to the same grid when its boundaries are ones already seen and it is crossed by
-     * nearly as many. The count matters as much as the positions: every band on the page is crossed by the
-     * page's own frame, so matching on positions alone would let a table run on through the prose beneath
-     * it, which is exactly what happened on the first sample invoice.
+     * A later band is in the same grid when its lines are ones already seen, and nearly as many. The count
+     * matters: the page frame crosses every band, so matching positions alone let a table run on into the
+     * prose below it.
      */
     private static boolean sameGrid(List<Float> candidate, List<Float> rules) {
         if (candidate.size() < MIN_RULES || candidate.size() < rules.size() - 1) {
@@ -178,12 +173,9 @@ public final class PdfTableDetector {
     }
 
     /**
-     * Lays the bands out on the grid. Rows come from the <em>horizontal</em> rules, not from guessing which
-     * bands look like continuations: a ruled table says outright where one row ends and the next begins, so
-     * several bands falling between the same pair of rules are the wrapped lines of one cell. Guessing
-     * instead - treating any band that leaves the last column empty as a wrapped line - cannot tell "Road,"
-     * continuing an address from "GSTIN: | ... | From:" starting a new row, and folded whole tables into
-     * their first row.
+     * Lays the bands out on the grid. Rows come from the <em>horizontal</em> lines: bands between the same
+     * pair of lines are the wrapped lines of one row. Guessing continuations from empty cells instead
+     * could not tell a wrapped address line from a new row, and folded whole tables into their first row.
      */
     private static Optional<ContentBlock> latticeTable(List<Band> bands,
                                                        List<LineSegment> verticals,
@@ -302,13 +294,12 @@ public final class PdfTableDetector {
     // ------------------------------------------------------------------ rows
 
     /**
-     * Turns raw rows into a table: drop the columns nothing ever lands in, fold wrapped lines into the row
-     * above, then check there is still a table left.
+     * Turns raw rows into a table: drop columns nothing lands in, fold wrapped lines into the row above,
+     * then check a table is left.
      * <p>
-     * Dropping empty columns has to happen first. In a ruled PDF the outermost rules are the page frame,
-     * so the first and last columns are margins that no text occupies - and while they are still present,
-     * every row looks like it leaves the last column empty, which is the test for a wrapped line. Left in,
-     * they fold the entire table into its first row.
+     * Empty columns go first. The outer lines are often the page frame, so the first and last columns are
+     * empty margins - and while they remain, every row looks like a wrapped line (empty last column), and
+     * the whole table folds into one row.
      */
     private static Optional<ContentBlock> finish(List<List<String>> rows, boolean mergeContinuations) {
         if (rows.isEmpty()) {

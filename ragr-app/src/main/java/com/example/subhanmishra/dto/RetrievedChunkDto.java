@@ -6,11 +6,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * One chunk as the vector store returned it, with its score and the metadata the pipeline wrote onto
  * it at ingestion time.
  *
- * <p>{@code citation} and {@code text} are the two halves of the stored content. Every chunk written
- * since the citation header was introduced begins with a source line - {@code [filename, p. N]} - as
- * part of its <em>text</em>, because {@code QuestionAnswerAdvisor} builds the RAG context with
- * {@code Document::getText} and discards metadata entirely. Splitting the two apart here shows the
- * content as the document wrote it while keeping visible the line the model actually cites from.
+ * <p>{@code citation} and {@code text} are the two halves of the stored content: the
+ * {@code [filename, p. N]} line the model cites from, and the content itself.
  */
 public record RetrievedChunkDto(
 

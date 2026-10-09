@@ -11,9 +11,8 @@ import java.util.List;
 /**
  * Collects the positioned text runs of one page.
  * <p>
- * {@code PDFTextStripper} normally joins runs into lines and pads the gaps with spaces, which is what
- * destroys a table's column structure before anything can read it. Overriding {@code writeString} keeps
- * each run and where it sits instead.
+ * {@code PDFTextStripper} normally joins runs into lines padded with spaces, which loses a table's
+ * columns. Overriding {@code writeString} keeps each run and its position instead.
  */
 public final class PdfTextRunExtractor extends PDFTextStripper {
 

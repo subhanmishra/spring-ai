@@ -3,9 +3,8 @@ package com.example.subhanmishra.service.parse.pdf;
 /**
  * A straight line drawn on the page, normalised so {@code x1 <= x2} and {@code y1 <= y2}.
  * <p>
- * Coordinates are top-down, converted into the same frame as {@link TextRun} so the two layers can be
- * compared. Only horizontal and vertical segments are kept: those are what rule a table, and curves and
- * diagonals never do.
+ * In the same top-down frame as {@link TextRun}, so the two can be compared. Only horizontal and vertical
+ * lines are kept; nothing else rules a table.
  */
 public record LineSegment(float x1, float y1, float x2, float y2) {
 

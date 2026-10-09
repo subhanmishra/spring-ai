@@ -18,7 +18,7 @@
             <groupId>com.example</groupId>
             <artifactId>ragr-shared</artifactId>
         </dependency>
-        <!-- Publishes each completed chat turn for evaluation to consume off the chat path. -->
+        <!-- Publishes each finished turn, and each rating, for ragr-eval. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-kafka</artifactId>
@@ -120,15 +120,10 @@
                          finds the root compose.yaml. See spring.docker.compose in
                          application-dev.yaml. -->
                     <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
-                    <!-- Measured over a grounded chat turn: heap peaked at 242 MB uncapped (with a 4 GB
-                         default max, so largely uncollected garbage) and 150 MB under this cap, 471 MB
-                         private against 726 MB uncapped. The host has a few hundred MB to spare once
-                         both Ollama models are loaded.
-                         SerialGC rather than the default G1, measured over three grounded turns: peak
-                         private 448 MB under G1, 333 MB under Serial. Native memory tracking puts G1's own
-                         bookkeeping at 63 MB against 0 for Serial, and Serial also keeps the committed
-                         heap smaller (128 MB against 181). Four collections took 81 ms in total, so no
-                         pause a chat turn could notice. The IntelliJ run configuration needs the same VM
+                    <!-- Capped because the machine has only a few hundred MB to spare beside the two
+                         models; uncapped, the JVM took 726 MB, against 471 MB under the cap.
+                         SerialGC, not G1: 333 MB in total against 448 MB over three chat answers, with
+                         no pause a user could notice. The IntelliJ run configuration needs the same
                          options. -->
                     <jvmArguments>-Xmx384m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
@@ -137,11 +132,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
-                    <!-- docs/ holds the golden corpus, the 13.6 MB reference manual, kept here only to be
-                         uploaded to ragr-ingest from disk; nothing reads it from the classpath. Packaged,
-                         it was nearly all of the application layer in the Docker image, re-sent on every
-                         code change. Excluded from the jar only, not from resources, so it still lands in
-                         target/classes and the parent's resource filtering is left alone. -->
+                    <!-- docs/ holds the 13.6 MB reference manual, kept here only to be uploaded from disk.
+                         In the jar it was nearly all of the image's application layer, re-sent on every
+                         change. Excluded from the jar only, so it still reaches target/classes. -->
                     <excludes>
                         <exclude>docs/**</exclude>
                     </excludes>

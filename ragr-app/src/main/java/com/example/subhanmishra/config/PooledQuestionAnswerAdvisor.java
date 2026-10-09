@@ -19,19 +19,17 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * {@code QuestionAnswerAdvisor}, retrieving a deeper candidate pool than it puts in the prompt.
+ * Spring AI's {@code QuestionAnswerAdvisor}, but fetching a bigger pool of chunks than it puts in the
+ * prompt.
  *
- * <p>Evaluation needs to know what retrieval <em>left out</em>. Recall and NDCG on live traffic are
- * measured against chunks the judge calls relevant, and a relevant chunk the threshold or top-k cut off
- * is exactly the miss those metrics exist to see - but the stock advisor discards everything past its
- * own top-k inside the vector store, so nothing downstream can ever see it.
+ * <p><b>Why.</b> Evaluation needs to see what retrieval <em>left out</em>: recall is a relevant chunk the
+ * threshold or top-k cut off. The stock advisor never lets anything past its top-k out of the vector
+ * store.
  *
- * <p>So this makes the <strong>one</strong> vector query the stock advisor would make, asking for
- * {@code pool-size} candidates above {@code pool-floor} instead, and then applies top-k and the
- * similarity threshold itself. The prompt is built from exactly the chunks the stock advisor would have
- * chosen, in the same order and with the same template - laid out differently, see {@link #passages}. Measured on
- * the 946-chunk corpus, 6 Oct 2026: LIMIT 5 and LIMIT 10 both take about 0.8 ms warm, LIMIT 20 about
- * 3.8 ms - against a generation of 16-75 s.
+ * <p><b>How.</b> The same single vector query, asking for {@code pool-size} chunks above
+ * {@code pool-floor}; then top-k and the threshold are applied here. The prompt gets exactly the chunks
+ * the stock advisor would have chosen, in the same order and template - only laid out differently, see
+ * {@link #passages}. A pool of 10 costs the same as 5.
  *
  * <p>Context keys:
  * <ul>
@@ -41,9 +39,8 @@ import java.util.stream.Collectors;
  *   <li>{@link #RETRIEVAL_MILLIS} - how long the vector query took.</li>
  * </ul>
  *
- * <p>Written out rather than wrapping the stock advisor because its constructor is package-private and
- * its search request is final; the parts copied are {@code before}'s prompt rendering and {@code after}'s
- * metadata hand-off, line for line, except how the chunks are joined.
+ * <p>Copied rather than wrapping the stock advisor, whose constructor is package-private and search
+ * request final. {@code before} and {@code after} follow it line for line, except how chunks are joined.
  */
 public class PooledQuestionAnswerAdvisor implements BaseAdvisor {
 
@@ -102,17 +99,12 @@ public class PooledQuestionAnswerAdvisor implements BaseAdvisor {
      * The chunks as the prompt shows them: each closed by {@link #PASSAGE_END}, with a blank line either
      * side of it.
      * <p>
-     * The stock advisor joins chunks with one line separator, so a passage ran straight into the next
-     * one's {@code [filename, p. N]} line and nothing said where it ended. gemma4:e2b read each source
-     * line as closing the text above it: asked how to fix "port 8080 already in use", it cited page 375's
-     * server.port instructions as page 301 - the chunk after it - 13 times in 10 answers, 6 Oct 2026. A
-     * blank line between passages changed nothing (13 of 13 again). A "---" rule fixed the page but in 4
-     * of 20 answers the model wrote the filename as "Spring Boot reference.pdf", a citation the scorer
-     * calls fabricated. This marker put all 37 such citations on page 375 across 20 answers, with every
-     * filename right in those and in 10 DataSource answers, and the model never repeated it.
+     * Joined the stock way, each passage ran straight into the next one's {@code [filename, p. N]} line,
+     * and the model read that line as belonging to the text <em>above</em> it - so it cited a passage's
+     * content to the next passage's page. The end marker fixed that; a blank line did not, and a "---"
+     * rule garbled filenames.
      * <p>
-     * Always "\n", never the platform line separator, so the prompt is the same in a container and on a
-     * Windows host.
+     * Always "\n", never the platform line separator, so the prompt is the same on every OS.
      */
     static String passages(List<Document> documents) {
         return documents.stream()
@@ -121,9 +113,8 @@ public class PooledQuestionAnswerAdvisor implements BaseAdvisor {
     }
 
     /**
-     * How many of the pool's leading chunks go in the prompt: at most top-k, and only those at or above
-     * the threshold. The pool arrives in descending score order, so the cut is always a prefix - which
-     * is what keeps pool rank implicit in the event.
+     * How many of the pool's first chunks go in the prompt: at most top-k, and only those at or above the
+     * threshold. The pool is sorted by score, so the prompt is always a prefix of it.
      */
     static int inContextCount(List<Document> pool, int topK, double similarityThreshold) {
         int count = 0;

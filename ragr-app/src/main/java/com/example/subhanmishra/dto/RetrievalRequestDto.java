@@ -11,9 +11,8 @@ import jakarta.validation.constraints.NotBlank;
  * A retrieval probe: the query to embed, plus optional overrides for the search parameters the chat
  * path would otherwise take from {@code app.rag}.
  *
- * <p>The overrides are nullable rather than defaulted here, because "not supplied" has to be
- * distinguishable from "supplied as the same value the configuration happens to hold" - the response
- * echoes back which parameters were actually in force.
+ * <p>The overrides are nullable, not defaulted here, so "not sent" stays distinct from "sent as the same
+ * value"; the response reports what was used.
  */
 public record RetrievalRequestDto(
 

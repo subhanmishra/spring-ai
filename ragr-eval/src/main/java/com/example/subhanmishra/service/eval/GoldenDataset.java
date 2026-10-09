@@ -6,14 +6,11 @@ import java.util.List;
 /**
  * A named set of {@link GoldenCase}s, loaded from YAML.
  *
- * <p>The suite name tags every metric a run publishes, so it is what separates one dataset's trend
- * line from another's in Grafana. Changing it starts a new series rather than continuing the old one.
+ * <p>The suite name tags every metric a run publishes; changing it starts a new trend line.
  *
- * @param suite       identifies the dataset in metrics and in the {@code eval_run} table
- * @param corpus      the document(s) this suite assumes are indexed, for the error message when they
- *                    are not. A suite silently scoring zero because its corpus was never uploaded is
- *                    indistinguishable from a pipeline regression, which is the worst way for this to
- *                    fail.
+ * @param suite       identifies the dataset in metrics and in {@code eval_run}
+ * @param corpus      the documents the suite needs stored, named in the error when they are not - a suite
+ *                    scoring zero for a missing corpus would look exactly like a regression
  * @param description what the suite is for
  * @param cases       the cases, run in declaration order
  */

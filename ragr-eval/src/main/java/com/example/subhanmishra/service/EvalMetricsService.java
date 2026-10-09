@@ -33,29 +33,20 @@ import java.util.concurrent.atomic.DoubleAdder;
 /**
  * Publishes evaluation results as Micrometer meters, which Prometheus scrapes and Grafana renders.
  *
- * <p>Two different shapes of instrument are used, and mixing them up produces a dashboard that lies:
- *
+ * <p>Two kinds of instrument, and mixing them up makes a dashboard lie:
  * <ul>
- *   <li><strong>Counters</strong> carry the online path. Live traffic arrives one turn at a time and
- *       forever, so the useful question is a rate or a ratio over a window - and a ratio of two
- *       counters stays correct however Prometheus aligns its scrapes. A gauge holding "the last
- *       answer's citation validity" would show whatever the most recent single request happened to do.</li>
- *   <li><strong>Gauges</strong> carry the golden path. A suite run is a batch job that finishes, and
- *       its aggregate score is a single number with no rate interpretation at all.</li>
+ *   <li><b>Counters for live traffic.</b> Turns keep arriving, so the useful number is a rate or a ratio
+ *       of two counters, which stays right however scrapes line up. A gauge would show only whatever the
+ *       last turn did.</li>
+ *   <li><b>Gauges for the golden suite.</b> A run is a batch job with one final score.</li>
  * </ul>
  *
- * <p>The consequence of that second choice is worth stating plainly, because it is the classic way a
- * batch-job dashboard misleads: <strong>a gauge holds its last value forever.</strong> The scores from
- * a run in March are still being scraped in June, looking exactly as current as a run from an hour ago.
- * {@code rag.eval.golden.last.run.timestamp} exists solely so a panel can say how old the number it is
- * showing actually is, and the Grafana dashboard puts that age next to the scores rather than in a
- * corner.
+ * <p><b>A gauge keeps its last value forever</b>, so a run from months ago looks as current as one from
+ * an hour ago. {@code rag.eval.golden.last.run.timestamp} exists so the dashboard can show how old the
+ * scores are, right beside them.
  *
- * <p>None of these meters get percentile histograms. {@code application-dev.yaml} enables
- * {@code percentiles-histogram} for an explicit list of meter-name prefixes and {@code rag.eval} is
- * not among them, so the timers here export {@code _count}, {@code _sum} and {@code _max} only - rates
- * and averages work, quantiles do not. That is intentional: the histogram buckets were already 92% of
- * the scrape body before this feature existed.
+ * <p>No percentile histograms here: the timers export {@code _count}, {@code _sum} and {@code _max},
+ * enough for rates and averages.
  */
 @Service
 public class EvalMetricsService {
@@ -66,21 +57,14 @@ public class EvalMetricsService {
     private static final String GOLDEN = "rag.eval.golden.";
 
     /**
-     * How long a golden snapshot read from the database is trusted before it is re-read.
+     * How long the golden scores read from the database are trusted before being read again.
      *
-     * <p>Refresh is driven by scrapes rather than by a scheduler: a Micrometer gauge's value function
-     * is evaluated when Prometheus scrapes it, so consulting the database from there needs no
-     * {@code @EnableScheduling} and costs nothing while nobody is looking.
+     * <p>The read happens when Prometheus scrapes a gauge, not on a schedule, so it costs nothing while
+     * nobody is looking. Runs are rare, so 15 minutes of lag loses nothing; the first scrape after
+     * startup always reads.
      *
-     * <p>Fifteen minutes because a golden run is a batch job that takes minutes and happens a few times
-     * a day, so a panel lagging a finished run by up to this long loses nothing - whereas re-reading
-     * on every 15s scrape put the query in the log four times a minute to report a number that almost
-     * never changes. The first scrape after startup always reads, so a restart is never stale.
-     *
-     * <p>That the query really is a single row is load-bearing rather than incidental. The filter and
-     * the limit belong in SQL, served by {@code eval_run_status_started_idx} - reading the history back
-     * and picking the newest COMPLETED row in Java costs a sequential scan and a sort of the whole
-     * table on every refresh, and that cost grows with run history rather than staying flat.
+     * <p>The query must fetch one row, filtered and limited in SQL on {@code eval_run_status_started_idx}.
+     * Picking the newest run in Java would scan the whole table on every refresh.
      */
     private static final Duration GOLDEN_REFRESH_INTERVAL = Duration.ofMinutes(15);
 
@@ -89,18 +73,12 @@ public class EvalMetricsService {
     /**
      * Where a golden run's scores are read back from.
      *
-     * <p>This exists because of a gap that only showed up when the dashboard was checked against a real
-     * run: the suite is triggered by a tagged JUnit test, which runs in its OWN JVM with its own meter
-     * registry. Prometheus scrapes the application, not the test, so a run executed that way published
-     * its gauges into a registry that was discarded when the test ended - and the dashboard sat at zero
-     * while the results were sitting in Postgres all along.
+     * <p>The suite runs as a test in its <em>own</em> JVM, whose meters Prometheus never sees. So the
+     * {@code eval_run} table is the record, and these gauges report its latest row, whichever process
+     * wrote it. A run in this process also sets them directly, so it shows at once.
      *
-     * <p>So the durable record is the {@code eval_run} table, and these gauges report the latest row
-     * from it, whichever process produced it. An in-process run additionally sets the fields directly,
-     * so it shows up immediately rather than at the next refresh.
-     *
-     * <p>The consequence to know: <strong>golden gauges require {@code app.eval.golden.persist=true}.</strong>
-     * With persistence off a run still logs and still returns its result, but nothing reaches Grafana.
+     * <p><b>So the golden gauges need {@code app.eval.golden.persist=true}.</b> Without it a run still
+     * logs its result, but nothing reaches Grafana.
      */
     private final EvalRunRepository runRepository;
 
@@ -110,33 +88,28 @@ public class EvalMetricsService {
     /**
      * Whether any run has ever produced a judge verdict.
      *
-     * <p>Until one has, the two judged gauges report {@code NaN} rather than 0.0, because Prometheus
-     * renders NaN as absent and 0.0 as "zero percent passed". Judging is off by default - it roughly
-     * triples a run's wall clock - so the overwhelmingly common case is no verdicts at all, and
-     * reporting that as total failure would put two alarming red zeroes on the dashboard describing
-     * something nobody measured.
+     * <p>Until then the judged gauges report {@code NaN}, which Grafana shows as "no data", not 0.0, which
+     * reads as "nothing passed". Judging is off by default, so a 0.0 would be a red alarm about something
+     * nobody measured.
      */
     private final AtomicBoolean relevancyEverJudged = new AtomicBoolean();
     private final AtomicBoolean groundednessEverJudged = new AtomicBoolean();
 
     /**
-     * The same treatment for the judged context precision pair, and it matters more here than for the
-     * other two. Judged precision costs top-k judge calls per case rather than one, so runs that
-     * measure it will be rarer still - and a 0.0 sitting beside the reference-based precision would
-     * read as the judge disagreeing completely, which is the opposite of "nobody asked the judge".
+     * The same for judged context precision. A 0.0 beside the other precisions would read as the judge
+     * disagreeing completely, when nobody asked it.
      */
     private final AtomicBoolean contextPrecisionEverJudged = new AtomicBoolean();
 
     /**
-     * Cited precision is measured on every run, but every run persisted before it existed carries null,
-     * so it too has to stay NaN until a run has actually produced one rather than read 0.0.
+     * Cited precision is measured on every run, but older runs have none, so it too stays NaN until a run
+     * produces one.
      */
     private final AtomicBoolean citedPrecisionEverMeasured = new AtomicBoolean();
 
     /**
-     * Gauge backing state for the golden path. Micrometer holds only a weak reference to whatever a
-     * gauge reads, so these have to be strong fields on a singleton - a locally created holder is
-     * collected and the gauge silently starts reporting NaN.
+     * What the golden gauges read. Micrometer holds gauges' sources only weakly, so these must be fields
+     * of this singleton - a local one is garbage-collected and the gauge silently reports NaN.
      */
     private final DoubleAdder goldenHitRate = new DoubleAdder();
     private final DoubleAdder goldenMrr = new DoubleAdder();
@@ -183,23 +156,14 @@ public class EvalMetricsService {
     /**
      * Creates every fixed-tag online meter at zero, so its series exists before the first event.
      *
-     * <p>Without this the dashboard lies by omission. A Micrometer counter is created lazily on first
-     * use, so a counter for something that has not happened yet has no series at all - Prometheus
-     * returns nothing and Grafana renders "No data" rather than 0. For the health signals that is
-     * precisely backwards: the good state of {@code refusals.total},
-     * {@code instruction.echoes.total} and {@code chunks.without.header.total} is zero, and "nothing
-     * has gone wrong" ended up indistinguishable from "this metric is broken". Three panels read as
-     * empty on a working system.
+     * <p>Micrometer creates a counter on first use, so a counter for something that has not happened has
+     * no series, and Grafana shows "No data" instead of 0. For health signals whose good state is zero -
+     * refusals, instruction echoes, chunks without a header - "nothing went wrong" then looked like "the
+     * metric is broken".
      *
-     * <p>{@code register()} is idempotent - it returns the existing meter when one is already there -
-     * so this only forces creation and never resets a counter, including on a re-registration.
-     *
-     * <p>The tagged counters have to be enumerated over their whole tag cross-product, because a series
-     * exists per tag combination rather than per name. That is only tractable where the tag values are
-     * a closed set, which is why the golden {@code cases.total{suite,case}} and {@code runs.total{suite}}
-     * counters are deliberately absent here: their tags come from whichever dataset is run, so they
-     * cannot be enumerated in advance. No panel depends on them - the golden row reads the gauges, which
-     * are registered eagerly - and they appear on the first suite run.
+     * <p>Registering is idempotent, so this never resets a counter. Tagged counters are registered for
+     * every tag combination, which works only for closed sets of values - so the golden per-case and
+     * per-suite counters are not here; they appear on the first run, and no panel needs them.
      */
     private void preRegisterOnlineMeters() {
         counter(ONLINE + "turns.total", Tags.empty());
@@ -232,8 +196,7 @@ public class EvalMetricsService {
             }
         }
 
-        // Summaries have the same lazy-creation behaviour, so the retrieval-quality panel would also
-        // read as empty until the first chat turn on a freshly started application.
+        // Summaries are created on first use too.
         registry.summary(ONLINE + "retrieved.chunks");
         registry.summary(ONLINE + "top.score");
         registry.summary(ONLINE + "score.spread");
@@ -245,10 +208,8 @@ public class EvalMetricsService {
     /**
      * Re-reads the latest persisted run when the cached snapshot has gone stale.
      *
-     * <p>Called from every golden gauge's value function, so it runs on the scrape thread. It must
-     * therefore never throw and never block for long: a failure here would break the whole
-     * {@code /actuator/prometheus} response, taking out every unrelated metric with it. On any error
-     * the previous values simply stand.
+     * <p>Runs during a Prometheus scrape, so it must never throw or block for long: a failure would break
+     * the whole scrape, every other metric with it. On error the previous values stand.
      */
     private void refreshGoldenIfStale() {
         long now = System.currentTimeMillis();
@@ -308,9 +269,8 @@ public class EvalMetricsService {
     // ---------------------------------------------------------------- online
 
     /**
-     * Records one live chat turn's deterministic scores. Called on the request thread, so it must stay
-     * allocation-light and must never throw - a metrics failure cannot be allowed to fail a chat
-     * response that has already been generated.
+     * Records one live turn's rule-based scores, on the Kafka listener thread. It must never throw, or the
+     * turn would not be stored.
      */
     public void recordOnline(EvalScores scores) {
         counter(ONLINE + "turns.total", Tags.empty()).increment();
@@ -323,9 +283,8 @@ public class EvalMetricsService {
             registry.summary(ONLINE + "top.score").record(retrieval.topScore());
             registry.summary(ONLINE + "score.spread").record(retrieval.scoreSpread());
         }
-        // Chunks that predate the citation header cannot be cited. A non-zero count here means the
-        // citation metrics below are being scored against a context that was never fully citable, and
-        // the fix is to re-ingest, not to tune the prompt.
+        // Chunks stored before the citation header cannot be cited. Any here means re-ingest, not prompt
+        // tuning.
         int withoutHeader = retrieval.retrievedCount() - retrieval.chunksWithHeader();
         if (withoutHeader > 0) {
             counter(ONLINE + "chunks.without.header.total", Tags.empty()).increment(withoutHeader);
@@ -336,8 +295,7 @@ public class EvalMetricsService {
             counter(ONLINE + "citations.total", Tags.of("outcome", "valid")).increment(citations.valid());
             counter(ONLINE + "citations.total", Tags.of("outcome", "fabricated")).increment(citations.fabricated());
         } else {
-            // Counted separately rather than folded into the validity rate, which an answer citing
-            // nothing would otherwise make vacuously perfect.
+            // Counted apart: an answer citing nothing would make the validity rate trivially perfect.
             counter(ONLINE + "uncited.answers.total", Tags.empty()).increment();
         }
 
@@ -363,13 +321,10 @@ public class EvalMetricsService {
     /**
      * Records what {@code CitationResolver} did to one answer's section-number citations.
      *
-     * <p>This pair is why the resolver cannot quietly mask a degrading model. A repair is a section
-     * number that resolved to a page the model was actually shown; an abstention is one that did not,
-     * and which therefore went on being counted as fabricated. <strong>Watch the ratio, not either
-     * count alone.</strong> Repairs rising on their own is the known {@code gemma4:e2b} behaviour
-     * being corrected as designed; abstentions rising is the model emitting section numbers that
-     * correspond to nothing it was given, which is the genuine hallucination this pipeline exists to
-     * prevent and which no amount of resolving will fix.
+     * <p>A repair is a section number that resolved to a page the model was shown; an abstention is one
+     * that did not, and still counts as fabricated. <b>Watch the ratio.</b> Rising repairs are the known
+     * habit being corrected; rising abstentions are the model citing sections it was never given - real
+     * hallucination, which resolving cannot fix.
      */
     public void recordCitationResolution(int repaired, int abstained) {
         if (repaired > 0) {
@@ -381,8 +336,7 @@ public class EvalMetricsService {
     }
 
     /**
-     * One judge call's wall-clock time, per stage - {@code metric} is the stage name, as it was when only
-     * relevancy and groundedness existed. This is the number that sizes the judge budget.
+     * One judge call's time, tagged {@code metric} with the stage name. This sizes the judge budget.
      */
     public void recordJudgeCall(String stage, long durationMillis) {
         Timer.builder(ONLINE + "judge.duration")
@@ -397,9 +351,8 @@ public class EvalMetricsService {
     }
 
     /**
-     * Turns the backlog outgrew before the worker reached them. A steadily rising count means the sample
-     * rate is too high for the traffic - the role {@code judgements.dropped.total} played when judging
-     * dropped instead of queueing.
+     * Turns that waited too long and were skipped. A steadily rising count means the sample rate is too
+     * high for the traffic.
      */
     public void recordJudgeSkipped(int count) {
         counter(ONLINE + "judge.skipped.total", Tags.empty()).increment(count);
@@ -408,12 +361,9 @@ public class EvalMetricsService {
     /**
      * Everything the judges concluded about one turn, tagged by its task type.
      *
-     * <p>Recorded when judging finishes, which can be minutes after the turn - so these series describe
-     * when turns were <em>judged</em>. The quality panels read {@code eval_turn} by {@code occurred_at}
-     * instead; these exist for alerting and for the per-task rates Prometheus is good at.
-     *
-     * <p>The task tag is a closed set ({@code TaskType}, plus {@code unknown} when classification failed),
-     * so the series count stays fixed however much traffic there is.
+     * <p>Recorded when judging finishes, possibly minutes after the turn, so these describe when turns were
+     * <em>judged</em>. Quality panels read {@code eval_turn} by when the turn happened instead; these are
+     * for alerting and per-task rates. The task tag is a closed set, so the series count stays fixed.
      */
     public void recordJudgedTurn(TurnVerdicts verdicts, @Nullable Boolean answerOk, boolean grounded,
                                  long judgeMillis) {
@@ -423,9 +373,8 @@ public class EvalMetricsService {
              .record(judgeMillis, TimeUnit.MILLISECONDS);
         counter(ONLINE + "judged.turns.total", task.and("grounded", String.valueOf(grounded))).increment();
 
-        // Retrieval first, for ungrounded turns too: their pool is graded, and a relevant chunk in it is a
-        // recall of 0. Precision, MRR and NDCG are null for them - the prompt got no chunks - so recording
-        // "if present" keeps them out of those means without a special case.
+        // Retrieval first, ungrounded turns included: a relevant chunk in their pool is a recall of 0.
+        // Their precision, MRR and NDCG are null (the prompt got no chunks), so they are left out.
         RetrievalRanking ranking = verdicts.ranking();
         if (ranking != null) {
             recordIfPresent(ONLINE + "precision.at.k", task, ranking.precisionAtK());
@@ -488,9 +437,8 @@ public class EvalMetricsService {
     }
 
     /**
-     * The judge queue's depth and the age of its oldest turn, read from {@code eval_turn} on the scrape.
-     * Cached for {@link #QUEUE_REFRESH_INTERVAL} so a 5 s scrape step is not a query every 5 s, and never
-     * thrown from: a failure here would take the whole scrape down with it.
+     * The judge queue's length and the age of its oldest turn, read from {@code eval_turn} during a scrape.
+     * Cached for {@link #QUEUE_REFRESH_INTERVAL}, and never throws - a failure would break the scrape.
      */
     private void registerQueueGauges() {
         io.micrometer.core.instrument.Gauge
@@ -561,8 +509,7 @@ public class EvalMetricsService {
         set(goldenCitationValidity, citationValidity);
         set(goldenCitationFabrication, citationFabrication);
         set(goldenPassRate, passRate);
-        // Left at their previous value when a run does not judge, rather than reset to zero, which
-        // would render as a catastrophic quality drop on the dashboard instead of "not measured".
+        // Unjudged runs leave these alone; a reset to zero would look like a collapse in quality.
         if (relevancyRate != null) {
             set(goldenRelevancy, relevancyRate);
             relevancyEverJudged.set(true);

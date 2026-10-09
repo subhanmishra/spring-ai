@@ -6,9 +6,8 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Registers {@link ConversationIdInterceptor} on the two endpoints that take a chat turn. The
- * conversation read-back and delete endpoints carry the id in their path instead, and must not have one
- * generated for them.
+ * Registers {@link ConversationIdInterceptor} on the two generate endpoints only. The conversation read
+ * and delete endpoints take the id in their path, and must never have one generated.
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {

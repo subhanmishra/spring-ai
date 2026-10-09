@@ -5,9 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * One turn of a stored conversation.
  *
- * <p>{@code role} is Spring AI's {@code MessageType} lower-cased - {@code user}, {@code assistant},
- * {@code system} or {@code tool} - rather than the enum constant, so the wire format does not change
- * shape if the enum gains members.
+ * <p>{@code role} is Spring AI's {@code MessageType} in lower case - {@code user}, {@code assistant},
+ * {@code system} or {@code tool} - so the format does not change if the enum grows.
  */
 public record ChatMessageDto(
 

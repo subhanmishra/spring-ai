@@ -16,12 +16,11 @@ import java.util.UUID;
 /**
  * Hands a user's rating of an answer to ragr-eval, which stores it beside the turn it rates.
  *
- * <p>ragr-app keeps no record of its turns, so it accepts any turn id: an id that names no turn is
- * feedback that joins nothing on the evaluation side, which costs a row and misleads no metric.
+ * <p>Any turn id is accepted, since ragr-app keeps no turns; an unknown one matches nothing and misleads
+ * no metric.
  *
- * <p>Fire-and-forget for the same reason {@link ChatTurnPublisher} is: the caller has nothing to do
- * about a broker outage, and the send is counted either way as {@code rag.chat.feedback.events}.
- * {@code KafkaTemplate.send} is already asynchronous; its blocking part is bounded by the producer's
+ * <p>Fire-and-forget, like {@link ChatTurnPublisher}: the caller can do nothing about a Kafka outage, and
+ * every send is counted as {@code rag.chat.feedback.events}. Any blocking is capped by
  * {@code max.block.ms}.
  */
 @Service

@@ -7,9 +7,8 @@ import java.util.List;
 /**
  * The result of a retrieval probe.
  *
- * <p>The search parameters are echoed back as the values that were actually <em>in force</em>, not as
- * they arrived on the request: a caller who supplied no overrides needs to see what the configured
- * defaults are, since those are the ones the chat path uses.
+ * <p>The search settings are the ones actually <em>used</em>, so a caller who sent none sees chat's
+ * configured defaults.
  */
 public record RetrievalResponseDto(
 

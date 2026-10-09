@@ -18,12 +18,9 @@ import java.util.List;
  * Chooses the status of a bulk upload from its per-file results, so {@link DocumentController} can
  * declare its success status and return the list.
  *
- * <p>201 when every file indexed, 207 Multi-Status when some failed, 422 when none did. The body is
- * returned unchanged either way: every file sent has an entry, failed ones included.
- *
- * <p>Applies to any {@code List<DocumentResponseDto>} returned by {@code DocumentController}, which
- * today is only the bulk upload. A single upload returns one {@code DocumentResponseDto} and is not
- * matched.
+ * <p>201 when every file was stored, 207 when some failed, 422 when none were. The body is unchanged:
+ * one entry per file, failures included. It applies to any {@code List<DocumentResponseDto>} the
+ * controller returns - today only the bulk upload.
  */
 @ControllerAdvice(assignableTypes = DocumentController.class)
 class BatchUploadStatusAdvice implements ResponseBodyAdvice<Object> {

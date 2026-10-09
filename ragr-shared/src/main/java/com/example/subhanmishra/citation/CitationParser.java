@@ -15,82 +15,61 @@ import java.util.regex.Pattern;
  * Reads citations out of the two places they appear: the header every stored chunk carries, and the
  * inline references the model writes into an answer.
  *
- * <p>This is what makes citation fidelity measurable without an LLM judge or a golden answer. Because
- * {@code DocumentIngestionService.citationHeader} prepends {@code [filename, p. N]} to every chunk's
- * text, and {@code QuestionAnswerAdvisor} exposes the chunks it retrieved, a citation the model wrote
- * can be checked against the citations that were actually available to it. A citation with no
- * corresponding header is fabricated - the model invented a page number - and establishing that is a
- * pure string comparison over data already in hand.
+ * <p>This is what lets citations be checked without an AI judge. Every chunk's text starts with
+ * {@code [filename, p. N]}, so a citation in the answer can be compared with the chunks the model was
+ * given. A citation that matches none of them is fabricated, and finding that out is a plain string
+ * comparison.
  *
- * <p>The answer grammar is deliberately more liberal than the one the prompts ask for. Both
- * {@code SpringAiConfig.QA_PROMPT_TEMPLATE} and the system prompt describe a single convention, but a
- * model complies approximately: it swaps brackets for parentheses, drops the comma, and writes "page"
- * where it was asked for "p.". Rejecting those would count a perfectly good citation as absent and
- * understate the very metric this class exists to report.
+ * <p>Answers are read more loosely than the prompt asks the model to write them. The model follows the
+ * format only roughly - square brackets for round ones, no comma, "page" for "p." - and rejecting those
+ * would miss real citations.
  *
- * <p>Being liberal creates the opposite hazard, which is why {@link #parseAnswerCandidates} is named
- * for what it returns. An answer about this corpus is full of parentheses containing filenames -
- * "(application.properties)", "(pom.xml)" - that are prose, not citations, and scoring them as
- * fabricated would make the fabrication rate mostly noise. Deciding which candidates are real
- * citations needs to know which documents were retrieved, so that policy lives in
- * {@link AnswerCitations} rather than here.
+ * <p>The loose reading also picks up filenames that are just prose, like "(pom.xml)", which is why
+ * {@link #parseAnswerCandidates} returns <em>candidates</em>. Telling real citations apart needs the
+ * list of retrieved documents, so {@link AnswerCitations} makes that call.
  */
 public final class CitationParser {
 
     /**
-     * A chunk's citation header occupies the whole of its first line. Matching the shape rather than
-     * splitting on the first blank line matters: chunks ingested before the header existed start
-     * straight into their content, and an unconditional split would silently promote a real first line
-     * to a citation.
-     *
-     * <p>{@code RetrievalDiagnosticsService} applies the same rule for its DTO and reads this constant,
-     * so the two cannot drift apart.
+     * A chunk's citation line: the whole first line, in square brackets. The shape is matched, rather
+     * than the text split at the first line break, so a chunk stored without a header never has its real
+     * first line mistaken for one. {@code RetrievalDiagnosticsService} has its own copy of this
+     * pattern; keep the two identical.
      */
     public static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
     /**
-     * Opens the line under the citation header naming the section a chunk starts inside, when the chunk
-     * does not open with that section's own heading: {@code Section: Customizing the Management Server
-     * Port}. It is part of the header - {@link #stripHeader} removes it with the citation line - and is
-     * written by {@code DocumentIngestionService.citationHeader}, which says why it exists.
+     * Starts the optional second header line, naming the section a chunk begins inside:
+     * {@code Section: Customizing the Management Server Port}. {@link #stripHeader} removes it with the
+     * citation line. {@code DocumentIngestionService.citationHeader} writes it, and says why.
      */
     public static final String SECTION_LINE_PREFIX = "Section: ";
 
     /**
-     * A bracketed span in the answer - the candidate container, not the citation itself. Either
-     * bracket style, because the prompt asks for parentheses and a model produces both.
-     *
-     * <p>Parsing happens in two steps rather than one, because a model routinely puts several
-     * citations inside a single pair of brackets: {@code (manual.pdf, p. 283; manual.pdf, p. 299)}.
-     * A single pattern anchored on a closing bracket immediately after the page number matches
-     * <em>neither</em> of those - the first is followed by a semicolon rather than a bracket, and the
-     * second has no opening bracket of its own. This was not hypothetical; it was the very first real
-     * answer this evaluator scored, and it silently under-counted four citations as two.
+     * A bracketed span in the answer, round or square - the container, which may hold several
+     * citations: {@code (manual.pdf, p. 283; manual.pdf, p. 299)}. So parsing takes two steps, first the
+     * span and then each citation inside it with {@link #CITATION_IN_SPAN}. A single pattern would
+     * miss both of those.
      */
     static final Pattern BRACKETED_SPAN = Pattern.compile("[\\[(]([^\\[\\]()\\n]{1,400})[\\])]");
 
     /**
-     * One citation inside a bracketed span, so several separated by {@code ;} or {@code ,} are each
-     * found in turn. Accepts an optional comma after the filename and any of {@code p.} /
-     * {@code pp.} / {@code page} / {@code pages} before the number, or no page at all.
+     * One citation inside a span; several, separated by {@code ;} or {@code ,}, are found in turn. The
+     * comma after the filename is optional, and the page may follow {@code p.}, {@code pp.},
+     * {@code page} or {@code pages}, or be absent.
      *
-     * <p>The extension must begin with a letter. Without that, "(version 3.14)" parses as a file named
-     * {@code 3.14}, and requiring at least two extension characters alone does not exclude it.
-     *
-     * <p>Ten characters of extension because {@code properties} is one, and this corpus is largely
-     * about files named {@code application.properties}.
-     *
-     * <p>A page <em>range</em> ("pp. 12-14") yields only its first number. Chunks are one page each, so
-     * a range is the model summarising rather than citing, and inventing the intermediate pages here
-     * would manufacture fabrications the model never actually claimed.
+     * <ul>
+     *   <li>The extension must start with a letter, or "(version 3.14)" would read as a file named 3.14.</li>
+     *   <li>It may be up to ten characters long, for {@code application.properties}.</li>
+     *   <li>A page range ("pp. 12-14") yields only its first page. Chunks are one page each, so pages in
+     *       between would be citations the model never made.</li>
+     * </ul>
      */
     static final Pattern CITATION_IN_SPAN = Pattern.compile(
             "([^,;\\n]*?[^,;\\s.\\n]\\.[A-Za-z][A-Za-z0-9]{1,9})"
             + "(?:\\s*,)?"
-            // An optional page marker and reference, then only what can continue a page reference - a
-            // range ("pp. 12-14") or a list ("pp. 12, 14"). The reference is captured whole, dots and
-            // all: "p. 5.3" is a section number written where a page goes, and truncating it to 5
-            // would report a page the model never claimed. Citation decides which it is.
+            // An optional page, then only what can continue one: a range or a list. The page is captured
+            // whole, dots included - "p. 5.3" is a section number, and cutting it to 5 would invent a page.
             + "(?:\\s*(?:pp?\\.?|pages?)\\s*(\\d{1,5}(?:\\.\\d{1,3})*)[-–\\s\\d]*)?");
 
     /** Splits a header's inner text into its filename and page halves, e.g. {@code ", p. 590"}. */
@@ -100,10 +79,8 @@ public final class CitationParser {
     }
 
     /**
-     * The citation declared by a retrieved chunk's header, or null when it carries none - which means
-     * the chunk predates the header and can never be cited. Those are worth counting rather than
-     * ignoring, because a corpus holding them answers some questions with citations and some without,
-     * with nothing externally distinguishing the two.
+     * The citation in a chunk's header, or null when it has none. A chunk without one was stored before
+     * headers existed and can never be cited, so callers count them rather than skip them.
      */
     public static @Nullable Citation parseHeader(@Nullable String chunkText) {
         String firstLine = firstLineOf(chunkText);
@@ -123,10 +100,9 @@ public final class CitationParser {
     }
 
     /**
-     * The chunk's text with its citation header removed, or the whole text when it has none. Anything
-     * comparing stored text against what a document actually said has to strip this first - the header
-     * is prepended before embedding, so the stored content is not verbatim. The header is the citation
-     * line and, when there is one, the {@link #SECTION_LINE_PREFIX section line} under it.
+     * The chunk's text without its header - the citation line and any {@link #SECTION_LINE_PREFIX section
+     * line} - or the whole text when it has none. Anything comparing stored text with the original
+     * document must call this first, since the header is not part of the document.
      */
     public static @Nullable String stripHeader(@Nullable String chunkText) {
         if (chunkText == null) {
@@ -168,8 +144,8 @@ public final class CitationParser {
                     continue;
                 }
                 Citation citation = citationOf(fileName, inner.group(2));
-                // De-duplicated: an answer citing the same page in three sentences has cited one
-                // source, and counting it three times would flatter the validity rate.
+                // The same page cited in three sentences is one source; counting three would flatter
+                // the validity rate.
                 if (seen.add(key(citation))) {
                     citations.add(citation);
                 }
@@ -206,8 +182,8 @@ public final class CitationParser {
     /**
      * A citation from a filename and whatever the model wrote where a page belongs.
      *
-     * <p>A reference containing a dot is a section number, not a page - "5.3" is the heading
-     * "5.3. Endpoints". It is kept verbatim as a label so the failure reads as what the model wrote.
+     * <p>A reference with a dot is a section number, not a page, and is kept exactly as written so the
+     * mistake can be reported as the model made it.
      */
     static Citation citationOf(String fileName, @Nullable String pageRef) {
         if (pageRef == null) {

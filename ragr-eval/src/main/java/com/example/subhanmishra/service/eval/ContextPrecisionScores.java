@@ -5,41 +5,36 @@ import java.util.List;
 /**
  * How well the retrieved set was ordered, scored from a per-chunk relevance verdict.
  *
- * <p>This is RAGAS's {@code ContextPrecision}, and the two numbers here are deliberately both kept
- * because the metric everyone reaches for does not measure what its name suggests.
+ * <p>RAGAS's context precision, plus a second number, because the RAGAS one does not measure what its
+ * name suggests.
  *
- * <p><strong>{@link #averagePrecision()} is RAGAS's definition</strong> - mean of {@code Precision@k}
- * taken at each rank that holds a relevant chunk, divided by the number of relevant chunks retrieved:
+ * <p><b>{@link #averagePrecision()} is RAGAS's definition</b> - {@code Precision@k} at each rank holding a
+ * relevant chunk, averaged over the relevant chunks retrieved:
  *
  * <pre>{@code
  * averagePrecision = sum(Precision@k * v_k) / relevantCount
  * Precision@k      = (relevant chunks in ranks 1..k) / k
  * }</pre>
  *
- * Note what that denominator does: it normalises by the relevant chunks that were <em>found</em>, not
- * by top-k. {@code [1,0,0,0,0]} and {@code [1,1,1,1,1]} both score 1.000. It is a measure of
- * <em>ranking quality among the relevant chunks retrieved</em> - were they at the top - and says
- * nothing about how much of the context was noise. Where it earns its place next to MRR is the case
- * MRR cannot see: {@code [1,1,0,0,0]} scores 1.000 and {@code [1,0,0,0,1]} scores 0.700, while hit
- * rate and MRR are 1.000 for both.
+ * It divides by the relevant chunks <em>found</em>, not by k, so {@code [1,0,0,0,0]} and
+ * {@code [1,1,1,1,1]} both score 1.000. It measures whether the relevant chunks were at the top, not how
+ * much of the context was noise. Its value beside MRR: {@code [1,1,0,0,0]} scores 1.000 and
+ * {@code [1,0,0,0,1]} 0.700, where MRR gives both 1.000.
  *
- * <p><strong>{@link #precisionAtK()} is the noise fraction</strong> - plain {@code relevantCount / k},
- * unweighted by rank. This is the question "how much of what I paid to retrieve was junk", which is
- * the one the average above is routinely but wrongly assumed to answer. It costs one division off the
- * same vector, so there is no reason to compute one without the other.
+ * <p><b>{@link #precisionAtK()} is the noise share</b> - plain {@code relevantCount / k}: how much of what
+ * was retrieved was junk, the question people wrongly expect the first number to answer.
  *
- * <p>Read them together. A high average with a low precision@k is a well-ordered context that is
- * mostly padding - the signal to lower top-k or raise the similarity threshold. Both low means
- * retrieval is ranking badly, which points at embedding or chunking rather than at the advisor.
+ * <p>Read them together. A high average with a low precision@k is a well-ordered but padded context:
+ * lower top-k or raise the threshold. Both low means retrieval ranks badly: look at embedding or
+ * chunking.
  *
  * @param averagePrecision rank-weighted, normalised by relevant chunks found. 0.0 when none were.
  * @param precisionAtK     fraction of the retrieved set judged relevant
  * @param relevantCount    chunks judged relevant
  * @param retrievedCount   chunks the advisor returned, the {@code k} in {@code Precision@k}
- * @param relevance        the per-rank verdicts themselves, in rank order. Kept rather than discarded
- *                         because the two relevance sources disagree in a way that is worth reading:
- *                         a chunk the LLM judged useful that {@code expectedPages} omits is evidence
- *                         the dataset's page list is too narrow, not that retrieval erred.
+ * @param relevance        the per-rank verdicts, kept because where the judge and the expected pages
+ *                         disagree is worth reading: a useful chunk the pages omit means the list is too
+ *                         narrow, not that retrieval erred
  */
 public record ContextPrecisionScores(double averagePrecision,
                                      double precisionAtK,
@@ -68,9 +63,7 @@ public record ContextPrecisionScores(double averagePrecision,
             }
         }
 
-        // Nothing relevant retrieved is a genuine 0.0 rather than a missing measurement: the case was
-        // scored, and it scored badly. "Not scored at all" is represented by a null ContextPrecisionScores
-        // at the call site, which is why it is not folded in here.
+        // Nothing relevant is a real 0.0: scored, and badly. "Not scored" is a null at the call site.
         double average = relevantSoFar == 0 ? 0.0 : weightedTotal / relevantSoFar;
 
         return new ContextPrecisionScores(average,

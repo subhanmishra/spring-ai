@@ -12,11 +12,11 @@ spring:
     hikari:
       pool-name: ragr-ingest-hikari-pool
       maximum-pool-size: 20          # app.ingestion.concurrency must stay well below this
-      minimum-idle: 5                # must be < maximum-pool-size, otherwise idle-timeout never reaps
-      connection-timeout: 30000      # 30s - fail rather than queue forever on an exhausted pool
+      minimum-idle: 5                # below maximum-pool-size, or idle connections are never closed
+      connection-timeout: 30000      # 30s - fail rather than wait forever for a connection
       idle-timeout: 300000           # 5m
-      keepalive-time: 120000         # 2m - stops idle connections being silently dropped by NAT/firewalls
-      max-lifetime: 1800000          # 30m - must stay below any DB-side or proxy-side connection lifetime
+      keepalive-time: 120000         # 2m - keeps idle connections from being dropped by the network
+      max-lifetime: 1800000          # 30m - below any lifetime the database or a proxy enforces
       validation-timeout: 5000
       leak-detection-threshold: 60000
       data-source-properties:
@@ -31,10 +31,10 @@ spring:
         max-interval: 10000
         multiplier: 2
       max-attempts: 3
-    # The embedding model and dimensions MUST match ragr-app's, which embeds each query with the same
-    # model to search what this application wrote. A different dimension fails loudly at query time; a
-    # different model with the same dimension fails silently, returning poor matches with no error.
-    # Changing either means changing ragr-app too and re-ingesting every document.
+    # The embedding model and dimensions MUST match ragr-app's, which embeds each question to search
+    # what this application wrote. A different dimension fails loudly; a different model with the same
+    # dimension fails silently, with poor matches. Changing either means changing ragr-app too and
+    # re-ingesting every document.
     vectorstore:
       pgvector:
         table-name: vector_store
@@ -47,8 +47,7 @@ spring:
       base-url: http://localhost:11434
       embedding:
         model: nomic-embed-text
-        keep-alive: "-1"   # pin the embedding model in memory: avoids the ~28s cold start, and the
-                           # runner-startup race that concurrent batches would otherwise hit
+        keep-alive: "-1"   # keep the model loaded: no ~28s cold start, and no startup race for batches
 
 server:
   port: 8081
@@ -63,11 +62,8 @@ management:
       application: ${spring.application.name}
   server:
     port: 9097
-  # The Boot 4 key. Its predecessor, management.otlp.tracing.endpoint, is still accepted without a
-  # warning but ignored, and under it this application exported no traces at all: spans were
-  # recorded, trace ids reached the logs and the Prometheus exemplars, and Tempo never saw one, so
-  # every exemplar's "Query with Tempo" link opened a trace that did not exist. ragr-app hid the
-  # problem by getting the collector's address from its Docker Compose service connection instead.
+  # The Spring Boot 4 key. The old management.otlp.tracing.endpoint is accepted silently but ignored,
+  # and with it no traces reached Tempo at all.
   opentelemetry:
     tracing:
       export:
@@ -89,10 +85,8 @@ management:
       application: ${spring.application.name}
       env: local
     distribution:
-      # Histograms only for the timers a dashboard runs histogram_quantile against; everything else
-      # still exports _count, _sum and _max. These keys are PREFIX matches, so each timer's separate
-      # `.active` LongTaskTimer has to be switched off explicitly - see ragr-app's application-dev.yaml
-      # for the measurement behind this.
+      # Histograms only for the timers a dashboard takes percentiles from. The keys match by PREFIX, so
+      # each timer's `.active` twin must be switched off explicitly.
       percentiles-histogram:
         "[http.server.requests]": true
         "[gen_ai.client.operation]": true
@@ -100,10 +94,8 @@ management:
         "[http.server.requests.active]": false
         "[gen_ai.client.operation.active]": false
         "[db.vector.client.operation.active]": false
-      # Where the histogram's buckets stop. Micrometer's default is 30s, and indexing the 645-page
-      # reference manual is one ~240s upload request, so every upload landed in the +Inf bucket and its
-      # quantiles read 30s. 900s covers a document near the 25MB upload limit; embedding batches and
-      # vector writes take tens of seconds, so 300s leaves them headroom.
+      # Where the buckets stop. The default, 30s, is far shorter than one upload (~240s for the manual),
+      # so every upload read as 30s. 900s covers a file near the 25MB limit.
       maximum-expected-value:
         "[http.server.requests]": 900s
         "[gen_ai.client.operation]": 300s
@@ -125,30 +117,25 @@ logging:
 
 app:
   embedding:
-    # Prepended to every chunk sent to the embedding model, never stored. nomic-embed-text was trained
-    # with "search_document: " on passages and "search_query: " on queries, and Ollama adds neither.
-    # MUST pair with ragr-app's query prefix and change with the model: EmbeddingGemma's pair is
-    # "title: none | text: " and "task: search result | query: ". It is part of the pipeline version,
-    # so changing it means re-ingesting every document.
+    # Added to every chunk sent to the embedding model, never stored. nomic-embed-text was trained with
+    # "search_document: " on passages and "search_query: " on questions, and Ollama adds neither. MUST
+    # pair with ragr-app's question prefix and change with the model (EmbeddingGemma's pair is
+    # "title: none | text: " and "task: search result | query: "). Changing it means re-ingesting.
     task-prefix: "search_document: "
   ingestion:
-    # Changing any of the chunk-shaping settings below changes what is stored, and means re-ingesting
-    # the whole corpus. batch-size, concurrency and the retry settings only change how fast.
-    chunk-size: 400
+    # The settings down to table-detection shape what is stored: change one and re-ingest everything.
+    # batch-size, concurrency and the retries only change the speed.
+    chunk-size: 400              # tokens
     min-chunk-size-chars: 150
-    min-chunk-length-to-embed: 100   # characters; a shorter chunk is MERGED into the one before it, never
-                                     # dropped - the splitter's own discard behaviour deleted real content
+    min-chunk-length-to-embed: 100   # characters; a shorter chunk is MERGED into the one before, never
+                                     # deleted
     max-num-chunks: 10000
-    max-embed-tokens: 2048       # nomic-embed-text's context; a chunk above this is truncated by Ollama
-                                 # before embedding, so only an unsplittable table row may exceed it
-    table-detection: auto        # off | auto | lattice | stream. AUTO picks per page: ruled pages take
-                                 # columns from the rules, unruled ones from text alignment. This replaces
-                                 # the PDF reader entirely, so prose extraction changes too.
-    batch-size: 35               # chunks per batch; cost scales with TOKENS, not chunk count. At the
-                                 # mean of 261 tokens per chunk as embedded (header included, measured
-                                 # 2026-09-27) this carries ~9.1k tokens per batch, just under the ~10k
-                                 # the Hikari pool was sized against. Re-check it whenever chunk sizing
-                                 # changes.
-    concurrency: 4
-    max-attempts: 3              # only for an unreachable Ollama model runner; other failures fail fast
-    retry-backoff: 2s            # doubled on each further attempt
+    max-embed-tokens: 2048       # the embedding model's input limit; Ollama truncates beyond it, so only
+                                 # a single very wide table row can go over
+    table-detection: auto        # off | auto | lattice | stream. auto decides per page. Anything but off
+                                 # replaces the PDF reader, so prose is read differently too.
+    batch-size: 35               # chunks per embedding call. Cost follows tokens, not chunks: ~9.1k per
+                                 # batch at today's mean of 261 tokens a chunk. Revisit if chunk-size changes.
+    concurrency: 4               # batches written at once; well below the pool's 20 connections
+    max-attempts: 3              # only when Ollama's model runner is unreachable; anything else fails at once
+    retry-backoff: 2s            # doubled on each retry

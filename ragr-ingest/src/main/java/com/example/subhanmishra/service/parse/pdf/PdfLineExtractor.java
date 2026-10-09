@@ -14,13 +14,13 @@ import java.util.List;
 /**
  * Collects the horizontal and vertical lines drawn on one page, which is what a ruled table is made of.
  * <p>
- * Two conversions matter here. PDFBox hands path coordinates to this engine in bottom-up user space, while
- * {@code PDFTextStripper} reports text in a top-down frame relative to the crop box; the two layers are
- * useless together unless they agree, so every point is flipped and offset into the text frame as it
- * arrives. And a table border is often drawn as a thin filled <em>rectangle</em> rather than a stroked
- * line, so {@code appendRectangle} contributes its edges too.
- * <p>
- * Rotated pages are not handled: the flip assumes the page is upright. Every PDF checked so far is.
+ * Two things matter:
+ * <ul>
+ *   <li>PDFBox gives line coordinates from the bottom of the page, and text positions from the top. Every
+ *       point is flipped into the text's frame, or the two could not be compared.</li>
+ *   <li>A border is often a thin filled <em>rectangle</em>, not a line, so rectangles count too.</li>
+ * </ul>
+ * Rotated pages are not handled; every PDF checked so far is upright.
  */
 public final class PdfLineExtractor extends PDFGraphicsStreamEngine {
 
@@ -73,8 +73,8 @@ public final class PdfLineExtractor extends PDFGraphicsStreamEngine {
         float width = right - left;
         float height = bottom - top;
 
-        // A hairline rectangle is how many generators draw a single rule. Collapse it to that one line
-        // rather than to four, so a rule does not masquerade as a one-cell grid.
+        // Many generators draw a single line as a hairline rectangle. Count it as one line, not four, so
+        // it does not look like a one-cell grid.
         if (height <= RULE_THICKNESS && width > RULE_THICKNESS) {
             segments.add(LineSegment.of(left, (top + bottom) / 2, right, (top + bottom) / 2));
             return;

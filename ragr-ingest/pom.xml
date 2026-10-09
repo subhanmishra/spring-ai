@@ -91,8 +91,7 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-tika-document-reader</artifactId>
         </dependency>
-        <!-- Declared rather than used transitively: DocumentParserService parses the XHTML Tika emits
-             with it, to recover tables the default flat-text handler would discard. -->
+        <!-- Declared, not left transitive: XhtmlBlockParser reads Tika's XHTML with it to keep tables. -->
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
@@ -126,16 +125,12 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- Measured uploading the 645-page reference manual (946 chunks): heap peaked at
-                         384 MB uncapped and 354 MB under this cap, 651 MB private, with 0.24s of GC in
-                         total and the upload 245s against 231s uncapped. Uncapped, the JVM sized its
-                         heap to 4 GB on a host with a few hundred MB to spare once both Ollama models
-                         are loaded, and available RAM fell to 144 MB mid-upload.
-                         SerialGC rather than the default G1, measured over the same upload: peak private
-                         688 MB under G1, 516 MB under Serial, with G1's own bookkeeping at 68 MB against
-                         1 MB. The cost is GC time - 0.97s in total against 0.55s, longest pause 132 ms -
-                         and the upload took 185s against 180s. Nothing here is latency-sensitive enough
-                         for that to matter. The IntelliJ run configuration needs the same VM options. -->
+                    <!-- Capped because, uncapped, the JVM sized its heap to 4 GB on a machine with a few
+                         hundred MB to spare beside the two models. Storing the reference manual peaks at
+                         ~354 MB of heap under this cap.
+                         SerialGC, not G1: 516 MB in total against 688 MB under G1, for under a second
+                         more GC over a whole upload. The IntelliJ run configuration needs the same
+                         options. -->
                     <jvmArguments>-Xmx512m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>

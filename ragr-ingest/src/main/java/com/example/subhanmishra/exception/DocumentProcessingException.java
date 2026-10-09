@@ -7,11 +7,9 @@ public class DocumentProcessingException extends RuntimeException {
     /**
      * The document whose processing failed, when a record for it exists.
      *
-     * <p>Null for failures thrown before the metadata row is saved, or from below the layer that owns
-     * it - parsing and ingestion both throw this type without knowing the id. Only
-     * {@code DocumentMetadataService.uploadAndProcess} throws it after having written the FAILED row,
-     * and it is that id the bulk-upload path reports back so a caller can follow the failure to
-     * {@code GET /api/v1/documents/{id}/history}.
+     * <p>Set only by {@code DocumentMetadataService.uploadAndProcess}, after it has written the FAILED
+     * row; a bulk upload reports it so the caller can follow it to {@code /{id}/history}. Null when
+     * thrown from parsing or ingestion, which do not know the id.
      */
     private final UUID documentId;
 

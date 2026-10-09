@@ -127,11 +127,11 @@ sequenceDiagram
     U->>I: POST /api/v1/documents/upload
     I->>I: check the file type (415 if unsupported, nothing stored)
     I->>P: document_metadata UPLOADING, history row
-    I->>I: parse into prose and table blocks
+    I->>I: parse into prose and table blocks, then chunk
     I->>P: history row PROCESSING
-    par up to 4 batches at once
-        I->>I: chunk, add the citation line and metadata
-        I->>O: embed 35 chunks, with the passage prefix
+    I->>I: add the citation line and metadata to each chunk
+    par batches of 35, the first alone, then up to 4 at once
+        I->>O: embed, with the passage prefix
         I->>P: insert into vector_store
     end
     alt every batch written

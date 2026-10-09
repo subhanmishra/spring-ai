@@ -51,10 +51,8 @@ public class DocumentMetadataService {
         String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "document";
         String contentType = file.getContentType() != null ? file.getContentType() : "application/octat-stream";
 
-        // 0. Refuse types the parser cannot handle BEFORE anything is written. Doing this first is the
-        // whole point: a file that was never a candidate should not leave a metadata row and a history
-        // trail behind, and the caller should hear that the type was refused rather than that
-        // processing broke somewhere deep in Tika.
+        // 0. Refuse unsupported types BEFORE anything is written, so they leave no record behind and the
+        // caller hears "wrong type" rather than a parsing failure from deep inside Tika.
         if (!SupportedDocumentTypes.isSupported(fileName, contentType)) {
             log.warn("Rejected unsupported upload: {} (contentType={})", fileName, contentType);
             throw new UnsupportedDocumentTypeException(
@@ -62,7 +60,7 @@ public class DocumentMetadataService {
                             .formatted(fileName, SupportedDocumentTypes.describeAllowed()));
         }
 
-        // 1. Create the initial metadata record. The status here is just an initial marker.
+        // 1. Create the metadata record.
         DocumentMetadata documentMetadata = DocumentMetadata.builder()
                 .filename(fileName)
                 .contentType(contentType)
@@ -113,9 +111,8 @@ public class DocumentMetadataService {
             // 7. Record the FAILED status in the history table.
             historyService.recordHistory(documentMetadata.getId(), DocumentStatus.FAILED, errorMessage);
 
-            // Re-throw the exception to signal failure to the API caller.
-            // The id is carried on the exception so the bulk path can report which file failed and
-            // give the caller a handle to its history; a single upload just surfaces the message.
+            // The id travels with the exception, so a bulk upload can say which file failed and point
+            // the caller at its history.
             throw new DocumentProcessingException("Failed to process document: " + errorMessage, e,
                                                   documentMetadata.getId());
         }
@@ -134,15 +131,11 @@ public class DocumentMetadataService {
     /**
      * Uploads each file in turn, reporting one result per input in the order supplied.
      *
-     * <p>A failed file gets a {@code FAILED} entry rather than being dropped from the response. It used
-     * to be omitted entirely, so a caller who sent ten files and got seven back could not tell which
-     * three were missing or why - the only record was a server-side log line they could not see. The
-     * entry carries the document's id, which is the handle to {@code /{id}/history} where the full
-     * trail and error detail already live.
+     * <p>A failed file gets a {@code FAILED} entry with its document id - the way to its
+     * {@code /{id}/history} - instead of being left out, so ten files in always means ten results out.
      *
-     * <p>The loop is deliberately serial. Ollama pins embedding runners to a single slot regardless of
-     * concurrency, so uploading in parallel would not embed any faster; it would only contend for the
-     * Hikari pool that {@code app.ingestion.concurrency} already sizes against that single slot.
+     * <p>Deliberately one file at a time. Ollama embeds on a single slot however many requests arrive, so
+     * parallel uploads would not be faster; they would only compete for database connections.
      */
     public List<DocumentResponseDto> uploadMultipleDocuments(List<MultipartFile> files) {
         List<DocumentResponseDto> responseDtos = new ArrayList<>();

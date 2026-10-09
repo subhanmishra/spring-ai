@@ -18,11 +18,9 @@ public class DocumentMetadataHistory {
     private Instant createdAt;
 
     /**
-     * For Spring Data JDBC, which instantiates through the no-arg constructor and then populates the
-     * fields reflectively - the same arrangement {@link DocumentMetadata} uses. Without it the only
-     * constructor is the private builder one, and reading a row fails with "No property builder found
-     * on entity class ... to bind constructor parameter to". Writing worked regardless, which is why
-     * the omission survived until the history was first read back.
+     * For Spring Data JDBC, which creates the object empty and then fills its fields, as for
+     * {@link DocumentMetadata}. Without it, reading a row fails ("No property builder found ..."), though
+     * writing still works.
      */
     public DocumentMetadataHistory() {
     }

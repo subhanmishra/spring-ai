@@ -60,8 +60,7 @@ public class DocumentController {
     )
     @ResponseStatus(HttpStatus.CREATED) // BatchUploadStatusAdvice lowers this to 207 or 422 on failures
     public List<DocumentResponseDto> uploadMultipole(
-            // Guarded explicitly: with no files, "every file failed" is vacuously true, and an empty
-            // batch would otherwise report 422 - a confusing answer to a malformed request.
+            // With no files, "every file failed" is trivially true and would report 422; reject it here.
             @RequestParam("files") @NotEmpty List<MultipartFile> files) {
         return documentService.uploadMultipleDocuments(files);
     }

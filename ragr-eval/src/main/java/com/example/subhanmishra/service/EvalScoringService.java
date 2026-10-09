@@ -26,24 +26,21 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Computes every metric that needs neither an LLM nor a known-correct answer.
+ * Computes every metric that needs neither an AI judge nor a known-correct answer.
  *
- * <p>These run on 100% of live chat traffic, synchronously, because they cost nothing worth measuring:
- * a handful of regex passes over an answer and a comparison against at most top-k retrieved chunks.
- * No network, no model, no database. That is what makes continuous evaluation of real traffic viable
- * at all on a host where a single model call takes the better part of a minute.
+ * <p>These run on every live turn because they cost nothing: a few regex passes over the answer and a
+ * comparison with the retrieved chunks. No network, no model, no database.
  *
- * <p>The dividing line worth remembering when adding a metric here: this class may use only the query,
- * the answer, and the documents the advisor retrieved. Anything that needs to know what the
- * <em>right</em> answer was belongs on the golden path, where a {@link GoldenCase} supplies it.
+ * <p><b>The rule for adding a metric here:</b> it may use only the question, the answer and the retrieved
+ * chunks. Anything that needs the <em>right</em> answer belongs on the golden path, where a
+ * {@link GoldenCase} supplies it.
  */
 @Service
 public class EvalScoringService {
 
     /**
-     * Phrases indicating the assistant declined. Matched against the opening of the answer only - "I
-     * don't have enough information" as a leading clause is a refusal, whereas the same words in the
-     * middle of a long answer are usually a caveat attached to an answer that was in fact given.
+     * Phrases that mean the assistant declined, matched at the start of the answer only. "I don't have
+     * enough information" opening an answer is a refusal; the same words mid-answer are usually a caveat.
      */
     private static final List<String> REFUSAL_MARKERS = List.of(
             "i don't have enough information",
@@ -61,8 +58,7 @@ public class EvalScoringService {
     private static final int REFUSAL_WINDOW_CHARS = 200;
 
     /**
-     * The model restating its instructions rather than following them. Not hypothetical: llama3.2
-     * answered with the instruction itself and cited nothing, a failure that reads as a perfectly
+     * The model repeating its instructions instead of following them - it has happened, and looks like a
      * normal answer to every other metric here.
      */
     private static final Pattern ECHOED_INSTRUCTION = Pattern.compile(
@@ -150,9 +146,8 @@ public class EvalScoringService {
     /**
      * Scores the answer's citations against the ones its context actually offered.
      *
-     * <p>Which candidates count as citations, and which of those the context supports, are decided by
-     * {@link AnswerCitations} - the same rules the chat endpoints use to strip citations from the answer
-     * and report them to the caller, so the two cannot disagree about what a citation is.
+     * <p>{@link AnswerCitations} decides what is a citation and whether it is supported - the same rules
+     * chat uses, so the two cannot disagree.
      */
     private CitationScores scoreCitations(String answer, List<Document> hits) {
         List<Citation> available = CitationParser.availableCitations(hits);
@@ -219,8 +214,7 @@ public class EvalScoringService {
      * Whether the retrieved set contains a page the case expected, and at what rank.
      *
      * @return the 1-based rank of the first expected page retrieved, or 0 if none was. Callers take the
-     *         reciprocal for MRR; returning the rank rather than the reciprocal keeps "no hit" as an
-     *         exact 0 rather than a division no one can invert.
+     *         reciprocal for MRR.
      */
     public int firstRelevantRank(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
         List<Boolean> relevance = relevance(retrieved, goldenCase);
@@ -235,22 +229,15 @@ public class EvalScoringService {
     /**
      * How well retrieval ordered the chunks, judged against the pages the case declared.
      *
-     * <p>This is RAGAS's {@code NonLLMContextPrecisionWithReference} in all but the relevance test:
-     * RAGAS compares retrieved context strings against reference context strings, whereas here the
-     * comparison is page attribution, which this corpus carries on every chunk and which is what the
-     * dataset was curated in terms of. It costs nothing - no LLM call, no embedding, just the citation
-     * headers that {@link #firstRelevantRank} already parses.
+     * <p>RAGAS's non-LLM context precision, except that relevance is by page - every chunk carries its
+     * page, and the dataset lists pages. Free: no model call.
      *
-     * <p><strong>Read it as a floor, not as a value.</strong> {@code expectedPages} was verified as
-     * "pages that genuinely contain the answer", not as a complete labelling of every page that could
-     * usefully inform an answer, so a chunk that helped from a page the list omits is scored as noise.
-     * The number is therefore systematically pessimistic and its absolute level means little; what
-     * means something is the same number moving between two runs of the same dataset.
-     * {@code ContextPrecisionEvaluator} is the cross-check on exactly this.
+     * <p><b>A floor, not a value.</b> The expected pages are the ones with the answer, not every page that
+     * could help, so a useful chunk from an unlisted page counts as noise. Compare runs, not levels;
+     * {@code ContextPrecisionEvaluator} is the cross-check.
      *
-     * @return null when the case declares no {@code expectedPages}. That is "not scored", which is not
-     *         the same as 0.0 meaning "nothing relevant was retrieved", and folding the two together
-     *         would drag the suite average down with every grounding and capability case in the set.
+     * @return null when the case lists no expected pages - "not scored", which must not drag the average
+     *         down the way 0.0 would
      */
     public @Nullable ContextPrecisionScores contextPrecision(@Nullable List<Document> retrieved,
                                                              GoldenCase goldenCase) {
@@ -263,23 +250,14 @@ public class EvalScoringService {
     /**
      * Context precision with a chunk counted as used when the answer cites its page.
      *
-     * <p>The third relevance source, beside {@link #contextPrecision} (the dataset's expected pages)
-     * and {@code ContextPrecisionEvaluator} (an LLM judge per chunk), and the only one that is both free
-     * and deterministic. It exists because the judge proved unreliable at exactly this question:
-     * replayed on {@code executable-jar-maven-plugin} on 2 Oct 2026, it called the rank-1 chunk - cited
-     * three times, its wording reused - anywhere from YES 86% to NO 88% depending on the answer's
-     * phrasing, and called a chunk the answer never touched useful at 100% on every answer. A citation
-     * is the model's own statement of where a claim came from, already resolved by
-     * {@code CitationResolver} and checked against the retrieved headers, so it answers "was this
-     * passage used" without a second model's opinion.
+     * <p>The third way to decide relevance, beside {@link #contextPrecision} (expected pages) and
+     * {@code ContextPrecisionEvaluator} (the judge), and the only one both free and exact. It exists
+     * because the judge proved unreliable at this very question. A citation is the model's own statement
+     * of where a claim came from, so it answers "was this passage used" with no second opinion.
      *
-     * <p>Two limits, both in the direction of under-counting. A passage the answer used without citing
-     * counts as unused, so an uncited answer scores 0.0 - which is the uncited-answer defect showing up
-     * here too, not a separate one. And attribution is per page, so two retrieved chunks from the same
-     * cited page both count as used, whichever one the sentence came from.
-     *
-     * <p>Needs only the answer and the retrieved chunks, so like everything in this class it could
-     * score live traffic; for now only the golden path records it.
+     * <p>Two limits, both under-counting: a passage used without a citation counts as unused (so an
+     * uncited answer scores 0.0), and two chunks from one cited page both count as used. Recorded for
+     * live turns and golden runs alike.
      *
      * @return null when nothing was retrieved - an ungrounded answer has no ranked list to score
      */
@@ -308,14 +286,14 @@ public class EvalScoringService {
      * {@link RetrievalRanking} the judge's grades produce on live traffic, with a chunk on an expected
      * page graded 2 and every other chunk 0, plus page-level recall.
      *
-     * <p>Page recall is the one that answers "did retrieval find everything the answer needs": expected
-     * pages present in the prompt over expected pages, or, for a case whose pages are alternatives
-     * ({@code expectedPagesMode: ANY}), 1.0 as soon as one is. Chunk-level pooled recall from the ranking
-     * answers a different question - whether the threshold kept what the pool found.
+     * <p>Page recall answers "did retrieval find everything the answer needs": expected pages in the
+     * prompt over expected pages - or, when they are alternatives ({@code expectedPagesMode: ANY}), 1.0
+     * once one is. Pooled chunk recall answers something else: whether the threshold kept what the pool
+     * found.
      *
-     * <p>The stored relevance vector is wider than the ranking: a chunk on any of the case's
-     * {@link GoldenCase#referencePages() reference pages} counts, so that comparing it with the judge's
-     * grades measures the judge rather than how narrowly {@code expectedPages} was drawn.
+     * <p>The stored relevance vector counts chunks on any {@link GoldenCase#referencePages() reference
+     * page}, so comparing it with the judge's grades measures the judge, not how narrowly the expected
+     * pages were drawn.
      *
      * @param pool      the candidate pool in rank order
      * @param inContext how many leading pool chunks were in the prompt
@@ -357,8 +335,7 @@ public class EvalScoringService {
     /**
      * Per-rank relevance against the given pages of the case, in rank order.
      *
-     * <p>The single definition of "relevant" on the reference-based path. Rank and precision both read
-     * it, and having had two copies of the page-matching rule is how they would drift apart.
+     * <p>The one definition of "relevant" by page; rank and precision both use it so they cannot drift.
      */
     private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
         return relevance(retrieved, goldenCase, goldenCase.expectedPages());

@@ -3,10 +3,9 @@ package com.example.subhanmishra.event;
 /**
  * Who asked the question a chat turn answers.
  *
- * <p>Carried on every {@link ChatTurnCompleted} so the online evaluation can leave golden-suite turns
- * out of the live metrics. Those turns go through exactly the same chat path as real traffic - that is
- * the point of the suite - but a run replays a fixed set of hand-picked questions in a burst, and
- * counting them would move live citation and retrieval rates by however many cases the dataset holds.
+ * <p>Golden-suite turns take exactly the same chat path as real ones - that is the point of the suite -
+ * but a run is a burst of hand-picked questions that would skew the live rates. This lets live metrics
+ * leave them out.
  */
 public enum TurnOrigin {
 

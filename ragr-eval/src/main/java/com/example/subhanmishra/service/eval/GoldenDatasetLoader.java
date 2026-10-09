@@ -12,10 +12,7 @@ import java.io.InputStream;
 /**
  * Reads a {@link GoldenDataset} from a YAML resource.
  *
- * <p>Jackson 3, the version Spring Boot 4 manages, with its YAML module declared in {@code pom.xml}. In
- * {@code ragr-app} this class used Jackson 2 because a Jackson 2 YAML module happened to arrive there
- * through springdoc; nothing here brings one, and taking a second major version of Jackson onto the
- * classpath deliberately to keep that would be the wrong way round.
+ * <p>With Jackson 3, the version Spring Boot 4 manages; its YAML module is declared in {@code pom.xml}.
  */
 public final class GoldenDatasetLoader {
 
@@ -25,9 +22,8 @@ public final class GoldenDatasetLoader {
     public GoldenDatasetLoader(ResourceLoader resourceLoader) {
         this.resourceLoader = resourceLoader;
         this.yamlMapper = YAMLMapper.builder()
-                // A typo in a case's key is a mistake in the dataset, not something to silently ignore -
-                // a misspelled `expectedPages` would turn a recall assertion into no assertion at all,
-                // and the suite would pass while measuring nothing.
+                // An unknown key fails the load: a misspelled `expectedPages` would silently drop the
+                // assertion, and the suite would pass while measuring nothing.
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
     }

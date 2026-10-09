@@ -6,14 +6,12 @@ import org.springframework.ai.chat.client.ChatClient;
 /**
  * Whether the answer addresses every part of the question.
  *
- * <p>Judged from the question and the answer alone. Whether what the answer says is <em>true</em> is the
- * faithfulness judge's job; this one asks only whether anything asked was left unanswered - the failure
- * relevancy cannot see, since an answer to half of a two-part question is perfectly relevant. Leaving the
- * passages out also keeps this the shortest of the answer judges, which matters because a call holds the
- * runner a user may be waiting for.
+ * <p>From the question and answer alone. Whether the answer is <em>true</em> is the faithfulness judge's
+ * job; this asks only whether part of the question went unanswered - which relevancy misses, since half an
+ * answer is still relevant. Without the passages it is also the shortest answer judge.
  *
- * <p>Against a reference answer it would be a correctness judge; the golden dataset has none yet, and
- * live traffic never will, so the same reference-free question is asked of both.
+ * <p>With reference answers it could judge correctness, but live traffic will never have them, so both
+ * paths ask the same reference-free question.
  */
 public class CompletenessEvaluator {
 

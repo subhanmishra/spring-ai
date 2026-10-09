@@ -109,10 +109,9 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- Measured at 265 MB private with 63 MB of heap in use under this cap. The host
-                         runs with little RAM to spare once both Ollama models are loaded, so the cap is
-                         part of the design rather than a tuning detail; the IntelliJ run configuration
-                         needs the same VM options. -->
+                    <!-- Capped by design: the machine has little RAM to spare beside the two models.
+                         Measured at 265 MB in total, 63 MB of heap. The IntelliJ run configuration needs
+                         the same options. -->
                     <jvmArguments>-Xmx256m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>
@@ -120,11 +119,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- The same cap as the application, for the same reason. EvalSuiteIT's test JVM
-                         runs alongside ragr-app and both Ollama models; uncapped it reached 930 MB
-                         private during a golden run, sizing its heap from physical RAM the host does
-                         not have to spare. Merged with the parent's surefire configuration, which
-                         keeps the eval tag excluded. -->
+                    <!-- The same cap for the test JVM, which runs EvalSuiteIT beside ragr-app and both
+                         models; uncapped it reached 930 MB. Merged with the parent's surefire
+                         configuration, which keeps the eval tag excluded. -->
                     <argLine>-Xmx256m -XX:+UseSerialGC</argLine>
                 </configuration>
             </plugin>

@@ -5,10 +5,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * The metadata keys every stored chunk carries, and how to read them back.
  *
- * <p>Ingestion writes these and the chat path, the retrieval diagnostic and evaluation read them, so
- * they live here rather than with any one of those. The key strings are persisted in the vector
- * store's {@code metadata} JSONB column: renaming one orphans every chunk already written under the old
- * name, so a rename means re-ingesting the corpus.
+ * <p>Ingestion writes them; chat, the retrieval diagnostic and evaluation read them. The keys are
+ * stored in each chunk's {@code metadata} column, so renaming one strands every chunk written under the
+ * old name: a rename means re-ingesting.
  */
 public final class ChunkMetadata {
 
@@ -27,8 +26,8 @@ public final class ChunkMetadata {
     public static final String CHUNK_INDEX = "chunkIndex";
 
     /**
-     * {@link #PROSE} or {@link #TABLE}. Present on every chunk. Ingestion needs it to skip the text
-     * splitter for tables, and it makes a retrieved table identifiable when debugging an answer.
+     * {@link #PROSE} or {@link #TABLE}, on every chunk. Ingestion uses it to keep tables away from the
+     * text splitter, and it shows which retrieved chunks are tables.
      */
     public static final String BLOCK_TYPE = "blockType";
 
@@ -50,10 +49,10 @@ public final class ChunkMetadata {
     public static final String SECTION = "section";
 
     /**
-     * A short hash of everything that decides what a chunk contains - the chunk-shaping settings, the
-     * parser revision and the embedding model - stamped on every chunk at ingest. Chunks from before and
-     * after a pipeline change can sit side by side until the corpus is re-ingested, and a turn carries the
-     * versions of the chunks it was answered from, so evaluation can tell the two apart.
+     * A short hash of everything that decides a chunk's content and vector - the chunk settings, the
+     * parser revision, the embedding model and its task prefix - stamped on every chunk at ingest. A turn
+     * carries the versions of its chunks, so evaluation can separate results from before and after a
+     * pipeline change. It is a label, not permission to mix: a change still means re-ingesting everything.
      */
     public static final String PIPELINE_VERSION = "pipelineVersion";
 
@@ -65,8 +64,8 @@ public final class ChunkMetadata {
     }
 
     /**
-     * Metadata makes a round trip through a JSONB column, so a value written as an {@code int} can come
-     * back as any {@link Number} subtype - or, for a page number a reader supplied as text, as a String.
+     * Metadata goes through a JSON column, so an {@code int} can come back as any {@link Number} type,
+     * or as a String when a caller supplied it as text.
      */
     public static @Nullable Integer asInteger(@Nullable Object value) {
         return switch (value) {

@@ -15,13 +15,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Diagnostic and analytics endpoints, for operators rather than users.
  *
- * <p>Gated on the {@code dev} profile: outside it the bean is not registered and the paths do not
- * exist, which is a weaker guarantee than authentication but a stronger one than an unprotected route.
- * There is no Spring Security on the classpath; when there is, this gate should be replaced by a real
- * one rather than supplemented.
+ * <p>Only under the {@code dev} profile; elsewhere the paths do not exist. That is weaker than
+ * authentication, which this project does not have yet - when it does, replace this gate with it.
  *
- * <p>The whole of this controller reads. Nothing here writes to the vector store or to the metadata
- * tables, which is what makes it safe to point at a live corpus.
+ * <p>It only reads, which is what makes it safe against a live corpus.
  */
 @RestController
 @RequestMapping("/api/v1/admin")

@@ -3,9 +3,8 @@ package com.example.subhanmishra.service.parse.pdf;
 /**
  * One run of text as PDFBox emits it, with its position on the page.
  * <p>
- * A run is the unit a PDF actually draws text in, and in a laid-out table that is one cell - which is why
- * table structure is recoverable from positions at all. Coordinates are top-down (y grows downwards), the
- * same frame {@code PDFTextStripper} reports through {@code getXDirAdj()} and {@code getYDirAdj()}.
+ * A PDF draws text in runs, and in a table a run is usually one cell - which is why positions can recover
+ * a table at all. y grows downwards, as {@code PDFTextStripper} reports it.
  */
 public record TextRun(float x, float endX, float y, float height, String text) {
 

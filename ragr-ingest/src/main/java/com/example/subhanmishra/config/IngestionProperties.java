@@ -9,13 +9,12 @@ import java.time.Duration;
 import java.util.HexFormat;
 
 /**
- * How documents are parsed, chunked and written to the vector store. The retrieval settings the chat
- * path searches with ({@code app.rag.top-k}, {@code app.rag.similarity-threshold}) live in ragr-app.
+ * How documents are parsed, chunked and written to the vector store. Retrieval settings live in
+ * ragr-app ({@code app.rag.*}).
  *
- * <p>The chunk-shaping settings here change what is stored: after changing {@code chunkSize},
- * {@code minChunkSizeChars}, {@code minChunkLengthToEmbed}, {@code maxEmbedTokens} or
- * {@code tableDetection}, the whole corpus has to be re-ingested. The batching, concurrency and retry
- * settings only change how fast the same chunks are written.
+ * <p>Changing {@code chunkSize}, {@code minChunkSizeChars}, {@code minChunkLengthToEmbed},
+ * {@code maxEmbedTokens} or {@code tableDetection} changes what is stored, so the corpus must be
+ * re-ingested. Batching, concurrency and retry only change the speed.
  */
 @ConfigurationProperties(prefix = "app.ingestion")
 public record IngestionProperties(int chunkSize,
@@ -30,17 +29,15 @@ public record IngestionProperties(int chunkSize,
                                   TableDetection tableDetection) {
 
     /**
-     * Bump whenever parsing or ingestion code changes what a chunk contains - a new stripper, a different
-     * block split, another line in the citation header - since no setting below would change to say so.
-     * The pipeline version hashes it with them.
+     * Bump this whenever code changes what a chunk contains - a new stripper, a different split, another
+     * header line. No setting changes in that case, so without the bump the pipeline version would not.
      */
     public static final int PARSER_REVISION = 3;
 
     /**
-     * A short hash of everything that decides a chunk's content and embedding: the chunk-shaping settings,
-     * {@link #PARSER_REVISION}, the embedding model and the task prefix it embeds with. The prefix is never
-     * stored, but it moves every vector as surely as a model change. Batching, concurrency and retry are
-     * left out, as they change only how fast the same chunks are written.
+     * A short hash of everything that decides a chunk's content and vector: the chunk settings,
+     * {@link #PARSER_REVISION}, the embedding model and its task prefix. The prefix is never stored, but it
+     * moves every vector just as a new model would. Batching, concurrency and retry are left out.
      */
     public String pipelineVersion(String embeddingModel, String embeddingTaskPrefix) {
         String inputs = String.join("|", String.valueOf(PARSER_REVISION), String.valueOf(chunkSize),
@@ -56,12 +53,11 @@ public record IngestionProperties(int chunkSize,
     }
 
     /**
-     * How, if at all, tables are recovered from PDFs. Off by default: it replaces the reader used for
-     * every PDF, so it changes prose extraction as well as adding tables, and that is worth enabling
-     * deliberately rather than inheriting.
+     * How, if at all, tables are found in PDFs ({@code auto} in application.yaml). Anything but {@code OFF}
+     * replaces the PDF reader entirely, so it changes how prose is read too.
      */
     public enum TableDetection {
-        /** Read PDFs with {@code PagePdfDocumentReader}, one prose block per page, as before. */
+        /** Read PDFs with {@code PagePdfDocumentReader}, one prose block per page. */
         OFF,
         /** Choose per page: ruled pages take columns from the rules, unruled ones from text alignment. */
         AUTO,

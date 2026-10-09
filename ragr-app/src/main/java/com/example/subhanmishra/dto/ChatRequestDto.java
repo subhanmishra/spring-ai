@@ -8,19 +8,14 @@ import jakarta.validation.constraints.Size;
  * A chat turn: the prompt to answer, and nothing else. The conversation it continues travels in the
  * {@code X-Conversation-Id} header - see {@code ConversationIdInterceptor}.
  *
- * <p>The prompt travels in a request body rather than a query parameter so it stays out of access
- * logs, browser history and proxy logs - for a RAG assistant the questions people ask about their own
- * documents are usually the most sensitive thing in the system - and so it is not bounded by URL
- * length limits, which cap well below what a long prompt can reach.
+ * <p>In the body, not the URL, so questions - often the most sensitive thing in a RAG system - stay out
+ * of access logs, browser history and proxy logs, and are not capped by URL length.
  */
 public record ChatRequestDto(
 
         /*
-         * The cap is characters, and it is deliberately far below "as much as the caller likes".
-         * The chat model runs with num-ctx 8192 tokens, and QuestionAnswerAdvisor spends most of that
-         * window on the retrieved passages plus the system prompt. 4000 characters is roughly 1,000
-         * tokens, which leaves room for the RAG context and the generated answer; a much larger
-         * prompt would crowd out the very passages the answer is supposed to be grounded in.
+         * 4000 characters, about 1,000 tokens. The model's 8192-token window must also hold the system
+         * prompt, the passages and the answer; a much longer question would crowd out the passages.
          */
         @NotBlank(message = "prompt must not be blank")
         @Size(max = 4000, message = "prompt must be at most 4000 characters")

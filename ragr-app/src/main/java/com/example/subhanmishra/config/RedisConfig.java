@@ -9,9 +9,9 @@ import redis.clients.jedis.RedisClient;
 public class RedisConfig {
 
     /**
-     * The chat memory's Redis client. Spring AI's Redis repository has no auto-configuration, so the
-     * Docker Compose service connection never reaches it and the address is read here instead:
-     * localhost from IntelliJ, and {@code APP_REDIS_HOST=redis} from the ragr-app container.
+     * The chat memory's Redis client. Spring AI's Redis repository has no auto-configuration, so Docker
+     * Compose support cannot supply the address: it is read here - localhost from IntelliJ,
+     * {@code APP_REDIS_HOST=redis} in the container.
      */
     @Bean
     public RedisClient redisClient(@Value("${app.redis.host:localhost}") String host,

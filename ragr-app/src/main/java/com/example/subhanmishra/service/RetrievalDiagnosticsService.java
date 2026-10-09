@@ -20,19 +20,14 @@ import java.util.regex.Pattern;
 /**
  * Runs the same similarity search the chat path runs, and reports what came back.
  *
- * <p>This exists to separate a retrieval failure from a generation failure. When a grounded answer is
- * wrong, the question is whether the right chunk was never retrieved or was retrieved and ignored,
- * and nothing else in the application can answer it.
+ * <p>It tells a retrieval failure from a generation failure: when an answer is wrong, was the right
+ * chunk never found, or found and ignored? Nothing else in the application can say.
  *
- * <p>The search parameters default from {@link RagProperties} - the same record
- * {@code SpringAiConfig.chatClient} reads when it builds the {@code QuestionAnswerAdvisor}'s
- * {@code SearchRequest}. That shared source is what makes this faithful rather than merely similar;
- * hardcoding either value here would let the diagnostic drift away from the thing it reports on.
+ * <p>The search settings default from {@link RagProperties}, the same record chat's advisor is built
+ * from. That is what makes this faithful to chat rather than merely similar.
  *
- * <p>What it does <em>not</em> reproduce is the effect of chat memory. {@code QuestionAnswerAdvisor}
- * searches with the user's message as written, so a single-turn query matches exactly, but a
- * follow-up turn that only makes sense in context ("and what about the other one?") retrieves just as
- * poorly here as it does there - which is itself worth being able to see.
+ * <p>Like chat, it searches with the question as written, without the conversation, so a follow-up
+ * question retrieves here as poorly as it does there.
  */
 @Service
 public class RetrievalDiagnosticsService {
@@ -40,11 +35,8 @@ public class RetrievalDiagnosticsService {
     private static final Logger log = LoggerFactory.getLogger(RetrievalDiagnosticsService.class);
 
     /**
-     * A citation header occupies the whole of the chunk's first line and is bracketed, e.g.
-     * {@code [manual.pdf, p. 590]}. Matching the shape rather than splitting on the first blank line
-     * matters: chunks ingested before the header existed start straight into their content, and
-     * splitting those unconditionally would present a real first line as a citation and drop it from
-     * the body.
+     * The citation line, {@code [manual.pdf, p. 590]}: a copy of {@code CitationParser.CITATION_LINE},
+     * which must stay identical. The shape is matched so a chunk without a header keeps its first line.
      */
     private static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
@@ -58,13 +50,10 @@ public class RetrievalDiagnosticsService {
 
     public RetrievalResponseDto search(RetrievalRequestDto request) {
 
-        // Both defaults MUST keep coming from RagProperties - the same record SpringAiConfig.chatClient
-        // reads when it builds the QuestionAnswerAdvisor's SearchRequest. That shared source is the
-        // whole basis of this endpoint being faithful: it is here to tell a retrieval failure from a
-        // generation failure, which it can only do while it searches exactly as the chat path searches.
-        // Hardcoding either value would leave the endpoint working and quietly reporting on different
-        // retrieval than the application performs - a diagnostic that lies is worse than none. The
-        // response echoes the values actually in force so a caller can tell a default from an override.
+        // Both defaults MUST keep coming from RagProperties, as chat's advisor does. This endpoint is only
+        // useful while it searches exactly as chat searches; a hardcoded value would quietly report on a
+        // different search - a diagnostic that lies is worse than none. The response echoes the values
+        // used, so a caller can tell a default from an override.
         int topK = request.topK() != null ? request.topK() : ragProperties.topK();
         double threshold = request.similarityThreshold() != null
                 ? request.similarityThreshold()
@@ -77,8 +66,7 @@ public class RetrievalDiagnosticsService {
 
         String documentId = request.documentId();
         if (documentId != null && !documentId.isBlank()) {
-            // Parse before interpolating: this rejects junk with a 400 rather than a filter-parse
-            // failure, and keeps an arbitrary caller-supplied string out of the filter expression.
+            // Parsed as a UUID first: junk is a 400, and no caller string reaches the filter expression.
             documentId = UUID.fromString(documentId.trim()).toString();
             searchRequest.filterExpression("documentId == '" + documentId + "'");
         } else {

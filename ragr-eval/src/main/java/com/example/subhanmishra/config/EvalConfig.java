@@ -19,33 +19,20 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.util.StringUtils;
 
 /**
- * Wiring for the evaluation framework.
+ * Wiring for the judges.
  *
- * <p>The single most important thing here is that each judge is built from a <strong>fresh</strong>
- * {@link ChatClient.Builder}, taken from the {@link ObjectProvider} on every call. Spring AI declares
- * that builder bean {@code @Scope("prototype")}, which is what makes this safe: the builder
- * {@code SpringAiConfig.chatClient} consumed already carries the {@code QuestionAnswerAdvisor} and the
- * chat-memory advisor, and a judge inheriting those would be catastrophic in two distinct ways. It
- * would run its own similarity search and splice retrieved passages into the grading prompt, so the
- * judge would be marking the answer against context the answer never saw; and it would accumulate
- * conversation history, so each verdict would be influenced by the ones before it. Neither failure
- * would throw, log, or look wrong - the scores would just quietly stop meaning anything.
+ * <p><b>Every judge gets a fresh, bare {@link ChatClient.Builder}</b>, taken from the
+ * {@link ObjectProvider} each time (Spring AI makes it a prototype). A judge must never inherit a
+ * retrieval or memory advisor: it would grade the answer against passages the answer never saw, or let
+ * each verdict lean on the ones before it - and nothing would throw or look wrong.
  *
- * <p>Judging reuses the chat model rather than a dedicated one, and that is a memory decision, not a
- * quality one. Measured on the dev host: {@code gemma4:e2b}'s {@code llama-server} commits ~8.1 GB
- * (Ollama's scheduler predicts 6.9 GiB; {@code /api/ps} reports only the 1.70 GB placed on the iGPU)
- * and {@code nomic-embed-text} ~0.5 GB, leaving ~1.1 GB of RAM available of 15.63 GB total and ~2.7 GB
- * of commit headroom - tight enough that a cold load of gemma already evicts the embedder once. The
- * smallest purpose-built grounded-factuality judge, {@code bespoke-minicheck}, ships only at 7B with a
- * 4.39 GiB weights layer - there is no room for it alongside the pair, so every judgement would evict
- * a model or page. Reusing the resident chat model loads nothing new.
+ * <p><b>The judges reuse the chat model</b> - a memory decision, not a quality one. With the chat and
+ * embedding models loaded the machine has about 1 GB of RAM left, and the smallest dedicated judge
+ * ({@code bespoke-minicheck}) needs 4.39 GiB. The resident chat model costs nothing more.
  *
- * <p>The price is <strong>self-judging bias</strong>, and it should not be glossed over: a model
- * grading its own output is measurably more generous than an independent judge, so these rates are
- * optimistic in absolute terms. They are still useful, because what an eval is for is detecting
- * <em>change</em> - the bias is a roughly constant offset, so a drop in groundedness after a prompt or
- * model change is real even though the absolute level is flattering. Read them as a trend line, never
- * as a quality score to quote.
+ * <p><b>The price is self-judging bias.</b> A model grading itself is more generous than an independent
+ * judge, so the rates are optimistic. They still show <em>change</em>: the bias is roughly constant, so a
+ * drop after a prompt or model change is real. Read them as a trend, never as a score to quote.
  */
 @Configuration
 @ConditionalOnProperty(prefix = "app.eval", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -54,23 +41,17 @@ public class EvalConfig {
     /**
      * Options applied to every judge call.
      *
-     * <p>Temperature is pinned because Spring AI sends no value unless one is configured, and Gemma's
-     * own Modelfile defaults to 1.0 - the same trap {@code application-dev.yaml} documents at length
-     * for the chat path. A judge sampling at 1.0 returns a different verdict for the same answer on
-     * consecutive runs, which turns a regression signal into noise.
-     *
-     * <p>{@code num-predict} is small because a judge's entire answer is one word. Without a cap, a
-     * judge that starts explaining its reasoning holds Ollama's single runner slot for minutes, and on
-     * the online path that delays a real user's generation.
-     *
-     * <p>{@code think} is disabled for the same reason it is on the chat path: Spring AI 2.0.1 returns
-     * Gemma's reasoning in a separate {@code OllamaApi.Message.thinking} field that nothing here reads,
-     * so leaving it on both discards those tokens and spends the whole {@code num-predict} budget
-     * before the actual YES or NO is emitted - producing an empty verdict that scores as a failure.
+     * <ul>
+     *   <li><b>Temperature pinned.</b> Spring AI sends none unless set, and the model's default is 1.0, at
+     *       which the same answer gets different verdicts run to run.</li>
+     *   <li><b>A small {@code num-predict}.</b> A verdict is one word; without a cap a judge that starts
+     *       explaining holds the one model runner for minutes.</li>
+     *   <li><b>Thinking off.</b> It is returned separately and never read, and it used up the whole output
+     *       budget before the YES or NO - an empty verdict.</li>
+     * </ul>
      */
     private OllamaChatOptions.Builder judgeOptions(EvalProperties properties) {
-        // Returned unbuilt: ChatClient.Builder.defaultOptions takes a ChatOptions.Builder and builds it
-        // itself, so calling build() here would not type-check.
+        // Unbuilt: defaultOptions takes a builder and builds it itself.
         return OllamaChatOptions.builder()
                                 .model(properties.judgeModel())
                                 .temperature(properties.judgeTemperature())
@@ -80,14 +61,11 @@ public class EvalConfig {
     }
 
     /**
-     * A builder carrying only the judge's options and {@link JudgeLineEndingAdvisor} - no retrieval, no
-     * system prompt, no memory. That advisor is the one exception to "no advisors" and is safe for the
-     * reason the others are not: it adds nothing to the prompt, only rewrites its line endings, so the
-     * same judgement passes or fails alike on Windows and in the container.
+     * A builder with only the judge options and {@link JudgeLineEndingAdvisor} - no retrieval, no system
+     * prompt, no memory. That one advisor is safe: it adds nothing, only fixes line endings, so a
+     * judgement comes out the same on Windows and in the container.
      *
-     * <p>Taken from the provider on each call so that a prototype instance is created per judge. Two
-     * judges sharing one builder would be harmless today but is exactly the kind of thing that stops
-     * being harmless when someone adds a default to one of them.
+     * <p>A new instance per judge, so a default added to one can never leak into another.
      */
     private ChatClient.Builder judgeClientBuilder(ObjectProvider<ChatClient.Builder> builders,
                                                   EvalProperties properties) {
@@ -99,9 +77,8 @@ public class EvalConfig {
     /**
      * Judges whether the answer addresses the question, given the retrieved context.
      *
-     * <p>Catches a specific and otherwise invisible failure: an answer that is perfectly grounded and
-     * correctly cited, but about the wrong thing - which happens when retrieval returns a plausible
-     * neighbouring passage and the model dutifully summarises it.
+     * <p>Catches an answer that is grounded and correctly cited but about the wrong thing - when retrieval
+     * finds a plausible neighbouring passage and the model summarises it.
      */
     @Bean
     public RelevancyEvaluator relevancyEvaluator(ObjectProvider<ChatClient.Builder> builders,
@@ -114,9 +91,8 @@ public class EvalConfig {
     /**
      * Judges whether the answer's claims are supported by the retrieved context.
      *
-     * <p>Uses the default document/claim prompt rather than {@code forBespokeMinicheck}, whose stripped
-     * prompt omits the instruction entirely and relies on a model fine-tuned to infer the task from the
-     * bare format. A general chat model given that prompt has no idea what it is being asked.
+     * <p>The default prompt, not {@code forBespokeMinicheck}'s, which leaves out the instruction and only
+     * works with a model trained for it.
      */
     @Bean
     public FactCheckingEvaluator factCheckingEvaluator(ObjectProvider<ChatClient.Builder> builders,
@@ -128,13 +104,8 @@ public class EvalConfig {
      * Judges whether each retrieved chunk actually contributed to the answer, which is what context
      * precision is computed from.
      *
-     * <p>Built from the same bare builder as the other two judges and for the same reason - a judge
-     * inheriting the {@code QuestionAnswerAdvisor} would retrieve its own context and grade a chunk
-     * against passages the answer never saw.
-     *
-     * <p>Unlike them, this one is called {@code top-k} times per case rather than once. The bean always
-     * exists; {@code GoldenEvalService} only invokes it on a judged run, because on this host that
-     * multiplication is the dominant cost of the suite.
+     * <p>Called once per chunk rather than once per answer, so the golden suite uses it only on a judged
+     * run, where it is the biggest cost.
      */
     @Bean
     public ContextPrecisionEvaluator contextPrecisionEvaluator(ObjectProvider<ChatClient.Builder> builders,
@@ -143,9 +114,8 @@ public class EvalConfig {
     }
 
     /**
-     * The same judge client with a generation cap long enough for a list. The claim judges write one line
-     * per claim, and the one-word cap every other judge runs with would cut that list off after its first
-     * few tokens.
+     * The same judge client with room for a list: the claim judges write a line per claim, which the
+     * one-word cap would cut off.
      */
     private ChatClient.Builder listJudgeClientBuilder(ObjectProvider<ChatClient.Builder> builders,
                                                       EvalProperties properties) {
@@ -155,9 +125,7 @@ public class EvalConfig {
     }
 
     /**
-     * Citation checks per answer, at most. A grounded answer here cites 2-3 pages on average (82 citations
-     * across the five verification runs of 9 cases each), so this bounds an outlier without truncating
-     * the usual answer.
+     * Most citation checks per answer. Answers cite 2-3 pages on average, so this only bounds outliers.
      */
     private static final int MAX_CITATION_CHECKS = 6;
 
@@ -198,8 +166,8 @@ public class EvalConfig {
     }
 
     /**
-     * Fails fast when the judge model is not configured, rather than letting Spring AI fall back to the
-     * chat model's own configured name and silently judge with whatever is set there.
+     * Fails at startup when the judge model is not set, instead of Spring AI silently falling back to
+     * whatever chat model is configured.
      */
     @Bean
     public EvalPropertiesValidator evalPropertiesValidator(EvalProperties properties) {
