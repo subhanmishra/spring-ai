@@ -1,10 +1,28 @@
 # ragr-ingest
 
-The ingestion service: it takes an uploaded document, parses it, splits it into chunks, embeds them
-with Ollama and writes them to pgvector, where [ragr-app](../ragr-app/README.md) searches them.
-It runs on port **8081**, actuator on **9097**, and owns the `public` schema's Flyway migration,
-`vector_store` included. For how it fits with the other applications, see the
-[root README](../README.md).
+The ingestion service. It takes an uploaded document, parses it, splits it into chunks, embeds them
+with Ollama and stores them in pgvector, where [ragr-app](../ragr-app/README.md) searches them. It runs
+on port **8081** (actuator **9097**) and owns the `public` schema's Flyway migration, `vector_store`
+included.
+
+How it fits with the other applications is in the [root README](../README.md).
+
+## Design choices
+
+- **Tables are kept whole.** Parsing produces prose blocks and table blocks separately, so a chunk never
+  cuts through a table or mixes it with the text around it. A large table is split by rows, with its
+  header repeated in every piece.
+- **Every chunk says where it came from.** The citation line `[filename, p. N]` is part of the chunk's
+  text, embedded and stored with it. It is the only way the chat model knows which page it is reading.
+- **One page per chunk.** PDF pages are parsed one at a time, so a chunk never spans two pages and its
+  page number is always exact.
+- **All or nothing.** If any batch fails, every chunk already written for that document is deleted and
+  the document is marked `FAILED`. Search never sees half a document.
+- **Every step is recorded.** Each status change goes to `document_metadata_history`, which is kept
+  even after the document is deleted.
+- **Parsing and storing use different threads.** Parsing is CPU work, on a small fixed pool. Embedding
+  and writing mostly wait on Ollama and Postgres, so they run on virtual threads, at most 4 batches at
+  once.
 
 ## The flow
 
@@ -13,35 +31,25 @@ flowchart TD
     up[POST /api/v1/documents/upload] --> type{supported type?}
     type -- no --> r415[415, nothing stored]
     type -- yes --> meta[document_metadata: UPLOADING<br/>history row]
-    meta --> parse[parse to content blocks<br/>prose and tables kept apart]
-    parse --> proc[status PROCESSING]
-    proc --> chunk[chunk, lazily as batches are drawn:<br/>paragraphs joined up to 400 tokens<br/>tables split by rows, header repeated]
-    chunk --> head[prepend the citation line<br/>add chunk metadata]
-    head --> batch[batches of 35 chunks, up to 4 at once<br/>embed with nomic-embed-text, insert into vector_store]
-    batch -- all written --> ok[status INDEXED<br/>201 with chunk count]
+    meta --> parse[parse into content blocks<br/>prose and tables kept apart]
+    parse --> proc[history row: PROCESSING]
+    proc --> chunk[chunk, lazily as batches are taken:<br/>paragraphs joined up to 400 tokens<br/>tables split by rows, header repeated]
+    chunk --> head[add the citation line and Section: line<br/>add the chunk metadata]
+    head --> batch[batches of 35 chunks, up to 4 at once<br/>embed with the passage prefix,<br/>insert into vector_store]
+    batch -- all written --> ok[status INDEXED<br/>201 with the chunk count]
     batch -- any batch fails --> undo[delete every chunk written for it<br/>status FAILED, 422]
 ```
 
-Every status change is also written to `document_metadata_history`, so each document keeps a
-trail from upload to its outcome.
-
 ### Parsing
 
-Documents are parsed into a list of content blocks, each either **prose** or a **table**, so that a
-table is never cut through or merged with the text around it.
-
-- **PDFs** are read from positioned text, with tables recovered from the page geometry (ruling lines
-  or column alignment, under `table-detection`). The printed page numbers in page footers and the
-  entries of a table of contents are stripped: left in, they offered the model a second, wrong page
-  number to cite. Each page is parsed separately, so every chunk belongs to exactly one page.
-- **Everything else** - DOCX, XLSX, PPTX, HTML, TXT, MD and CSV - goes through Apache Tika, whose
-  XHTML output keeps the table markup. These formats have no pages, so their chunks carry no page
-  number and a whole file is one unit.
+- **PDFs** are read as positioned text. Tables are recovered from the page layout, from ruling lines or
+  from how the text lines up in columns (`table-detection`). Two things are removed because they offered
+  the model a second, wrong page number to cite: the printed page numbers in footers, and the entries of
+  a table of contents.
+- **Everything else** - DOCX, XLSX, PPTX, HTML, TXT, MD and CSV - goes through Apache Tika, whose XHTML
+  output keeps table markup. These formats have no pages, so their chunks have no page number.
 
 ### What a stored chunk looks like
-
-Each chunk's text begins with a citation line, which is embedded and stored as part of the content.
-A chunk that starts part-way through a numbered section also names it, on a second line:
 
 ```
 [spring-boot-reference.pdf, p. 301]
@@ -51,66 +59,72 @@ Properties
 management.server.port=8081 ...
 ```
 
-The citation line is the reason the chat model can cite pages at all. The section line tells it what an
-example configures when the heading fell in the chunk before - without it, the model gave this one's
-`management.server.port` as the way to move the application off port 8080. Chunks break at numbered
-headings, so a chunk that opens with its own heading has no section line. Anything that reads chunks
-back - export, re-ranking, re-chunking - must strip both, with `CitationParser.stripHeader`. For
-formats without pages the citation line is just `[filename]`, and there is no section line.
+- **The citation line** is the first line. For formats without pages it is just `[filename]`.
+- **The `Section:` line** appears when a chunk starts part-way through a numbered section. It tells the
+  model what the text is about when the heading fell in the chunk before. Without it, the model gave
+  this chunk's `management.server.port` as the way to move the *application* off port 8080. Chunks break
+  at numbered headings, so a chunk that opens with its own heading needs no section line.
+- **Anything that reads chunks back** - export, re-ranking, re-chunking - must remove both lines first,
+  with `CitationParser.stripHeader`.
 
-Each chunk's metadata carries the keys defined in `ragr-shared`'s `ChunkMetadata`: `documentId`,
-`fileName`, `contentType`, `pageNumber`, `chunkIndex` and `blockType` (`prose` or `table`), plus
-`tableIndex` and `tableRows` for table chunks, and two for evaluation: `section`, the numbered heading the
-chunk falls under (the first heading inside it, else the last one before it), and `pipelineVersion`, a
-hash of the chunk-shaping settings, `IngestionProperties.PARSER_REVISION`, the embedding model and its
-task prefix. Bump
-`PARSER_REVISION` with any parsing change that alters chunk content, so evaluation can tell chunks from
-either side of it apart. The policy is still one pipeline per corpus - re-ingest everything after a
-change; the version records which pipeline that was.
+**Metadata.** Each chunk carries the keys in `ragr-shared`'s `ChunkMetadata`:
+
+| Key | Meaning |
+|---|---|
+| `documentId`, `fileName`, `contentType` | The document it came from |
+| `pageNumber` | Its page; absent for formats without pages |
+| `chunkIndex` | Its position in the document |
+| `blockType` | `prose` or `table` |
+| `tableIndex`, `tableRows` | For table chunks only |
+| `section` | The numbered heading it falls under: the first one inside it, or else the last one before it |
+| `pipelineVersion` | A hash of everything that shaped it: the chunk settings, `IngestionProperties.PARSER_REVISION`, the embedding model and its task prefix |
+
+**Bump `PARSER_REVISION`** with any parsing change that alters chunk text. No setting changes in that
+case, so without the bump the pipeline version would not either. The version lets evaluation separate
+results from before and after a change; it does not allow a mixed corpus.
 
 ## Configuration
 
-All of it is in `src/main/resources/application.yaml`; there are no profiles. The embedding model and
-its dimensions (`nomic-embed-text`, 768) must match ragr-app's - see the
+All of it is in `src/main/resources/application.yaml`. There are no profiles. The embedding model
+(`nomic-embed-text`, 768 dimensions) must be the same as ragr-app's - see the
 [root README](../README.md#the-applications-never-call-each-other).
 
-`app.embedding.task-prefix` (`search_document: `) is prepended to every chunk sent to the embedding
-model, never stored: nomic-embed-text was trained with it, and Ollama does not add it. It pairs with
-ragr-app's query prefix and changes with the model, and changing it means re-ingesting every document.
+`app.embedding.task-prefix` (`search_document: `) is added to every chunk sent to the embedding model,
+but never stored. nomic-embed-text was trained with it, and Ollama does not add it. It pairs with
+ragr-app's query prefix and changes with the model.
 
-Indexing is tuned under `app.ingestion.*`. **Changing any setting that shapes chunks means
-re-ingesting every document**; `batch-size`, `concurrency` and the retry settings only change how
-fast.
+Indexing is tuned under `app.ingestion.*`. **Changing a setting that shapes chunks means re-ingesting
+every document.** `batch-size`, `concurrency` and the retry settings only change the speed.
 
 | Property | Default | Purpose |
 |---|---|---|
-| `chunk-size` | `400` | Target chunk size in **tokens**. Consecutive paragraphs are joined until adding the next would exceed it, so chunks actually reach this budget. Tables are chunked separately, by rows |
-| `min-chunk-length-to-embed` | `100` | Chunks shorter than this many **characters** are merged into the chunk before them, never discarded. Raise it if single-line noise is polluting retrieval |
-| `min-chunk-size-chars` | `150` | Where the splitter looks for a sentence boundary when cutting an over-budget chunk. Not a minimum chunk length |
-| `max-num-chunks` | `10000` | Upper bound on chunks per document |
-| `max-embed-tokens` | `2048` | The embedding model's context. Only a single table row wider than this can exceed it, and the parser warns when one does |
-| `table-detection` | `auto` | Recover tables from PDFs (`off`/`auto`/`lattice`/`stream`). `auto` picks per page: ruled pages take columns from the rules, unruled ones from text alignment. Set `off` to fall back to the plain page-text reader |
-| `batch-size` | `35` | Chunks embedded and written per batch. The cost it controls is *tokens*: ~9.1k per batch at the measured mean of 261 tokens per chunk, so revisit it if you change `chunk-size` |
-| `concurrency` | `4` | Batches written in parallel. Must stay well below `spring.datasource.hikari.maximum-pool-size` (20) |
-| `max-attempts` / `retry-backoff` | `3` / `2s` | Retries, only for an unreachable Ollama model runner; other failures fail fast |
+| `chunk-size` | `400` | Target chunk size, in **tokens**. Paragraphs are joined until the next would go over it. Tables are chunked separately, by rows |
+| `min-chunk-length-to-embed` | `100` | A chunk shorter than this many **characters** is merged into the one before it - never thrown away |
+| `min-chunk-size-chars` | `150` | Where the splitter starts looking for a sentence end when cutting an over-long chunk. Not a minimum length |
+| `max-num-chunks` | `10000` | Most chunks per document |
+| `max-embed-tokens` | `2048` | The embedding model's input limit. Only a single very wide table row can go over it, and the parser warns when one does |
+| `table-detection` | `auto` | Find tables in PDFs: `off`, `auto`, `lattice` (ruling lines) or `stream` (text alignment). `auto` decides per page. `off` uses the plain page-text reader |
+| `batch-size` | `35` | Chunks per embedding call and insert. What it really controls is tokens: ~9,100 per batch at today's chunk size. Revisit it if `chunk-size` changes |
+| `concurrency` | `4` | Batches stored at once. Must stay well below the database pool size (20) |
+| `max-attempts` / `retry-backoff` | `3` / `2s` | Retries, only when the Ollama model runner cannot be reached. Every other failure fails at once |
 
-Uploads are limited to 25MB per file and 50MB per request (`spring.servlet.multipart`).
+Uploads are limited to 25 MB per file and 50 MB per request (`spring.servlet.multipart`).
 
 ## Documents API (`/api/v1/documents`)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/documents/upload` | Upload and index a single document (PDF, DOCX, XLSX, PPTX, HTML, TXT, MD, CSV) |
-| POST | `/api/v1/documents/upload-multiple` | Upload and index multiple documents at once. 201 all indexed, 207 some failed, 422 none indexed |
-| GET | `/api/v1/documents` | List all uploaded documents and their indexing status |
-| GET | `/api/v1/documents/{id}` | Get metadata for a specific document |
-| GET | `/api/v1/documents/{id}/history` | Get the document's processing history, oldest entry first |
-| DELETE | `/api/v1/documents/{id}` | Delete a document and purge its vector embeddings |
+| POST | `/api/v1/documents/upload` | Upload and store one document (PDF, DOCX, XLSX, PPTX, HTML, TXT, MD, CSV) |
+| POST | `/api/v1/documents/upload-multiple` | Upload several. 201 if all were stored, 207 if some failed, 422 if none were |
+| GET | `/api/v1/documents` | List every document and its status |
+| GET | `/api/v1/documents/{id}` | One document's metadata |
+| GET | `/api/v1/documents/{id}/history` | One document's status history, oldest first |
+| DELETE | `/api/v1/documents/{id}` | Delete a document and all its chunks |
 
 ```bash
 curl -F "file=@document.pdf" http://localhost:8081/api/v1/documents/upload
 
-# Several at once — one result per file, in the order sent
+# Several at once - one result per file, in the order sent
 curl -F "files=@a.pdf" -F "files=@b.docx" http://localhost:8081/api/v1/documents/upload-multiple
 
 curl "http://localhost:8081/api/v1/documents/<id>/history"
@@ -118,51 +132,43 @@ curl "http://localhost:8081/api/v1/documents/<id>/history"
 
 OpenAPI docs: `http://localhost:8081/swagger-ui.html`.
 
-**Uploads are synchronous.** The request does not return until the document is fully indexed, and a
-large one takes minutes: the 645-page, 13.6MB reference manual indexes in about 3–4 minutes with the
-integrated GPU enabled. Set a generous client timeout. The response reports the number of chunks
-created.
+**Uploads are synchronous.** The request returns only once the document is fully stored, with the
+number of chunks created. A large document takes minutes - the 645-page, 13.6 MB reference manual takes
+3-4 minutes with the integrated GPU on - so set a generous client timeout.
 
-**Indexing is all-or-nothing.** If any batch fails, every chunk already written for that document is
-removed and the document is marked `FAILED`, so a failed upload never leaves partial content to be
-retrieved. Re-uploading is the way to retry.
+**A failed upload leaves nothing searchable.** Every chunk already written is removed and the document
+is marked `FAILED`. Upload it again to retry.
 
-**Supported types are checked before anything is stored.** `.pdf`, `.docx`, `.xlsx`, `.pptx`,
-`.html`/`.htm`, `.txt`, `.md` and `.csv` are accepted; anything else returns **415** and leaves no
-document record behind. The check reads the filename extension, falling back to the declared
-`Content-Type` only when the filename has no extension. Clients frequently send
-`application/octet-stream`, so a declared type is treated as a fallback rather than as evidence.
+**The file type is checked before anything is stored.** Accepted: `.pdf`, `.docx`, `.xlsx`, `.pptx`,
+`.html`/`.htm`, `.txt`, `.md`, `.csv`. Anything else is a **415** and leaves no record. The check reads
+the file extension, and uses the declared `Content-Type` only when there is no extension, because
+clients often send `application/octet-stream` for everything.
 
-This is a type filter, not a content scanner. A supported extension whose contents cannot actually be
-parsed - a corrupt PDF, say - still returns **422** and *does* leave a `FAILED` record with its
-history, because that is a processing failure rather than a rejected type.
+This is a type check, not a content check. A file with a supported extension that cannot be parsed - a
+corrupt PDF, say - is a **422**, and *does* leave a `FAILED` record with its history.
 
-**Bulk upload reports every file, including the ones that failed.** A file that cannot be processed
-gets a `FAILED` entry carrying its document id and the error, rather than being dropped from the
-response, so a batch of ten that returns seven successes also returns three failures, each
-identifying itself. Follow a failed entry's `id` to `/{id}/history` for the full trail. A rejected
-type appears as a `FAILED` entry with a **null id**, since no document was ever created for it. The
-status code summarises the batch: **201** when every file indexed, **207 Multi-Status** when some
-failed, **422** when none did.
+**Bulk upload reports every file, including failures.** A file that fails gets a `FAILED` entry with
+its document id and the error, so ten files sent always means ten results back. Follow a failed
+entry's `id` to `/{id}/history` for the full story. A rejected type is a `FAILED` entry with a **null
+id**, since no document was created for it.
 
-Files are processed one at a time. Ollama embeds on a single slot however many requests arrive, so
-uploading concurrently would add contention without adding throughput.
+Files in a bulk upload are processed one at a time. Ollama embeds on one slot however many requests
+arrive, so parallel uploads would only add contention.
 
-**History outlives the document it describes.** The history endpoint returns each status transition
-with the details recorded at the time: `UPLOADING` → `PROCESSING` → `INDEXED` on success, or ending in
-`FAILED` with the error message when parsing or indexing broke. `document_metadata_history` is an
-immutable audit log with deliberately no foreign key to `document_metadata`, so deleting a document
-removes its metadata and chunks but leaves the trail. The endpoint still answers for a deleted
-document, reporting `documentExists: false`, and 404s only when no history exists for the id at all.
-It is the only place a failure reason is kept once a document has been removed.
+**History outlives the document.** The history endpoint lists each status change with the details
+recorded at the time: `UPLOADING` → `PROCESSING` → `INDEXED`, or ending in `FAILED` with the error.
+The history table deliberately has no foreign key to the documents table, so deleting a document
+removes its metadata and chunks but keeps its history. The endpoint still answers for a deleted
+document, with `documentExists: false`, and returns 404 only when there is no history at all. It is the
+only place a failure's reason survives once the document is gone.
 
 **There is no re-index endpoint.** After a pipeline change, delete every document and upload them all
 again - see the [root README](../README.md#changing-the-pipeline-means-re-ingesting-everything).
 
 ## Dashboard
 
-**ragr-ingest — ingestion** in Grafana answers *is indexing healthy?*: one row per upload with its
-outcome, chunk count and time split into parsing and embedding-plus-writing, read from
-`document_metadata_history` through the Postgres datasource; document API requests; embedding calls, latency and throughput; vector-store write
-latency; and the live row count of `vector_store`. A **Swagger UI** link in the top bar opens this
-application's API docs.
+**ragr-ingest — ingestion** in Grafana answers *is storing documents healthy?* It shows one row per
+upload with its outcome, chunk count and time split into parsing and embedding-plus-writing (read from
+`document_metadata_history` through the Postgres data source); document API requests; embedding calls,
+latency and throughput; vector-store write latency; and the current row count of `vector_store`. The
+top bar links to this application's Swagger UI.

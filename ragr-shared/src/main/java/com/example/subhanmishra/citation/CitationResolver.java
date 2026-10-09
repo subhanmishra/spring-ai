@@ -14,78 +14,36 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Rewrites a section number the model wrote where a page number belongs into the page it came from.
+ * Turns a section number the model wrote in place of a page number back into a real page.
  *
- * <p>This exists because of a failure the evaluation suite reproduced on every single run: asked how
- * actuator endpoints are exposed, {@code gemma4:e2b} answers with "(spring-boot-reference.pdf, p. 5.3)"
- * - where 5.3 is not a page at all but the heading "5.3. Monitoring and Management over HTTP", which
- * the model read off page 299 of a passage it was given. The same answer cites pages 277 and 283
- * correctly alongside it, so the model is not inventing a location; it is naming the right passage with
- * the wrong kind of identifier. A reader following "p. 5.3" lands nowhere.
+ * <p>The model sometimes cites the heading it read instead of the page it read it on:
+ * "(spring-boot-reference.pdf, p. 5.3)" for the section "5.3. Monitoring and Management over HTTP". The
+ * passage is the right one, but a reader following "p. 5.3" lands nowhere. So the answer itself is
+ * fixed, before anyone reads it, rather than the scoring being relaxed to forgive it. Chat and
+ * evaluation both score the fixed text, so they agree on it.
  *
- * <p><strong>Why this is a rewrite rather than a looser scoring rule.</strong> Relaxing
- * {@code EvalScoringService} to accept a section number that resolves would make the suite pass while
- * leaving the answer exactly as unusable as before. The defect is in what the reader receives, so the
- * repair belongs in what the reader receives; scoring then follows for free, because both
- * {@code ChatService} and {@code GoldenEvalService} score the resolved text.
+ * <p>Three forms are recognised, each matched against the numbered headings in the retrieved chunks:
+ * <ul>
+ *   <li>the section number as written: {@code p. 9.2.6};</li>
+ *   <li>every dot dropped: {@code p. 926}, tried only when 926 is not a page the model was shown;</li>
+ *   <li>some dots dropped: {@code p. 913.1} for 9.13.1, where the dots that remain must line up.</li>
+ * </ul>
  *
- * <p><strong>Why it is safe to do deterministically.</strong> Measured against the live corpus, the
- * mapping from section number to page is total and unambiguous: of 232 heading occurrences across 212
- * pages, no section number appears as a heading on more than one page. Anchoring on the heading form
- * rather than a bare substring is what buys that - "5.3" occurs in 11 chunks as a substring, mostly as
- * a Spring Framework version, and in exactly one as a heading. Every section number the suite has ever
- * seen the model emit - 5.3, 5.2.5, 5.3.1, 5.5.1, 4.3.2, 4.3.3, 9.2.6 - resolves to exactly one
- * retrieved chunk.
+ * <p><strong>The rule that keeps it honest:</strong> a citation is rewritten only to a page the model
+ * was actually given, and only when exactly one retrieved heading fits. Anything else is left as the
+ * model wrote it and still counts as fabricated, so this class cannot hide a model that has started
+ * guessing. Swapping one unsupported page for another would be worse than the original mistake.
  *
- * <p><strong>What it deliberately will not do.</strong> The map is built from the retrieved chunks
- * only, never from the whole corpus, so a resolution can only ever name a page the model was actually
- * shown - swapping one unsupported citation for a different unsupported citation would be a worse
- * failure than the one being fixed. When a label matches no retrieved chunk, or more than one, it is
- * left exactly as the model wrote it and goes on being counted as fabricated. That is what keeps the
- * metric honest: this class cannot quietly absorb a model that has started guessing, because a guess
- * does not resolve.
- *
- * <p><strong>The same mistake with the dots dropped.</strong> On 2 Oct 2026 the golden suite caught
- * the first invented page since the parser strippers landed: {@code profiles-activation} cited "p. 926"
- * of a 645-page manual. 926 appears in no retrieved chunk; the sentence came from page 372, under the
- * heading "9.2.6. Set the Active Spring Profiles", and the run before cited "(9.2.6)" for the same
- * sentence. So a plain page number is also resolved, under two extra conditions: it must name no page
- * the model was shown - a retrieved page is a real citation and is never touched - and its digits must
- * be exactly one retrieved heading with the dots removed. "926" can also be 92.6 or 9.26; if more than
- * one retrieved heading collapses to it, it is left alone and counted as abstained. The residual risk
- * is a genuinely invented page whose digits happen to match a retrieved heading being repaired rather
- * than counted. It is narrow - the guess must collapse onto a heading among five chunks - and the
- * repair still lands on a page the model was given, which is the property this class exists to keep.
- *
- * <p><strong>And with only some of them dropped.</strong> On 6 Oct 2026 {@code port-in-use-startup-failure}
- * cited "p. 913.1" for a sentence from page 419, headed "9.13.1. Change the HTTP Port or Address of the
- * Actuator Endpoints" - the first dot dropped, the second kept. A dotted label that heads no retrieved
- * chunk exactly is therefore also tried against the retrieved headings it can be made from by deleting
- * dots: the same digits, with every dot the label kept sitting where the heading has one. The kept dots
- * are evidence, and using them matters - digits alone are ambiguous more often than the dotless case
- * suggests: of the 374 section numbers heading chunks in the corpus (counted 6 Oct 2026), 26 pairs
- * collapse to the same digits ("4.13" and "4.1.3", "4.11" and "4.1.1"), and a kept dot tells most of
- * them apart: "41.1" can only be "4.1.1". Two retrieved headings that both fit still abstain.
- *
- * <p>One limitation worth stating, since it affects a citation's precision rather than its
- * correctness. The page a section number resolves to is the page the <em>heading</em> sits on, which
- * for a section spanning several pages is its opening page rather than the page carrying the specific
- * sentence. Observed once, on the bare "5.3": the fact was on page 277 and the heading on 299. The
- * citation becomes correct at section level and navigable, which it was not before, but it is not
- * always pinpoint.
+ * <p><strong>Limitation:</strong> the page found is the one the section's heading sits on. For a long
+ * section that can be a few pages before the sentence cited, so the citation is right to the section
+ * but not always to the page.
  */
 public final class CitationResolver {
 
     /**
      * A numbered heading at the start of a line: {@code "5.2.5. Hypermedia for Actuator Web Endpoints"}.
-     *
-     * <p>The trailing capital is load-bearing rather than decorative. Without it the pattern also
-     * matches a version number or a numeric list item, and the whole value of this class is that a
-     * match means a heading. Verified across the corpus: 232 occurrences match this form and zero
-     * headings are missed by requiring the capital, because the manual title-cases every one of them.
-     *
-     * <p>At least two components, so an ordinary decimal cannot match. At most three, which is as deep
-     * as the manual numbers its sections.
+     * Two or three number parts, so a plain decimal cannot match, and a capital letter after them, so a
+     * version number or a numbered list item cannot either. The manual capitalises every heading.
      */
     private static final Pattern SECTION_HEADING = Pattern.compile(
             "(?m)^[ \\t]*(\\d{1,2}(?:\\.\\d{1,2}){1,2})\\.[ \\t]+\\p{Lu}");
@@ -127,9 +85,8 @@ public final class CitationResolver {
      *
      * @param answer     the answer with every resolvable section number rewritten to its page, or the
      *                   original text unchanged when nothing resolved
-     * @param repaired   how many citation occurrences were rewritten. Occurrences rather than distinct
-     *                   citations: an answer citing "p. 5.3" in four sentences has four places a reader
-     *                   could follow, and all four are rewritten.
+     * @param repaired   how many citations were rewritten, counting each occurrence: "p. 5.3" cited in
+     *                   four sentences counts four
      * @param abstained  how many occurrences carried a section number that did not resolve and were
      *                   left as written
      * @param unresolved the distinct citations behind {@code abstained}, so a log line can name them
@@ -175,8 +132,7 @@ public final class CitationResolver {
      * heading they name.
      *
      * @param answer    the model's answer, exactly as generated
-     * @param retrieved the chunks the advisor put in the prompt - the only source of pages this will
-     *                  cite, for the reason in the class javadoc
+     * @param retrieved the chunks that were in the prompt - the only pages this will ever cite
      */
     public static Resolution resolve(@Nullable String answer, @Nullable List<Document> retrieved) {
         if (answer == null || answer.isBlank()) {
@@ -207,10 +163,8 @@ public final class CitationResolver {
                         source = partlyDottedSection(pageRef, sectionSources);
                     }
                 } else {
-                    // A plain page number is a candidate only when it names no retrieved page - a page
-                    // the model was shown is a real citation and is never touched - and its digits are
-                    // a retrieved heading with the dots taken out. Anything else is either right or
-                    // fabricated, and neither is this class's business.
+                    // A page the model was shown is a real citation and is never touched. Otherwise a
+                    // plain number is repaired only if it is a retrieved heading with its dots removed.
                     if (retrievedPages.contains(Integer.valueOf(pageRef))) {
                         continue;
                     }
@@ -321,11 +275,10 @@ public final class CitationResolver {
 
     /**
      * The section numbers the retrieved chunks head, each with the file and page its heading sits on.
-     * Ambiguous ones are left out - the same rule {@link #resolve} applies, so anything this names is
-     * something {@code resolve} would also rewrite.
+     * Ambiguous ones are left out, as {@link #resolve} leaves them.
      *
-     * <p>This is what makes a bare "(5.3)" in an answer recognisable as a reference rather than a
-     * version number or a decimal: it is one only if 5.3 heads a page the model was actually given.
+     * <p>This is how a bare "(5.3)" in an answer is told apart from a version number: it is a reference
+     * only if 5.3 heads a page the model was given.
      */
     public static Map<String, Citation> resolvableSections(@Nullable List<Document> retrieved) {
         Map<String, Citation> sections = new HashMap<>(sectionSources(retrieved));
@@ -335,11 +288,8 @@ public final class CitationResolver {
 
     /**
      * Maps each section number heading the retrieved chunks contain to the file and page it sits on,
-     * with {@link #AMBIGUOUS} for any that appears on more than one.
-     *
-     * <p>Ambiguity has never been observed - no section number heads two pages anywhere in the corpus -
-     * but it is cheap to detect and the alternative is picking one at random, which would turn a
-     * visible failure into an invisible one.
+     * with {@link #AMBIGUOUS} for any that appears on more than one. An ambiguous number is never
+     * resolved: picking one page would turn a visible mistake into a hidden one.
      */
     private static Map<String, Citation> sectionSources(@Nullable List<Document> retrieved) {
         if (retrieved == null || retrieved.isEmpty()) {
