@@ -4,58 +4,32 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>spring-ai-ragr</artifactId>
+        <artifactId>ragr-service-parent</artifactId>
         <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../ragr-service-parent/pom.xml</relativePath>
     </parent>
     <artifactId>ragr-eval</artifactId>
     <name>ragr-eval</name>
     <description>Scores answer quality: live chat turns from Kafka, and the curated golden suite</description>
 
     <properties>
-        <spring-boot.run.skip>false</spring-boot.run.skip>
+        <!-- Measured at 265 MB in total, 63 MB of heap. The test JVM, which runs EvalSuiteIT beside
+             ragr-app and both models, reached 930 MB uncapped. -->
+        <ragr.heap>256m</ragr.heap>
     </properties>
 
-    <!-- Deliberately no vector store, no Redis, no document readers and no spring-boot-docker-compose:
+    <!-- From ragr-service-parent: ragr-shared, observability, and
+         - web: the actuator endpoints Prometheus scrapes, the human-review API, and the RestClient the
+           golden suite drives chat with and the idle gate reads it by;
+         - validation: the human-review request body;
+         - Ollama: the judges only; embedding is switched off in configuration.
+         Deliberately no vector store, no Redis, no document readers and no spring-boot-docker-compose:
          this application reads everything a turn needs from the event, and it must never start or stop
          the stack that ragr-app owns. -->
     <dependencies>
         <dependency>
-            <groupId>com.example</groupId>
-            <artifactId>ragr-shared</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-kafka</artifactId>
-        </dependency>
-        <!-- Serves the actuator endpoints Prometheus scrapes and the human-review API, and supplies the
-             RestClient the golden suite drives the chat endpoint with and the idle gate reads it by. -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-        <!-- Validates the human-review request body. -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-        <!-- Tracing: the OpenTelemetry SDK, Micrometer's bridge to it, and the OTLP exporter to the
-             collector. It also brings an OTLP metrics registry, switched off in configuration, since
-             Prometheus scrapes the metrics. -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-opentelemetry</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.loki4j</groupId>
-            <artifactId>loki-logback-appender</artifactId>
         </dependency>
         <!-- The eval schema: run and per-case results, and the golden gauges read back from them. -->
         <dependency>
@@ -81,41 +55,6 @@
             <groupId>tools.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
         </dependency>
-        <!-- The LLM judges. Embedding is switched off in configuration: nothing here embeds. -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-ollama</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <!-- Capped by design: the machine has little RAM to spare beside the two models.
-                         Measured at 265 MB in total, 63 MB of heap. The IntelliJ run configuration needs
-                         the same options. -->
-                    <jvmArguments>-Xmx256m -XX:+UseSerialGC</jvmArguments>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- The same cap for the test JVM, which runs EvalSuiteIT beside ragr-app and both
-                         models; uncapped it reached 930 MB. Merged with the parent's surefire
-                         configuration, which keeps the eval tag excluded. -->
-                    <argLine>-Xmx256m -XX:+UseSerialGC</argLine>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>

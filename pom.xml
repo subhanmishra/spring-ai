@@ -17,9 +17,11 @@
 
     <!-- Three applications and one library. ragr-shared holds what they must agree on exactly - chunk
          metadata keys, the citation code, the embedding task prefix, the Kafka events and the error
-         handling - so no two copies can drift apart. -->
+         handling - so no two copies can drift apart. ragr-service-parent is the applications' own
+         parent: what all three depend on, and how their JVMs run. -->
     <modules>
         <module>ragr-shared</module>
+        <module>ragr-service-parent</module>
         <module>ragr-app</module>
         <module>ragr-ingest</module>
         <module>ragr-eval</module>

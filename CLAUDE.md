@@ -72,6 +72,8 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 │       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka messages
 │       └── exception # ApiExceptionHandler (abstract; each app's advice extends it),
 │                     # ResourceNotFoundException
+├── ragr-service-parent # the three applications' parent (not ragr-shared's): what all three depend
+│                       # on, and the JVM options (ragr.jvm.options; each app sets only ragr.heap)
 ├── ragr-app         # chat (8080, actuator 9095); publishes turns and ratings to Kafka
 │   └── src/main
 │       ├── java/.../subhanmishra/
@@ -115,7 +117,7 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 ├── docker/          # config for the compose services (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime data
 ├── .claude/         # gitignored: context documents, hooks, skills
-├── pom.xml          # parent: versions, modules, the surefire eval exclusion
+├── pom.xml          # root parent: versions, modules, the surefire eval exclusion
 ├── compose.yaml     # at the root; infrastructure, plus the applications behind the `apps` profile
 ├── Dockerfile       # one layered image per application, from the jar packaged on the host
 ├── ragr.ps1         # stack | docker | intellij | status | logs

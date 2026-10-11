@@ -357,9 +357,11 @@ from the IntelliJ run configurations:
 - **Ingest goes second** because it creates the `public` schema. Until it has started once on an empty
   database, chat has no `vector_store` to search.
 
-**Every JVM has a capped heap and SerialGC**, because the reference machine is short of memory. The
-settings are in each module's `pom.xml` (for `spring-boot:run` and for tests) and in
-`JDK_JAVA_OPTIONS` (for containers). An IntelliJ run configuration needs the same VM options:
+**Every JVM has a capped heap and SerialGC**, because the reference machine is short of memory. For
+`spring-boot:run` and for tests, the options are in `ragr-service-parent/pom.xml`, the three
+applications' shared parent, and each application sets only its heap cap (`ragr.heap`) in its own
+`pom.xml`. Containers take them from `JDK_JAVA_OPTIONS` in `compose.yaml`. An IntelliJ run
+configuration needs the same VM options:
 
 | Application | VM options | Measured |
 |---|---|---|

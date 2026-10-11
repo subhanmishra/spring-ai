@@ -4,51 +4,26 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>spring-ai-ragr</artifactId>
+        <artifactId>ragr-service-parent</artifactId>
         <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../ragr-service-parent/pom.xml</relativePath>
     </parent>
     <artifactId>ragr-ingest</artifactId>
     <name>ragr-ingest</name>
     <description>Document ingestion: upload, parse, chunk, embed and index into pgvector</description>
 
     <properties>
-        <spring-boot.run.skip>false</spring-boot.run.skip>
+        <!-- Uncapped, the JVM sized its heap to 4 GB. Storing the reference manual peaks at ~354 MB of
+             heap under this cap. SerialGC: 516 MB in total against 688 MB under G1, for under a second
+             more GC over a whole upload. -->
+        <ragr.heap>512m</ragr.heap>
     </properties>
 
-    <!-- Deliberately no Kafka, no Redis and no spring-boot-docker-compose: nothing here chats, and it
+    <!-- Web, validation, Ollama (embedding only here; chat is switched off in configuration),
+         observability and ragr-shared come from ragr-service-parent.
+         Deliberately no Kafka, no Redis and no spring-boot-docker-compose: nothing here chats, and it
          must never start or stop the stack that ragr-app owns. -->
     <dependencies>
-        <dependency>
-            <groupId>com.example</groupId>
-            <artifactId>ragr-shared</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-        <!-- Tracing: the OpenTelemetry SDK, Micrometer's bridge to it, and the OTLP exporter to the
-             collector. It also brings an OTLP metrics registry, switched off in configuration, since
-             Prometheus scrapes the metrics. -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-opentelemetry</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.loki4j</groupId>
-            <artifactId>loki-logback-appender</artifactId>
-        </dependency>
         <!-- The public schema: document metadata, its history, and vector_store, which this application
              writes and ragr-app reads. -->
         <dependency>
@@ -63,11 +38,6 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
             <scope>runtime</scope>
-        </dependency>
-        <!-- Embedding only. Chat is switched off in configuration: nothing here generates. -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-ollama</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -94,38 +64,6 @@
             <groupId>org.modelmapper</groupId>
             <artifactId>modelmapper</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <!-- Capped because, uncapped, the JVM sized its heap to 4 GB on a machine with a few
-                         hundred MB to spare beside the two models. Storing the reference manual peaks at
-                         ~354 MB of heap under this cap.
-                         SerialGC, not G1: 516 MB in total against 688 MB under G1, for under a second
-                         more GC over a whole upload. The IntelliJ run configuration needs the same
-                         options. -->
-                    <jvmArguments>-Xmx512m -XX:+UseSerialGC</jvmArguments>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- The same cap for the test JVM, which loads the full context beside the running
-                         applications. Merged with the parent's surefire configuration. -->
-                    <argLine>-Xmx512m -XX:+UseSerialGC</argLine>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>
