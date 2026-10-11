@@ -107,7 +107,7 @@ publish is lost. To replay the topic on purpose, reset the `ragr-eval` group's o
 
 ## Human review
 
-The dashboard's review queue lists unreviewed live turns worth a person's verdict: every thumbs-down,
+The live dashboard's "Answers to review" table lists unreviewed live turns worth a person's verdict: every thumbs-down,
 every turn where the user and the judges disagree, and a random 5% (`online.review-sample-rate`).
 Record a verdict - `CORRECT`, `PARTIAL` or `WRONG` - with:
 
@@ -115,8 +115,8 @@ Record a verdict - `CORRECT`, `PARTIAL` or `WRONG` - with:
 curl -X PUT http://localhost:9096/eval/turns/<turnId>/review -H "Content-Type: application/json" -d '{"verdict":"CORRECT","notes":"optional"}'
 ```
 
-204 on success; 404 for a turn never stored, or already purged. The dashboard compares each verdict
-with the judges'. That comparison is the evidence for whether the model is good enough to judge itself.
+204 on success; 404 for a turn never stored, or already purged. The live dashboard compares each
+verdict with the judges'. That comparison is the evidence for whether the model is good enough to judge itself.
 
 ## The golden suite
 
@@ -213,26 +213,35 @@ under `app.eval.*`:
 | `golden.chat-url` | `http://localhost:8080` | The running chat service a suite run drives |
 | `golden.turn-timeout` | `30s` | How long the suite waits for a turn to appear on Kafka after the answer returns |
 
-## Dashboard
+## Dashboards
 
-**ragr-eval — evaluation** in Grafana answers *are the answers any good?* Each section puts the golden
-suite on the left and live traffic on the right:
+Two Grafana dashboards answer *are the answers any good?*, one per source, never mixed. Each has the same
+sections, top to bottom:
 
-- **Overview** - age of the last golden run, live turns and grounded share, the judge queue (waiting,
-  oldest wait, skipped, errors, idle waits, time per turn), answer health counters and section-number
-  citation repairs.
-- **1. Retrieval** - Recall@K, Precision@K, MRR, NDCG and hit rate, per run and hourly; context
-  precision three ways; relevant chunks the threshold left out; retrieval scores.
-- **2. Generation** - faithfulness, groundedness, relevance, completeness, citation support and
-  validity, per run and hourly; citation outcomes; context used; fabricated, uncited and cut-off answers.
-- **3. End to end** - case pass rate and end-to-end success, the debugging matrix, a breakdown by task,
-  thumbs up/down and "asked again", agreement with human review, latency.
-- **Calibration** - the judge against the hand-checked pages, against human review and against user
-  ratings.
-- **Drill-down** - the review queue, failing live turns with each stage's verdict and chunk grades, and
-  the golden per-case tables and run history.
+| Section | Asks |
+|---|---|
+| **At a glance** | the headline numbers and a trend |
+| **Retrieval** | did the search find the right passages? |
+| **Generation** | is the answer itself good - backed by its sources, on topic, complete, cited correctly? |
+| **End to end** | did the whole pipeline work - where answers go wrong, by kind of question |
+| **Can we trust the judge?** | how often the judge agrees with a more trusted opinion |
+| **Drill-down** | which answers or cases, and why |
+| **Detail** (collapsed) | the finer measures behind the sections above |
 
-Quality panels read the `eval` schema, by when each turn happened. Prometheus carries the operational
-rates. A **Task** variable filters the live panels. Golden trend panels always show the last 30 days,
-since runs are rare, and re-ingests and golden runs are marked on every time axis. Every rate is shown
-beside how many turns it rests on: at a few turns an hour, a rate can rest on very few verdicts.
+- **ragr-eval — live answers** - live turns in the time range, filtered by the **Task** variable. Also
+  human verdicts (correct, partly correct, wrong), user feedback and response time; the judge compared with human reviewers and with thumbs up/down; the
+  review queue and failing answers; a collapsed **Judge workload** row (skips, errors, time per answer);
+  and running totals (refusals, citation outcomes, section numbers repaired) and search scores under
+  Detail.
+- **ragr-eval — golden test set** - the latest run, plus one point per run over the time range (30 days
+  by default). The judge compared with the hand-checked pages; every case of the latest run with why it
+  failed, pass history per case, and run history with the settings behind each run; context precision
+  and precision@k three ways under Detail.
+
+Quality panels read the `eval` schema, by when each turn happened; Prometheus carries the judge queue
+and the running totals. Re-ingests (and, on the golden dashboard, golden runs) are marked on every time
+axis. Every rate is shown beside how many answers it rests on: at a few turns an hour, a rate can rest
+on very few verdicts. Labels are plain words with the standard term in brackets - "Useful passages used (Recall@K)",
+"Backed by sources (Faithfulness)". Each panel's description (the ⓘ) says what it means, what to do when
+it is bad and, for the headline metrics, an example target. Targets are not colour-coded: the judge is
+the same small model that answers, so read the trend rather than the level.

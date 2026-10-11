@@ -417,7 +417,7 @@ panels select on:
 | `ragr-ingest` | `9097` | `ragr-ingest` | `ragr-ingest` |
 | `ragr-eval` | `9096` | `ragr-eval` | `ragr-eval` |
 
-Grafana has four dashboards, each answering one question, linked to each other from the "ragr
+Grafana has five dashboards, each answering one question, linked to each other from the "ragr
 dashboards" menu at the top left:
 
 * **ragr — overview** - *are the applications and the infrastructure healthy?* JVM, HTTP and connection
@@ -426,7 +426,9 @@ dashboards" menu at the top left:
   Kafka console; Redis; and Postgres, including row counts per schema and table.
 * **ragr-app — chat** - *is the chat pipeline healthy?* See [ragr-app](ragr-app/README.md#dashboard).
 * **ragr-ingest — ingestion** - *is storing documents healthy?* See [ragr-ingest](ragr-ingest/README.md#dashboard).
-* **ragr-eval — evaluation** - *are the answers any good?* See [ragr-eval](ragr-eval/README.md#dashboard).
+* **ragr-eval — live answers** - *are real users getting good answers?* See [ragr-eval](ragr-eval/README.md#dashboards).
+* **ragr-eval — golden test set** - *how does the pipeline score on questions with known answers?* See
+  [ragr-eval](ragr-eval/README.md#dashboards).
 
 The Postgres data source shows what only the database knows: how long each upload took, from
 `document_metadata_history`, and the golden suite's per-question results, from the `eval` schema.
