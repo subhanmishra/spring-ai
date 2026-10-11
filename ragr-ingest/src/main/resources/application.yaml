@@ -72,6 +72,12 @@ management:
   tracing:
     sampling:
       probability: 1.0
+  # Prometheus scrapes the metrics. The OpenTelemetry starter would also push them over OTLP, which
+  # nothing here receives.
+  otlp:
+    metrics:
+      export:
+        enabled: false
   prometheus:
     metrics:
       export:
