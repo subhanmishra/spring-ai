@@ -30,6 +30,7 @@
         <spring-ai.version>2.0.1</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
         <modelmapper.version>3.2.4</modelmapper.version>
+        <loki4j.version>2.0.3</loki4j.version>
         <!-- The version spring-ai-tika-document-reader already brings, so ragr-ingest's explicit
              declaration adds no second copy. -->
         <jsoup.version>1.22.2</jsoup.version>
@@ -45,12 +46,34 @@
         <spring-boot.run.skip>true</spring-boot.run.skip>
     </properties>
 
+    <!-- Every version Spring Boot and Spring AI do not manage is set here, once, so the applications
+         declare these dependencies without one and cannot drift apart. -->
     <dependencyManagement>
         <dependencies>
             <dependency>
                 <groupId>com.example</groupId>
                 <artifactId>ragr-shared</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.loki4j</groupId>
+                <artifactId>loki-logback-appender</artifactId>
+                <version>${loki4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.modelmapper</groupId>
+                <artifactId>modelmapper</artifactId>
+                <version>${modelmapper.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>${jsoup.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springframework.ai</groupId>
