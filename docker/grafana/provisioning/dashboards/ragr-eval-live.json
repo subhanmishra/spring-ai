@@ -100,14 +100,14 @@
       "id": 2,
       "type": "stat",
       "title": "Chat turns",
-      "description": "Chat turns in the time range, and the share that used the uploaded documents. Turns answered without them (small talk, general questions) are not scored on the answer.",
+      "description": "Chat turns in the time range, and the share where the search returned passages for the prompt. Turns with none (small talk, questions the documents do not cover) are not scored on the answer. Passages found does not mean the answer used them - that is Backed by sources (Faithfulness).",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
+        "w": 12,
         "x": 0,
         "y": 1
       },
@@ -125,7 +125,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Used the documents (Grounded)"
+              "options": "Passages found (Retrieved)"
             },
             "properties": [
               {
@@ -185,7 +185,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -196,7 +196,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"Turns\", AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END) AS \"Used the documents (Grounded)\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}')",
+          "rawSql": "SELECT COUNT(*) AS \"Turns\", AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END) AS \"Passages found (Retrieved)\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}')",
           "refId": "A"
         }
       ]
@@ -212,9 +212,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 13,
-        "x": 4,
-        "y": 1
+        "w": 24,
+        "x": 0,
+        "y": 6
       },
       "fieldConfig": {
         "defaults": {
@@ -275,7 +275,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -302,8 +302,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 7,
-        "x": 17,
+        "w": 12,
+        "x": 12,
         "y": 1
       },
       "fieldConfig": {
@@ -406,7 +406,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -442,7 +442,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -495,7 +495,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 18
       },
       "panels": [],
       "id": 6
@@ -510,10 +510,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 0,
-        "y": 14
+        "y": 19
       },
       "fieldConfig": {
         "defaults": {
@@ -573,7 +573,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -593,16 +593,16 @@
       "id": 8,
       "type": "stat",
       "title": "Are the search settings too strict? (top-k, threshold)",
-      "description": "Useful passage left out: one was found, but the similarity threshold or top-k kept it out of the prompt - if this is often above zero, loosen one of them. Nothing useful found: the documents do not cover the question. All useful passages cut: the answer used no documents although a useful passage was found.",
+      "description": "Useful passage left out: one was found, but the similarity threshold or top-k kept it out of the prompt - if this is often above zero, loosen one of them. Nothing useful found: the documents do not cover the question. All useful passages cut: no passage reached the prompt although a useful one was found.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 8,
-        "y": 14
+        "y": 19
       },
       "fieldConfig": {
         "defaults": {
@@ -662,7 +662,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -688,10 +688,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 16,
-        "y": 14
+        "y": 19
       },
       "fieldConfig": {
         "defaults": {
@@ -743,7 +743,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 29
       },
       "panels": [],
       "id": 10
@@ -752,16 +752,16 @@
       "id": 11,
       "type": "stat",
       "title": "Answer quality (Generation metrics)",
-      "description": "Over answers that used the documents. Backed by sources: share of the answer's statements the passages support. On topic and Complete: the judge's verdicts. Citations check out: cited pages that really say what the sentence claims. Citations to shown pages: cited pages that were in the prompt - checked by code on every answer, not by the judge. Example targets: Faithfulness and Citation support above 0.8.",
+      "description": "Over answers that had passages in the prompt. Backed by sources: share of the answer's statements the passages support. On topic and Complete: the judge's verdicts. Citations check out: cited pages that really say what the sentence claims. Citations to shown pages: cited pages that were in the prompt - checked by code on every answer, not by the judge. Example targets: Faithfulness and Citation support above 0.8.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 0,
-        "y": 23
+        "y": 30
       },
       "fieldConfig": {
         "defaults": {
@@ -821,7 +821,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -841,16 +841,16 @@
       "id": 12,
       "type": "stat",
       "title": "Answer problems",
-      "description": "All three should stay near zero. Made-up citations: cited pages the model was never shown. Cites nothing: answers that used the documents but cite no page. Cut off: answers that hit the length limit - the judge reads these as incomplete, so check this first when Complete drops.",
+      "description": "All three should stay near zero. Made-up citations: cited pages the model was never shown. Cites nothing: answers that had passages in the prompt but cite no page. Cut off: answers that hit the length limit - the judge reads these as incomplete, so check this first when Complete drops.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 8,
-        "y": 23
+        "y": 30
       },
       "fieldConfig": {
         "defaults": {
@@ -893,7 +893,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -918,10 +918,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 8,
         "x": 16,
-        "y": 23
+        "y": 30
       },
       "fieldConfig": {
         "defaults": {
@@ -974,7 +974,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 40
       },
       "panels": [],
       "id": 14
@@ -992,7 +992,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
@@ -1035,7 +1035,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
@@ -1060,7 +1060,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"used documents % (grounded)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\", COUNT(f.turn_id) FILTER (WHERE f.rating = 'DOWN') AS \"thumbs down\", COUNT(*) FILTER (WHERE t.rephrased) AS \"asked again\" FROM eval.eval_turn t LEFT JOIN eval.eval_feedback f ON f.turn_id = t.turn_id WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) GROUP BY 1 ORDER BY 2 DESC",
+          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"passages found % (retrieved)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\", COUNT(f.turn_id) FILTER (WHERE f.rating = 'DOWN') AS \"thumbs down\", COUNT(*) FILTER (WHERE t.rephrased) AS \"asked again\" FROM eval.eval_turn t LEFT JOIN eval.eval_feedback f ON f.turn_id = t.turn_id WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) GROUP BY 1 ORDER BY 2 DESC",
           "refId": "A"
         }
       ]
@@ -1075,10 +1075,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 7,
+        "h": 9,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
@@ -1138,7 +1138,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -1164,10 +1164,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 7,
+        "h": 9,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
@@ -1227,7 +1227,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -1256,7 +1256,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {
@@ -1318,7 +1318,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 63
       },
       "panels": [],
       "id": 20
@@ -1333,10 +1333,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1398,7 +1398,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -1424,10 +1424,10 @@
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1489,7 +1489,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -1513,7 +1513,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 72
       },
       "panels": [],
       "id": 23
@@ -1531,7 +1531,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 73
       },
       "fieldConfig": {
         "defaults": {
@@ -1609,7 +1609,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 82
       },
       "fieldConfig": {
         "defaults": {
@@ -1750,7 +1750,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 78
+        "y": 91
       },
       "panels": [
         {
@@ -1766,7 +1766,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 79
+            "y": 92
           },
           "fieldConfig": {
             "defaults": {
@@ -1797,7 +1797,7 @@
             "showPercentChange": false,
             "text": {
               "titleSize": 16,
-              "valueSize": 32
+              "valueSize": 26
             }
           },
           "targets": [
@@ -1843,7 +1843,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 79
+            "y": 92
           },
           "fieldConfig": {
             "defaults": {
@@ -1874,7 +1874,7 @@
             "showPercentChange": false,
             "text": {
               "titleSize": 16,
-              "valueSize": 32
+              "valueSize": 26
             }
           },
           "targets": [
@@ -1885,7 +1885,7 @@
               },
               "format": "table",
               "rawQuery": true,
-              "rawSql": "SELECT AVG(t.judge_millis) FILTER (WHERE t.grounded) AS \"Used the documents (Grounded)\", AVG(t.judge_millis) FILTER (WHERE NOT t.grounded) AS \"No documents\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') AND t.judge_status IN ('DONE','PARTIAL')",
+              "rawSql": "SELECT AVG(t.judge_millis) FILTER (WHERE t.grounded) AS \"Passages found (Retrieved)\", AVG(t.judge_millis) FILTER (WHERE NOT t.grounded) AS \"No passages found\" FROM eval.eval_turn t WHERE t.origin = 'LIVE' AND $__timeFilter(t.occurred_at) AND ('${task}' = 'all' OR t.task_type = '${task}') AND t.judge_status IN ('DONE','PARTIAL')",
               "refId": "A"
             }
           ]
@@ -1901,7 +1901,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 92
       },
       "panels": [
         {
@@ -1913,7 +1913,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 80
+            "y": 93
           },
           "datasource": {
             "type": "prometheus",
@@ -1990,7 +1990,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 80
+            "y": 93
           },
           "fieldConfig": {
             "defaults": {
@@ -2051,7 +2051,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 88
+            "y": 101
           },
           "datasource": {
             "type": "prometheus",
@@ -2121,7 +2121,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 88
+            "y": 101
           },
           "datasource": {
             "type": "prometheus",
@@ -2155,7 +2155,7 @@
             "colorMode": "none",
             "text": {
               "titleSize": 16,
-              "valueSize": 32
+              "valueSize": 26
             }
           },
           "targets": [
@@ -2188,7 +2188,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 88
+            "y": 101
           },
           "datasource": {
             "type": "prometheus",

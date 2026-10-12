@@ -22,6 +22,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +38,8 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -47,6 +51,14 @@ public class DocumentIngestionService {
     /** Fragments of the Go dial error Ollama returns when its model runner is not listening. */
     private static final List<String> RUNNER_UNAVAILABLE_MARKERS =
             List.of("dial tcp", "connection refused", "actively refused", "connectex");
+
+    /** A chapter or appendix title at the start of a line; see {@link #sectionHeadings}. */
+    private static final Pattern CHAPTER_TITLE =
+            Pattern.compile("(?m)^[ \\t]*((?:Chapter \\d{1,2}\\.|Appendix \\p{Lu}:)[ \\t]+\\S[^\\n]*)");
+
+    /** The number a section line leaves off: "9.17.5. ", "10.A.11. ", "Chapter 10. ". */
+    private static final Pattern SECTION_NUMBER =
+            Pattern.compile("^(?:Chapter \\d{1,2}\\.|\\d{1,2}(?:\\.(?:\\p{Lu}|\\d{1,2}))+\\.)\\s*");
 
     private final VectorStore vectorStore;
     private final DocumentHistoryService historyService;
@@ -245,10 +257,12 @@ public class DocumentIngestionService {
             newMetadata.put(ChunkMetadata.CONTENT_TYPE, metadata.getContentType());
             newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
             newMetadata.put(ChunkMetadata.PIPELINE_VERSION, pipelineVersion);
-            List<String> headings = CitationResolver.sectionHeadings(chunk.getText());
+            List<String> headings = sectionHeadings(chunk.getText());
             // The section the chunk starts in, read before its own headings move it on. Named in the
             // header only when the chunk does not open with that heading.
-            String openedIn = CitationResolver.opensWithSectionHeading(chunk.getText()) ? null : currentSection.get();
+            boolean opensWithHeading = CitationResolver.opensWithSectionHeading(chunk.getText())
+                                       || CHAPTER_TITLE.matcher(chunk.getText()).lookingAt();
+            String openedIn = opensWithHeading ? null : currentSection.get();
             String section = headings.isEmpty() ? currentSection.get() : headings.getFirst();
             if (!headings.isEmpty()) {
                 currentSection.set(headings.getLast());
@@ -267,6 +281,38 @@ public class DocumentIngestionService {
             }
             return new Document(citationHeader(metadata.getFilename(), pageNumber, openedIn) + chunk.getText(), newMetadata);
         });
+    }
+
+    /**
+     * The headings in a chunk that move the current section on, in order: the numbered ones, and the
+     * chapter and appendix titles above them - {@code "Chapter 10. Appendices"}, {@code "Appendix C:
+     * Auto-configuration Classes"}. Without the titles, a chapter opening with prose, or an appendix with
+     * no numbered sections, inherits the last section of the chapter before - every appendix once carried
+     * "Use Testcontainers for integration testing". The titles only name a section: they neither split a
+     * chunk nor resolve a citation.
+     */
+    static List<String> sectionHeadings(String text) {
+        record Mark(int at, String title) {
+        }
+        List<Mark> marks = new ArrayList<>();
+        int from = 0;
+        for (String heading : CitationResolver.sectionHeadings(text)) {
+            int at = text.indexOf(heading, from);
+            marks.add(new Mark(at, heading));
+            from = at + heading.length();
+        }
+        Matcher title = CHAPTER_TITLE.matcher(text);
+        while (title.find()) {
+            String line = title.group(1).strip();
+            // "Chapter 5. Spring Boot Actuator: Production-" continues on the next line.
+            if (line.endsWith("-")) {
+                String rest = text.substring(title.end()).strip();
+                int lineEnd = rest.indexOf('\n');
+                line += (lineEnd < 0 ? rest : rest.substring(0, lineEnd)).strip();
+            }
+            marks.add(new Mark(title.start(1), line));
+        }
+        return marks.stream().sorted(Comparator.comparingInt(Mark::at)).map(Mark::title).toList();
     }
 
     /**
@@ -295,7 +341,7 @@ public class DocumentIngestionService {
         if (section == null) {
             return citation + "\n\n";
         }
-        String title = section.replaceFirst("^[\\d.]+\\s*", "");
+        String title = SECTION_NUMBER.matcher(section).replaceFirst("");
         return citation + "\n" + CitationParser.SECTION_LINE_PREFIX + title + "\n\n";
     }
 

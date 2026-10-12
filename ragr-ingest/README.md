@@ -64,6 +64,10 @@ management.server.port=8081 ...
   model what the text is about when the heading fell in the chunk before. Without it, the model gave
   this chunk's `management.server.port` as the way to move the *application* off port 8080. Chunks break
   at numbered headings, so a chunk that opens with its own heading needs no section line.
+- **What counts as a heading.** Numbered sections (`9.17.5.`), appendix sections (`10.A.11.`), and the
+  chapter and appendix titles above them (`Chapter 10. Appendices`, `Appendix C: ...`). Without the last
+  two kinds, every appendix chunk was labelled with the last how-to section before it. A heading with
+  only a table under it opens that table's first chunk, rather than being stored as a chunk of one line.
 - **Anything that reads chunks back** - export, re-ranking, re-chunking - must remove both lines first,
   with `CitationParser.stripHeader`.
 
@@ -76,7 +80,7 @@ management.server.port=8081 ...
 | `chunkIndex` | Its position in the document |
 | `blockType` | `prose` or `table` |
 | `tableIndex`, `tableRows` | For table chunks only |
-| `section` | The numbered heading it falls under: the first one inside it, or else the last one before it |
+| `section` | The heading it falls under: the first one inside it, or else the last one before it |
 | `pipelineVersion` | A hash of everything that shaped it: the chunk settings, `IngestionProperties.PARSER_REVISION`, the embedding model and its task prefix |
 
 **Bump `PARSER_REVISION`** with any parsing change that alters chunk text. No setting changes in that

@@ -44,9 +44,13 @@ public final class CitationResolver {
      * A numbered heading at the start of a line: {@code "5.2.5. Hypermedia for Actuator Web Endpoints"}.
      * Two or three number parts, so a plain decimal cannot match, and a capital letter after them, so a
      * version number or a numbered list item cannot either. The manual capitalises every heading.
+     *
+     * <p>Appendix sections carry a letter after the chapter - {@code "10.A.11. Server Properties"} - and
+     * match too. A cited section number is only ever digits, so these never resolve a citation; they are
+     * here so ingestion knows the section has changed.
      */
     private static final Pattern SECTION_HEADING = Pattern.compile(
-            "(?m)^[ \\t]*(\\d{1,2}(?:\\.\\d{1,2}){1,2})\\.[ \\t]+\\p{Lu}");
+            "(?m)^[ \\t]*(\\d{1,2}(?:\\.\\d{1,2}){1,2}|\\d{1,2}\\.\\p{Lu}(?:\\.\\d{1,2}){1,2})\\.[ \\t]+\\p{Lu}");
 
     /**
      * Every numbered heading in a text, in order, each as its whole line - {@code "9.2.6. Set the Active

@@ -147,7 +147,7 @@
         "colorMode": "background",
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -263,7 +263,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -360,7 +360,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 14,
         "x": 0,
         "y": 14
       },
@@ -422,7 +422,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -449,8 +449,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
-        "x": 12,
+        "w": 10,
+        "x": 14,
         "y": 14
       },
       "fieldConfig": {
@@ -519,7 +519,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 14,
         "x": 0,
         "y": 22
       },
@@ -581,7 +581,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -608,8 +608,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
-        "x": 12,
+        "w": 10,
+        "x": 14,
         "y": 22
       },
       "fieldConfig": {
@@ -748,7 +748,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"used documents % (grounded)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\" FROM eval.eval_turn t WHERE t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) GROUP BY 1 ORDER BY 2 DESC",
+          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"passages found % (retrieved)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\" FROM eval.eval_turn t WHERE t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) GROUP BY 1 ORDER BY 2 DESC",
           "refId": "A"
         }
       ]
@@ -841,7 +841,7 @@
         "showPercentChange": false,
         "text": {
           "titleSize": 16,
-          "valueSize": 32
+          "valueSize": 26
         }
       },
       "targets": [
@@ -1083,7 +1083,7 @@
             "colorMode": "none",
             "text": {
               "titleSize": 16,
-              "valueSize": 32
+              "valueSize": 26
             }
           },
           "targets": [
@@ -1158,7 +1158,7 @@
             "colorMode": "none",
             "text": {
               "titleSize": 16,
-              "valueSize": 32
+              "valueSize": 26
             }
           },
           "targets": [

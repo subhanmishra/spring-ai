@@ -99,6 +99,19 @@ class CitationResolverTest {
         }
 
         @Test
+        @DisplayName("includes appendix headings, whose number carries a letter")
+        void appendixHeadings() {
+            String text = """
+                    Appendix A: Common Application properties
+
+                    10.A.11. Server Properties
+                    | server.port | 8080 | Server HTTP port. |
+                    """;
+
+            assertThat(CitationResolver.sectionHeadings(text)).containsExactly("10.A.11. Server Properties");
+        }
+
+        @Test
         @DisplayName("is empty for text with no heading, or none at all")
         void none() {
             assertThat(CitationResolver.sectionHeadings("Set server.port to 8081.")).isEmpty();

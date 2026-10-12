@@ -75,6 +75,21 @@ class DocumentParserServiceTest {
         assertThat(realisticBudget().coalesceParagraphs(page)).hasSize(1);
     }
 
+    @Test
+    @DisplayName("a heading with only a table under it opens the table's chunk rather than being a chunk alone")
+    void loneHeadingOpensItsTable() {
+        String previous = "Templating properties configure the view engines Spring Boot supports. ".repeat(10).strip();
+        ContentBlock.Table table = new ContentBlock.Table(List.of("Key", "Default Value"),
+                                                          List.of(List.of("server.port", "8080")), null);
+
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Prose(previous + "\n\n10.A.11. Server Properties"), table), Map.of());
+
+        assertThat(chunks).hasSize(2);
+        assertThat(chunks.get(0).getText()).isEqualTo(previous);
+        assertThat(chunks.get(1).getText()).startsWith("10.A.11. Server Properties\n\n| Key |");
+    }
+
     /** The production budget of 400 tokens, so a chunk can hold a section break's worth of text. */
     private static DocumentParserService realisticBudget() {
         IngestionProperties properties = new IngestionProperties(400, 150, 5, 10000, CEILING_TOKENS, 200, 4, 3,

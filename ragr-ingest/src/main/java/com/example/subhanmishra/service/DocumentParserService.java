@@ -292,7 +292,10 @@ public class DocumentParserService {
      * was a chunk of its own.
      * <p>
      * A table closes the open prose group and becomes its own chunk, or several, split between rows with
-     * the header repeated. Prose and tables never share a chunk.
+     * the header repeated. Prose and tables never share a chunk - except a section heading with nothing
+     * after it but the table, which opens the table's first chunk instead of being a chunk of one line.
+     * Every appendix section of the manual is a heading over a property table, and each heading was
+     * otherwise stored and embedded on its own.
      *
      * @param blocks         the blocks of one page or one Tika document, in reading order
      * @param sourceMetadata metadata carried onto every chunk produced from this unit
@@ -310,8 +313,14 @@ public class DocumentParserService {
                     }
                 }
                 case ContentBlock.Table table -> {
+                    String heading = prose.takeLoneHeading();
                     prose.flush();
-                    chunks.addAll(renderTable(table, tableIndex++, sourceMetadata));
+                    List<Document> pieces = renderTable(table, tableIndex++, sourceMetadata);
+                    if (heading != null && !pieces.isEmpty()) {
+                        Document first = pieces.getFirst();
+                        pieces.set(0, new Document(heading + PARAGRAPH_SEPARATOR + first.getText(), first.getMetadata()));
+                    }
+                    chunks.addAll(pieces);
                 }
             }
         }
@@ -377,6 +386,21 @@ public class DocumentParserService {
          * little more than noise, so the heading joins it instead.
          */
         private static final int SECTION_BREAK_MIN_TOKENS = 80;
+
+        /**
+         * Removes and returns the open group when it is nothing but one section heading, or null. Called
+         * as a table arrives, so the heading can open the table's chunk.
+         */
+        private @Nullable String takeLoneHeading() {
+            String group = current.toString();
+            if (group.contains(PARAGRAPH_SEPARATOR) || group.contains("\n")
+                || !CitationResolver.opensWithSectionHeading(group)) {
+                return null;
+            }
+            current.setLength(0);
+            currentTokens = 0;
+            return group;
+        }
 
         /**
          * The budget is measured on the <em>joined</em> text, never on the sum of the parts: the line

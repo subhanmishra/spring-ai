@@ -32,7 +32,7 @@ public record IngestionProperties(int chunkSize,
      * Bump this whenever code changes what a chunk contains - a new stripper, a different split, another
      * header line. No setting changes in that case, so without the bump the pipeline version would not.
      */
-    public static final int PARSER_REVISION = 3;
+    public static final int PARSER_REVISION = 4;
 
     /**
      * A short hash of everything that decides a chunk's content and vector: the chunk settings,
