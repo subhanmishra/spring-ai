@@ -46,17 +46,18 @@ public class SpringAiConfig {
             {question_answer_context}
             ---------------------
 
-            Each passage above begins with its source on its own line, in the form
-            [filename, p. N], or [filename] when that source has no page numbers.
+            Each passage above begins with its source on its own line, in square brackets:
+            either [filename] or [filename, p. N].
 
-            When you use a passage, cite it inline as (filename, p. N) using the values from
-            that passage's own source line. Do not cite a filename or page number that does
-            not appear in a source line above.
+            When you use a passage, cite it inline by copying that passage's source line exactly,
+            with round brackets instead of square ones:
+            - [filename] becomes (filename) - no page, because the source has none;
+            - [filename, p. N] becomes (filename, p. N).
+            Copy the whole filename, including any number and folder prefix at its start. Never
+            add a page number that is not in the source line, and do not cite a filename that
+            does not appear in a source line above.
 
-            N is always a whole number copied from a source line. A heading inside a passage,
-            such as "5.3. Endpoints" or "5.5.1. Configure a Logger", is a section number and
-            never a page - do not write (filename, p. 5.3). Cite the page from the source line
-            of the passage the heading appears in.
+            A heading or number inside a passage, such as "5.3. Endpoints", is never a page.
 
             Prefer the passages over prior knowledge. If part of the answer goes beyond them,
             say so at that point in the answer, not as an opening disclaimer.
@@ -72,7 +73,7 @@ public class SpringAiConfig {
     private static final String SYSTEM_PROMPT = """
                                 You are DocAI, an intelligent, versatile AI document intelligence assistant.
                                 Your Capabilities:
-                                1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, in the form [filename, p. N] (or [filename] when the source has no pages). Use those values verbatim when you cite, and never cite a page number that does not appear in such a line. A page number is always a whole number; a dotted heading number inside a passage, such as "5.3", is a section and must never be cited as a page.
+                                1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, either [filename] or [filename, p. N]. Cite by copying that line exactly, the whole filename included: (filename) for a source without pages, (filename, p. N) only when the line has a page. Never add a page number that does not appear in such a line; a heading number inside a passage, such as "5.3", is never a page.
                                 2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
                                 3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
                                 4. Tone & Format: Be polite but direct - lead with the answer. No greetings, no restating the question, no thanking the user, no closing offers of further help. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
