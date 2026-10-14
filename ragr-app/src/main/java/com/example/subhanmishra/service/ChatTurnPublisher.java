@@ -1,6 +1,5 @@
 package com.example.subhanmishra.service;
 
-import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.config.SpringAiConfig;
@@ -96,16 +95,12 @@ public class ChatTurnPublisher {
             return;
         }
         try {
-            Resolution resolution = turn.resolution();
             ChatTurnCompleted event = new ChatTurnCompleted(turn.turnId(),
                                                             turn.origin(),
                                                             Instant.now(),
                                                             turn.conversationId(),
                                                             turn.query(),
-                                                            resolution.answer(),
-                                                            resolution.repaired(),
-                                                            resolution.abstained(),
-                                                            resolution.unresolved(),
+                                                            turn.answer(),
                                                             turn.retrieved().stream().map(RetrievedChunk::of).toList(),
                                                             modelOf(turn.response()),
                                                             ragProperties.topK(),
@@ -145,7 +140,7 @@ public class ChatTurnPublisher {
      * One finished turn, as {@code ChatService} hands it over.
      *
      * @param turnId     also returned to the caller, who quotes it back to give feedback
-     * @param resolution the answer after {@code CitationResolver} - the text the evaluation scores
+     * @param answer     the answer as the model wrote it, citations in place - the text evaluation scores
      * @param retrieved  the chunks in the prompt
      * @param excluded   the rest of the candidate pool, in rank order after them
      * @param response   the final model response, for its model, usage and finish reason; null when
@@ -155,7 +150,7 @@ public class ChatTurnPublisher {
                        TurnOrigin origin,
                        String conversationId,
                        String query,
-                       Resolution resolution,
+                       String answer,
                        List<Document> retrieved,
                        List<Document> excluded,
                        @Nullable ChatResponse response,

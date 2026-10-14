@@ -41,15 +41,15 @@ public class EvalTurnRepository {
                     query, answer, chat_model, prompt_version, pipeline_version, top_k, similarity_threshold,
                     pool_size, retrieval_millis, first_token_millis, total_millis, streamed, prompt_tokens,
                     completion_tokens, finish_reason, grounded, retrieved_count, pool_count, top_score,
-                    score_spread, citations_emitted, citations_valid, citations_fabricated, citations_repaired,
-                    citations_abstained, cited_context_precision, cited_precision_at_k, refused,
+                    score_spread, citations_emitted, citations_valid, citations_fabricated,
+                    cited_context_precision, cited_precision_at_k, refused,
                     echoed_instruction, answer_chars, judge_status, review_sample)
                 VALUES (:turnId, :origin, :runId, :caseId, :conversationId, :occurredAt, :receivedAt,
                     :query, :answer, :chatModel, :promptVersion, :pipelineVersion, :topK, :similarityThreshold,
                     :poolSize, :retrievalMillis, :firstTokenMillis, :totalMillis, :streamed, :promptTokens,
                     :completionTokens, :finishReason, :grounded, :retrievedCount, :poolCount, :topScore,
-                    :scoreSpread, :citationsEmitted, :citationsValid, :citationsFabricated, :citationsRepaired,
-                    :citationsAbstained, :citedContextPrecision, :citedPrecisionAtK, :refused,
+                    :scoreSpread, :citationsEmitted, :citationsValid, :citationsFabricated,
+                    :citedContextPrecision, :citedPrecisionAtK, :refused,
                     :echoedInstruction, :answerChars, :judgeStatus, :reviewSample)
                 ON CONFLICT (turn_id) DO NOTHING
                 """)
@@ -83,8 +83,6 @@ public class EvalTurnRepository {
                            .param("citationsEmitted", turn.citationsEmitted())
                            .param("citationsValid", turn.citationsValid())
                            .param("citationsFabricated", turn.citationsFabricated())
-                           .param("citationsRepaired", turn.citationsRepaired())
-                           .param("citationsAbstained", turn.citationsAbstained())
                            .param("citedContextPrecision", turn.citedContextPrecision())
                            .param("citedPrecisionAtK", turn.citedPrecisionAtK())
                            .param("refused", turn.refused())

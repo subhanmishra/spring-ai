@@ -62,7 +62,7 @@ class OnlineEvalServiceTest {
 
     private static ChatTurnCompleted turn(String answer, List<RetrievedChunk> retrieved, List<RetrievedChunk> excluded) {
         return new ChatTurnCompleted(UUID.randomUUID(), TurnOrigin.LIVE, Instant.now(), "conv-1",
-                                     "How does graceful shutdown work?", answer, 0, 0, List.of(), retrieved,
+                                     "How does graceful shutdown work?", answer, retrieved,
                                      "gemma4:e2b", 5, 0.6, ChatTurnCompleted.SCHEMA_VERSION, excluded, 10,
                                      new ChatTurnCompleted.Timings(2L, null, 20_000L, false),
                                      new ChatTurnCompleted.GenerationUsage(900, 60, "stop"), "abc123");

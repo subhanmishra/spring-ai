@@ -1,6 +1,5 @@
 package com.example.subhanmishra.event;
 
-import com.example.subhanmishra.citation.Citation;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.document.Document;
 
@@ -27,11 +26,8 @@ import java.util.stream.Stream;
  * @param occurredAt          when the answer finished, not when the event was sent
  * @param conversationId      also the Kafka record key, so one conversation's turns stay in order
  * @param query               the user's prompt
- * @param answer              the answer after {@code CitationResolver}, inline citations still in place -
+ * @param answer              the answer as the model wrote it, inline citations still in place -
  *                            what evaluation scores, not the stripped text the caller reads
- * @param citationsRepaired   section-number citations the resolver rewrote into pages
- * @param citationsAbstained  section-number citations it could not place, and left as written
- * @param unresolved          the citations behind {@code citationsAbstained}
  * @param retrieved           the chunks in the prompt, in rank order; empty for an ungrounded turn
  * @param chatModel           the model that answered, when the response reported it
  * @param topK                how many chunks retrieval was asked for
@@ -54,9 +50,6 @@ public record ChatTurnCompleted(UUID turnId,
                                 String conversationId,
                                 String query,
                                 String answer,
-                                int citationsRepaired,
-                                int citationsAbstained,
-                                List<Citation> unresolved,
                                 List<RetrievedChunk> retrieved,
                                 @Nullable String chatModel,
                                 int topK,
@@ -71,11 +64,13 @@ public record ChatTurnCompleted(UUID turnId,
     /**
      * Version 2 added the candidate pool, timings, usage and the prompt version - all as nullable boxed
      * types, because a version-1 event has none of them and Jackson 3 fails on a missing primitive.
+     * Version 3 removed the section-number repair counts ({@code citationsRepaired},
+     * {@code citationsAbstained}, {@code unresolved}); an older event still reads, its extra fields
+     * ignored, but an older consumer cannot read a version-3 event.
      */
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
 
     public ChatTurnCompleted {
-        unresolved = List.copyOf(unresolved);
         retrieved = List.copyOf(retrieved);
         excluded = excluded != null ? List.copyOf(excluded) : List.of();
     }

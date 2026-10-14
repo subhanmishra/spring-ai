@@ -258,10 +258,9 @@ public class GoldenEvalService {
                                               false);
 
             log.info("Eval case [{}] answered in {}ms: {} chunk(s), {} citation(s), {} fabricated, "
-                     + "{} section number(s) resolved, {} left unresolved, context precision {}, cited {}",
+                     + "context precision {}, cited {}",
                      goldenCase.id(), millis, scores.retrieval().retrievedCount(),
                      scores.citations().emitted(), scores.citations().fabricated(),
-                     turn.citationsRepaired(), turn.citationsAbstained(),
                      precision != null ? format(precision.averagePrecision()) : "n/a",
                      cited != null ? cited.relevanceAsString() : "n/a");
 

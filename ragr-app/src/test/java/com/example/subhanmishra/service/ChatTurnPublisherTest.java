@@ -1,7 +1,5 @@
 package com.example.subhanmishra.service;
 
-import com.example.subhanmishra.citation.Citation;
-import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import com.example.subhanmishra.config.EventsProperties;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.event.ChatTurnCompleted;
@@ -54,9 +52,7 @@ class ChatTurnPublisherTest {
                                            .metadata(Map.of("fileName", "manual.pdf", "pageNumber", 12))
                                            .score(0.77)
                                            .build();
-    private final Resolution resolution = new Resolution("Set server.port (manual.pdf, p. 12).", 1, 1,
-                                                         List.of(new Citation("manual.pdf", null, "5.3")),
-                                                         List.of());
+    private final String answer = "Set server.port (manual.pdf, p. 12).";
 
     private final Document belowThreshold = Document.builder()
                                                     .id("chunk-2")
@@ -68,7 +64,7 @@ class ChatTurnPublisherTest {
     /** A finished turn with one chunk in the prompt and one left in the pool. */
     private ChatTurnPublisher.Turn turn(String query) {
         ChatResponse response = ChatResponse.builder()
-                .generations(List.of(new Generation(new AssistantMessage(resolution.answer()),
+                .generations(List.of(new Generation(new AssistantMessage(answer),
                                                     ChatGenerationMetadata.builder().finishReason("stop").build())))
                 .metadata(ChatResponseMetadata.builder()
                                               .model("gemma4:e2b")
@@ -76,7 +72,7 @@ class ChatTurnPublisherTest {
                                               .build())
                 .build();
         return new ChatTurnPublisher.Turn(UUID.fromString("00000000-0000-0000-0000-000000000042"),
-                                          TurnOrigin.LIVE, "conv-1", query, resolution,
+                                          TurnOrigin.LIVE, "conv-1", query, answer,
                                           List.of(chunk), List.of(belowThreshold), response,
                                           new Timings(3L, null, 21_000L, false));
     }
@@ -124,9 +120,7 @@ class ChatTurnPublisherTest {
             assertThat(event.origin()).isEqualTo(TurnOrigin.LIVE);
             assertThat(event.topK()).isEqualTo(5);
             assertThat(event.similarityThreshold()).isEqualTo(0.6);
-            assertThat(event.answer()).isEqualTo(resolution.answer());
-            assertThat(event.citationsRepaired()).isEqualTo(1);
-            assertThat(event.citationsAbstained()).isEqualTo(1);
+            assertThat(event.answer()).isEqualTo(answer);
             assertThat(event.retrieved()).singleElement()
                                          .satisfies(c -> assertThat(c.text()).startsWith("[manual.pdf, p. 12]"));
             assertThat(event.turnId()).isEqualTo(UUID.fromString("00000000-0000-0000-0000-000000000042"));
@@ -214,7 +208,7 @@ class ChatTurnPublisherTest {
         }
 
         @Test
-        @DisplayName("still reads a version-1 event, which has none of the version-2 fields")
+        @DisplayName("still reads a version-1 event, which has none of the later fields and the repair counts since removed")
         void readsVersionOne() {
             String v1 = """
                     {"turnId":"00000000-0000-0000-0000-000000000001","origin":"LIVE",

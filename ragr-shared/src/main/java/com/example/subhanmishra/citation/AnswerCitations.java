@@ -3,11 +3,8 @@ package com.example.subhanmishra.citation;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.document.Document;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,36 +33,20 @@ public final class AnswerCitations {
      */
     private static final int MAX_SPAN_LENGTH = 402;
 
-    /**
-     * One bare section reference - "5.3", "Section 5.3", "see 5.3.1" - in the heading form
-     * {@code CitationResolver} matches: two or three components. The lookahead stops "5.3.1.2" matching
-     * as "5.3.1", which would turn a longer number into a reference to a different section.
-     */
-    private static final Pattern SECTION_REFERENCE = Pattern.compile(
-            "(?i)(?:see\\s+)?(?:(?:sections?|sec\\.|§)\\s*)?(\\d{1,2}(?:\\.\\d{1,2}){1,2})(?!\\.?\\d)");
-
-    /** What may separate bare section references in one span: "(5.3, 5.5.1)", "(5.3 and 5.4)". */
-    private static final Pattern SECTION_FILLER = Pattern.compile("(?i)(?:[\\s,;]|\\band\\b)*");
-
     private AnswerCitations() {
     }
 
-    /**
-     * What one turn's retrieved context offers to cite: the files, lower-cased, and the section numbers
-     * its chunks head, each with the file and page the heading sits on.
-     */
-    public record Context(Set<String> fileNames, Map<String, Citation> sections) {
+    /** What one turn's retrieved context offers to cite: the files, lower-cased. */
+    public record Context(Set<String> fileNames) {
 
-        public static final Context EMPTY = new Context(Set.of(), Map.of());
+        public static final Context EMPTY = new Context(Set.of());
 
         public Context {
             fileNames = Set.copyOf(fileNames);
-            sections = Map.copyOf(sections);
         }
 
         public static Context of(@Nullable List<Document> retrieved) {
-            return new Context(CitationParser.availableFileNames(retrieved),
-                               CitationResolver.resolvableSections(retrieved));
+            return new Context(CitationParser.availableFileNames(retrieved));
         }
     }
 
@@ -112,10 +93,6 @@ public final class AnswerCitations {
      * into it - "dependencies (manual.pdf, p. 42)." becomes "dependencies.". A span at the start of a
      * line takes the whitespace after it instead, so the line does not start with a space.
      *
-     * <p>Two kinds of span are removed: file citations, and bare section references like "(5.3)". A bare
-     * number counts only when it heads a retrieved page; otherwise "(3.14)" is a version or a decimal,
-     * and removing it would remove content.
-     *
      * <p>A span with anything else in it is left whole. Cutting the citation out of "(see the table on
      * manual.pdf, p. 42, for defaults)" would leave a broken sentence; one citation left in the text is
      * the smaller problem.
@@ -128,8 +105,7 @@ public final class AnswerCitations {
         int copiedTo = 0;
         Matcher spans = CitationParser.BRACKETED_SPAN.matcher(answer);
         while (spans.find()) {
-            if (!isCitationOnly(spans.group(1), context.fileNames())
-                    && sectionReferencesIn(spans.group(1), context).isEmpty()) {
+            if (!isCitationOnly(spans.group(1), context.fileNames())) {
                 continue;
             }
             int cutFrom = spans.start();
@@ -165,42 +141,6 @@ public final class AnswerCitations {
             consumedTo = inner.end();
         }
         return found && FILLER.matcher(spanContent.substring(consumedTo)).matches();
-    }
-
-    /**
-     * The distinct bare section references in the answer - each one {@link #strip} removes - in the
-     * order written. They are not counted by the citation metrics, which score file citations only;
-     * they are reported to the caller so that stripping them does not lose where they pointed.
-     */
-    public static List<String> bareSectionReferences(@Nullable String answer, Context context) {
-        if (answer == null || answer.isEmpty()) {
-            return List.of();
-        }
-        Set<String> sections = new LinkedHashSet<>();
-        Matcher spans = CitationParser.BRACKETED_SPAN.matcher(answer);
-        while (spans.find()) {
-            sections.addAll(sectionReferencesIn(spans.group(1), context));
-        }
-        return List.copyOf(sections);
-    }
-
-    /**
-     * The section numbers a span holds when it holds nothing else, every one of them heading a retrieved
-     * page - or an empty list when the span is anything more than that.
-     */
-    private static List<String> sectionReferencesIn(String spanContent, Context context) {
-        Matcher references = SECTION_REFERENCE.matcher(spanContent);
-        List<String> sections = new ArrayList<>();
-        int consumedTo = 0;
-        while (references.find()) {
-            if (!SECTION_FILLER.matcher(spanContent.substring(consumedTo, references.start())).matches()
-                    || !context.sections().containsKey(references.group(1))) {
-                return List.of();
-            }
-            sections.add(references.group(1));
-            consumedTo = references.end();
-        }
-        return SECTION_FILLER.matcher(spanContent.substring(consumedTo)).matches() ? sections : List.of();
     }
 
     private static boolean isHorizontalSpace(char c) {

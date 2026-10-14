@@ -46,7 +46,7 @@ public class ChatController {
             description = "Sends a prompt to the AI and gets a single, non-streaming response. The answer text " +
                     "carries no inline citations; the evidence is reported beside it instead - every retrieved " +
                     "source with its full text, each citation the model made checked against those sources " +
-                    "(VERIFIED, REPAIRED or UNVERIFIED), whether the answer was grounded at all, and token usage. " +
+                    "(VERIFIED or UNVERIFIED), whether the answer was grounded at all, and token usage. " +
                     "The conversation to continue is named in the X-Conversation-Id request header; the ID used " +
                     "(newly generated if none was supplied) is returned in the X-Conversation-Id response " +
                     "header so it can be passed back in on subsequent calls to continue the same conversation. " +

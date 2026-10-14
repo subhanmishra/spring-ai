@@ -9,8 +9,8 @@ here is a change to every application that uses it.** How the applications fit t
 
 | Package | Holds | Used by |
 |---|---|---|
-| `chunk` | `ChunkMetadata`: the metadata keys every stored chunk carries (`documentId`, `fileName`, `contentType`, `pageNumber`, `chunkIndex`, `blockType`, `tableIndex`, `tableRows`, `section`, `pipelineVersion`) | ragr-ingest writes them; ragr-app reads them; ragr-eval stores `section` and `pipelineVersion` with each evaluated turn |
-| `citation` | `CitationParser` reads the `[filename, p. N]` line at the start of a chunk, removes it with the `Section:` line under it, and reads `(filename, p. N)` citations in an answer. `CitationResolver` turns a section number cited as a page into that heading's page. `AnswerCitations` decides what counts as a citation and whether it is supported, and removes citations from the answer text | ragr-app to fix and remove citations, ragr-eval to score them - one implementation, so the response and the fabrication rate cannot disagree. ragr-ingest to write the header and find section headings, so chunk boundaries and citation fixing agree on what a heading is |
+| `chunk` | `ChunkMetadata`: the metadata keys every stored chunk carries (`documentId`, `fileName`, `contentType`, `pageNumber`, `chunkIndex`, `blockType`, `tableIndex`, `tableRows`, `section`, `project`, `projectVersion`, `sourceUrl`, `docKind`, `pipelineVersion`) | ragr-ingest writes them; ragr-app reads them; ragr-eval stores `section` and `pipelineVersion` with each evaluated turn |
+| `citation` | `CitationParser` reads the `[filename]` or `[filename, p. N]` line at the start of a chunk, removes it with the `Section:` line under it, and reads `(filename)` and `(filename, p. N)` citations in an answer. `AnswerCitations` decides what counts as a citation and whether it is supported, and removes citations from the answer text | ragr-app to report and remove citations, ragr-eval to score them - one implementation, so the response and the fabrication rate cannot disagree. ragr-ingest for the `Section:` line's prefix |
 | `embedding` | `TaskPrefixEmbeddingModel`: wraps the embedding model so every text sent to it starts with the model's task prefix (`app.embedding.task-prefix`). Only the request changes, never the stored text | ragr-ingest with the passage prefix, ragr-app with the query prefix |
 | `event` | The Kafka messages: `ChatTurnCompleted` (one finished answer - the chunks in the prompt and the rest of the pool, timings, token usage, the prompt version), `ChatFeedbackSubmitted` (a user's rating of one turn), and `TurnOrigin` (`LIVE` or `GOLDEN`) | ragr-app publishes, ragr-eval consumes |
 | `exception` | `ApiExceptionHandler`, the shared `ProblemDetail` error handling, and `ResourceNotFoundException` | all three, each through its own `@RestControllerAdvice` subclass |
@@ -28,7 +28,8 @@ here is a change to every application that uses it.** How the applications fit t
 
 - Add fields as nullable boxed types (`Integer`, not `int`). Jackson 3 fails on a missing primitive.
 - `schemaVersion` says which shape an event has. A version-1 event, with no pool, timings or usage,
-  must still read.
+  must still read. Version 3 removed the citation-repair counts: an older event still reads, its extra
+  fields ignored, but an older consumer cannot read version 3 - upgrade ragr-eval with ragr-app.
 - Events stay on the topic for its 3-day retention, so the old shape can come back if the consumer
   group's offsets are ever reset to replay them.
 

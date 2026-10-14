@@ -17,9 +17,6 @@ import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.citation.AnswerCitations;
 import com.example.subhanmishra.citation.Citation;
 import com.example.subhanmishra.citation.CitationParser;
-import com.example.subhanmishra.citation.CitationResolver;
-import com.example.subhanmishra.citation.CitationResolver.Repair;
-import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jspecify.annotations.Nullable;
@@ -88,7 +85,6 @@ public class ChatService {
      *       chunks the answer was built on are in its context, under
      *       {@link QuestionAnswerAdvisor#RETRIEVED_DOCUMENTS}. Searching again would not be the same
      *       search.</li>
-     *   <li>{@link CitationResolver} turns section numbers cited as pages back into pages.</li>
      *   <li>{@link ChatTurnPublisher} hands the turn to Kafka and returns at once, so evaluation is never
      *       on this path - not even when Kafka is down.</li>
      *   <li>{@link AnswerCitations} takes the inline citations out of the text; the caller gets them as
@@ -111,16 +107,16 @@ public class ChatService {
         }
 
         List<Document> retrieved = retrievedDocuments(response);
-        Resolution resolution = CitationResolver.resolve(answerOf(response.chatResponse()), retrieved);
+        String answer = answerOf(response.chatResponse());
         Timings timings = new Timings(retrievalMillis(response), null, millisSince(started), false);
-        chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, resolution,
+        chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, answer,
                                                              retrieved, excludedDocuments(response),
                                                              response.chatResponse(), timings));
 
         AnswerCitations.Context context = AnswerCitations.Context.of(retrieved);
-        List<CitationDto> citations = citations(resolution, retrieved, context);
+        List<CitationDto> citations = citations(answer, retrieved, context);
         return new ChatAnswerDto(turnId,
-                                 AnswerCitations.strip(resolution.answer(), context),
+                                 AnswerCitations.strip(answer, context),
                                  !retrieved.isEmpty(),
                                  sources(retrieved, citations),
                                  citations,
@@ -184,12 +180,12 @@ public class ChatService {
 
         Flux<ServerSentEvent<?>> closing = Flux.defer(() -> {
             List<Document> documents = retrieved.get();
-            Resolution resolution = CitationResolver.resolve(answer.toString(), documents);
+            String fullAnswer = answer.toString();
             Timings timings = new Timings(retrievalMillis.get(), firstTokenMillis.get(), millisSince(started), true);
-            chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, resolution,
+            chatTurnPublisher.publish(new ChatTurnPublisher.Turn(turnId, origin, conversationId, prompt, fullAnswer,
                                                                  documents, excluded.get(), last.get(), timings));
 
-            List<CitationDto> citations = citations(resolution, documents, context.get());
+            List<CitationDto> citations = citations(fullAnswer, documents, context.get());
             return token(stripper.finish(context.get())).concatWith(Flux.just(
                     ServerSentEvent.builder(new ChatSourcesDto(!documents.isEmpty(), sources(documents, citations)))
                                    .event("sources").build(),
@@ -240,19 +236,15 @@ public class ChatService {
         return documents instanceof List<?> list ? (List<Document>) list : List.of();
     }
 
-    /**
-     * One entry per distinct source cited, checked by the same rules evaluation uses. Bare section
-     * references such as "(5.3)" come last, as REPAIRED to their heading's page; evaluation does not count
-     * those.
-     */
-    private static List<CitationDto> citations(Resolution resolution, List<Document> retrieved,
+    /** One entry per distinct source cited, checked by the same rules evaluation uses. */
+    private static List<CitationDto> citations(String answer, List<Document> retrieved,
                                                AnswerCitations.Context context) {
         List<Citation> available = CitationParser.availableCitations(retrieved);
         Set<String> availableNames = context.fileNames();
         List<SourceKey> sourceKeys = retrieved.stream().map(SourceKey::of).toList();
 
         List<CitationDto> citations = new ArrayList<>();
-        for (Citation citation : CitationParser.parseAnswerCandidates(resolution.answer())) {
+        for (Citation citation : CitationParser.parseAnswerCandidates(answer)) {
             if (!AnswerCitations.isCitation(citation, availableNames)) {
                 continue;
             }
@@ -261,21 +253,8 @@ public class ChatService {
                                               CitationDto.Status.UNVERIFIED, null, citation.pageLabel()));
                 continue;
             }
-            Repair repair = resolution.repairOf(citation);
-            citations.add(new CitationDto(citation.fileName(), citation.pageNumber(),
-                                          repair != null ? CitationDto.Status.REPAIRED : CitationDto.Status.VERIFIED,
-                                          firstSourceRef(citation, sourceKeys),
-                                          repair != null ? repair.section() : null));
-        }
-        for (String section : AnswerCitations.bareSectionReferences(resolution.answer(), context)) {
-            Citation source = context.sections().get(section);
-            boolean alreadyCited = citations.stream().anyMatch(citation -> citation.status() != CitationDto.Status.UNVERIFIED
-                    && source.fileName().equalsIgnoreCase(citation.fileName())
-                    && source.pageNumber().equals(citation.page()));
-            if (!alreadyCited) {
-                citations.add(new CitationDto(source.fileName(), source.pageNumber(), CitationDto.Status.REPAIRED,
-                                              firstSourceRef(source, sourceKeys), section));
-            }
+            citations.add(new CitationDto(citation.fileName(), citation.pageNumber(), CitationDto.Status.VERIFIED,
+                                          firstSourceRef(citation, sourceKeys), null));
         }
         return List.copyOf(citations);
     }

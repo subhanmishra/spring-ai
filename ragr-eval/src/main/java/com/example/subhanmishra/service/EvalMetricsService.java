@@ -186,9 +186,6 @@ public class EvalMetricsService {
         for (String outcome : List.of("valid", "fabricated")) {
             counter(ONLINE + "citations.total", Tags.of("outcome", outcome));
         }
-        for (String outcome : List.of("repaired", "abstained")) {
-            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", outcome));
-        }
         for (String metric : JUDGE_METRICS) {
             counter(ONLINE + "judgements.errors.total", Tags.of("metric", metric));
             for (String outcome : List.of("pass", "fail")) {
@@ -316,23 +313,6 @@ public class EvalMetricsService {
     public void recordOnlineCitedPrecision(ContextPrecisionScores cited) {
         registry.summary(ONLINE + "cited.context.precision").record(cited.averagePrecision());
         registry.summary(ONLINE + "cited.precision.at.k").record(cited.precisionAtK());
-    }
-
-    /**
-     * Records what {@code CitationResolver} did to one answer's section-number citations.
-     *
-     * <p>A repair is a section number that resolved to a page the model was shown; an abstention is one
-     * that did not, and still counts as fabricated. <b>Watch the ratio.</b> Rising repairs are the known
-     * habit being corrected; rising abstentions are the model citing sections it was never given - real
-     * hallucination, which resolving cannot fix.
-     */
-    public void recordCitationResolution(int repaired, int abstained) {
-        if (repaired > 0) {
-            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", "repaired")).increment(repaired);
-        }
-        if (abstained > 0) {
-            counter(ONLINE + "citations.resolved.total", Tags.of("outcome", "abstained")).increment(abstained);
-        }
     }
 
     /**

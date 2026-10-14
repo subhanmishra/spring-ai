@@ -205,8 +205,6 @@ CREATE TABLE IF NOT EXISTS eval_turn
     citations_emitted     INT                      NOT NULL DEFAULT 0,
     citations_valid       INT                      NOT NULL DEFAULT 0,
     citations_fabricated  INT                      NOT NULL DEFAULT 0,
-    citations_repaired    INT                      NOT NULL DEFAULT 0,
-    citations_abstained   INT                      NOT NULL DEFAULT 0,
     cited_context_precision DOUBLE PRECISION,
     cited_precision_at_k  DOUBLE PRECISION,
     refused               BOOLEAN                  NOT NULL DEFAULT FALSE,

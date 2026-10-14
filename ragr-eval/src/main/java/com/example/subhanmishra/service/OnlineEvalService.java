@@ -8,8 +8,6 @@ import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalTurnRepository;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -39,8 +37,6 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 @Service
 public class OnlineEvalService {
-
-    private static final Logger log = LoggerFactory.getLogger(OnlineEvalService.class);
 
     private final EvalScoringService scoringService;
     private final EvalMetricsService metricsService;
@@ -73,12 +69,6 @@ public class OnlineEvalService {
         if (!properties.enabled() || !properties.online().enabled()) {
             return;
         }
-        metricsService.recordCitationResolution(turn.citationsRepaired(), turn.citationsAbstained());
-        if (!turn.unresolved().isEmpty()) {
-            log.debug("Left {} section-number citation(s) unresolved - they match no retrieved chunk: {}",
-                      turn.citationsAbstained(), turn.unresolved());
-        }
-
         List<Document> retrieved = turn.retrievedDocuments();
         EvalScores scores = scoringService.score(turn.answer(), retrieved);
         metricsService.recordOnline(scores);

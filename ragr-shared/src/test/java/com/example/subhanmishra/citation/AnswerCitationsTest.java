@@ -1,16 +1,11 @@
 package com.example.subhanmishra.citation;
 
-import com.example.subhanmishra.citation.CitationResolver.Repair;
-import com.example.subhanmishra.citation.CitationResolver.Resolution;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.ai.document.Document;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -18,9 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AnswerCitationsTest {
 
     private static final AnswerCitations.Context RETRIEVED = new AnswerCitations.Context(
-            Set.of("spring-boot-reference.pdf", "notes.docx"),
-            Map.of("5.3", new Citation("spring-boot-reference.pdf", 299),
-                   "5.5.1", new Citation("spring-boot-reference.pdf", 306)));
+            Set.of("spring-boot-reference.pdf", "notes.docx"));
 
     @Nested
     @DisplayName("strip")
@@ -73,33 +66,10 @@ class AnswerCitationsTest {
         }
 
         @Test
-        @DisplayName("removes bare section references that head a retrieved page, in every written form")
-        void removesBareSectionReferences() {
-            assertThat(AnswerCitations.strip("Exposed over HTTP (5.3). Loggers (Section 5.5.1) and "
-                                             + "paths (see 5.3, 5.5.1) too.", RETRIEVED))
-                    .isEqualTo("Exposed over HTTP. Loggers and paths too.");
-        }
-
-        @Test
-        @DisplayName("leaves a dotted number that heads no retrieved page - a version, a decimal")
-        void leavesUnknownNumbers() {
-            String answer = "Needs Java (17.0) and Spring Framework (6.1), with a ratio (0.75); see (5.3.1.2).";
+        @DisplayName("leaves a bracketed number alone - a section, a version, a decimal: it names no source")
+        void leavesBareNumbers() {
+            String answer = "Exposed over HTTP (5.3). Needs Java (17.0), with a ratio (0.75); see (Section 5.5.1).";
             assertThat(AnswerCitations.strip(answer, RETRIEVED)).isEqualTo(answer);
-        }
-
-        @Test
-        @DisplayName("leaves a span mixing a known section with anything unknown")
-        void leavesPartlyKnownSectionSpan() {
-            String answer = "Compare (5.3, 6.1) and (5.3 onwards).";
-            assertThat(AnswerCitations.strip(answer, RETRIEVED)).isEqualTo(answer);
-        }
-
-        @Test
-        @DisplayName("reports the bare references it strips, once each, in order")
-        void reportsBareReferences() {
-            assertThat(AnswerCitations.bareSectionReferences(
-                    "A (5.5.1). B (5.3). C (see 5.5.1). D (3.14).", RETRIEVED))
-                    .containsExactly("5.5.1", "5.3");
         }
 
         @Test
@@ -153,40 +123,6 @@ class AnswerCitationsTest {
 
             assertThat(stripper.accept("a (b", RETRIEVED)).isEqualTo("a");
             assertThat(stripper.accept("\nc", RETRIEVED)).isEqualTo(" (b\nc");
-        }
-    }
-
-    @Nested
-    @DisplayName("CitationResolver repairs")
-    class Repairs {
-
-        private static final Document PAGE_299 = new Document("""
-                [spring-boot-reference.pdf, p. 299]
-
-                5.3. Monitoring and Management over HTTP
-
-                If you are developing a web application, Spring Boot Actuator auto-configures all
-                enabled endpoints to be exposed over HTTP.""");
-
-        @Test
-        @DisplayName("records what each repair changed, once per distinct citation")
-        void recordsRepairs() {
-            Resolution resolution = CitationResolver.resolve(
-                    "Exposed (spring-boot-reference.pdf, p. 5.3). Again (spring-boot-reference.pdf, p. 5.3).",
-                    List.of(PAGE_299));
-
-            assertThat(resolution.repairs())
-                    .containsExactly(new Repair("spring-boot-reference.pdf", "5.3", 299));
-            assertThat(resolution.repairOf(new Citation("spring-boot-reference.pdf", 299)))
-                    .isEqualTo(new Repair("spring-boot-reference.pdf", "5.3", 299));
-            assertThat(resolution.repairOf(new Citation("spring-boot-reference.pdf", 42))).isNull();
-        }
-
-        @Test
-        @DisplayName("names each resolvable section with the file and page its heading sits on")
-        void resolvableSections() {
-            assertThat(CitationResolver.resolvableSections(List.of(PAGE_299)))
-                    .containsExactlyEntriesOf(Map.of("5.3", new Citation("spring-boot-reference.pdf", 299)));
         }
     }
 }

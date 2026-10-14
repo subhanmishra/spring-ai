@@ -17,10 +17,10 @@ public record SourceDto(
         @Schema(description = "Id of the document this chunk came from")
         String documentId,
 
-        @Schema(example = "spring-boot-reference.pdf")
+        @Schema(example = "01-spring-boot__028-reference-features-task-execution-and-scheduling.md")
         String fileName,
 
-        @Schema(description = "1-based page, absent for sources Tika reads whole (DOCX, XLSX, PPTX, HTML, TXT, MD, CSV)",
+        @Schema(description = "1-based PDF page, absent for sources without pages (Markdown, DOCX, XLSX, PPTX, HTML, TXT, CSV)",
                 example = "42")
         Integer page,
 

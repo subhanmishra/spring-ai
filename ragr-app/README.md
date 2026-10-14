@@ -32,13 +32,12 @@ flowchart TD
     id --> mem[MessageChatMemoryAdvisor<br/>adds the last 10 messages from Redis]
     mem --> qa[PooledQuestionAnswerAdvisor<br/>embeds the question with the query prefix<br/>and fetches a pool of 10 chunks]
     qa --> split{top 5 at or above 0.65?}
-    split -- in the prompt --> gen[gemma4:e2b answers<br/>each passage closed by an end marker,<br/>citing inline as filename, p. N]
+    split -- in the prompt --> gen[gemma4:e2b answers<br/>each passage closed by an end marker,<br/>citing inline as filename, or filename, p. N]
     split -- the rest of the pool --> pool[kept for evaluation]
     gen --> save[the turn is saved to Redis]
-    save --> res[CitationResolver<br/>section numbers turned into pages]
-    res --> pub[ChatTurnPublisher<br/>ChatTurnCompleted to Kafka, not awaited]
+    save --> pub[ChatTurnPublisher<br/>ChatTurnCompleted to Kafka, not awaited]
     pool --> pub
-    res --> strip[AnswerCitations<br/>inline citations taken out]
+    save --> strip[AnswerCitations<br/>inline citations taken out]
     strip --> out[turnId + answer + sources + citations]
     out -. client rates it .-> fb[POST /ai/turns/turnId/feedback<br/>ChatFeedbackSubmitted to Kafka]
 ```
@@ -52,10 +51,10 @@ Some details of each step:
   about the port?") retrieves poorly, because the conversation is not part of the search.
 - **Each passage in the prompt ends with `(end of passage)`.** Without it the model attached a passage
   to the source line of the next one and cited the wrong page.
-- **Fixing citations.** The model sometimes writes a section number where a page belongs: `p. 5.3`,
-  `p. 926` for section 9.2.6, or `p. 913.1` for 9.13.1. `CitationResolver` rewrites it to the page that
-  heading sits on, using only the chunks that were in the prompt. A page the model was actually shown
-  is never changed.
+- **Citations are reported as written.** Nothing rewrites them. On the old PDF corpus the model wrote
+  section numbers where pages belong (`p. 5.3`), and a resolver turned them back into pages. The Markdown
+  corpus has no pages to confuse, so the resolver was removed. A section number written as a page is
+  now simply `UNVERIFIED`.
 - **Streaming strips as it goes.** It holds back text only from an opening bracket to its close, so a
   citation split across tokens is still caught. The turn is published when the stream completes. A
   failed stream is not published, since a half-delivered answer is not an answer.
@@ -146,11 +145,12 @@ the streaming endpoint. An id sent in the body is ignored and starts a new conve
   "answer": "Starters bundle a curated set of dependencies ...",
   "grounded": true,
   "sources": [
-    { "ref": 1, "documentId": "8c1f…", "fileName": "spring-boot-reference.pdf", "page": 42,
-      "blockType": "prose", "score": 0.83, "excerpt": "<the chunk's full text>", "cited": true }
+    { "ref": 1, "documentId": "8c1f…", "fileName": "01-spring-boot__020-reference-using-build-systems.md",
+      "page": null, "blockType": "prose", "score": 0.83, "excerpt": "<the chunk's full text>", "cited": true }
   ],
   "citations": [
-    { "fileName": "spring-boot-reference.pdf", "page": 42, "status": "VERIFIED", "sourceRef": 1, "writtenPage": null }
+    { "fileName": "01-spring-boot__020-reference-using-build-systems.md", "page": null, "status": "VERIFIED",
+      "sourceRef": 1, "writtenPage": null }
   ],
   "usage": { "model": "gemma4:e2b", "promptTokens": 2018, "completionTokens": 495, "latencyMillis": 56381 }
 }
@@ -163,9 +163,8 @@ the streaming endpoint. An id sent in the body is ignored and starts a new conve
 - **`sources`** lists every chunk in the prompt, in rank order, with its full text.
 - **`citations`** lists each source the answer cites:
   - `VERIFIED` - it points at a source in the prompt.
-  - `REPAIRED` - the model wrote a section number (`p. 5.3`, `(5.3)`, `p. 926`) and it was resolved to
-    that heading's page. `writtenPage` keeps what the model wrote.
-  - `UNVERIFIED` - it points at nothing the model was given.
+  - `UNVERIFIED` - it points at nothing the model was given. When the model wrote something other than a
+    page number where the page belongs, `writtenPage` keeps it.
 
 A grounded answer takes tens of seconds on the reference machine, mostly spent reading the ~3,000-token
 prompt the retrieved chunks make.
