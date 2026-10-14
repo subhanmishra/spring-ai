@@ -227,10 +227,10 @@ public class EvalScoringService {
     }
 
     /**
-     * How well retrieval ordered the chunks, judged against the pages the case declared.
+     * How well retrieval ordered the chunks, judged against the pages or files the case declared.
      *
-     * <p>RAGAS's non-LLM context precision, except that relevance is by page - every chunk carries its
-     * page, and the dataset lists pages. Free: no model call.
+     * <p>RAGAS's non-LLM context precision, except that relevance is by page - or by file, for sources
+     * without pages - as every chunk's header names both. Free: no model call.
      *
      * <p><b>A floor, not a value.</b> The expected pages are the ones with the answer, not every page that
      * could help, so a useful chunk from an unlisted page counts as noise. Compare runs, not levels;
@@ -303,58 +303,80 @@ public class EvalScoringService {
         if (!goldenCase.scoresRecall()) {
             return null;
         }
-        List<Boolean> relevance = relevance(pool, goldenCase, goldenCase.expectedPages());
+        List<Boolean> relevance = relevance(pool, goldenCase, false);
         RetrievalRanking ranking = RetrievalRanking.of(
                 relevance.stream().map(relevant -> relevant ? RetrievalRanking.RELEVANT : 0).toList(), inContext);
 
-        Set<Integer> found = new HashSet<>();
+        // The expected pages, or files, that made it into the prompt.
+        Set<Object> found = new HashSet<>();
         for (int i = 0; i < inContext; i++) {
             if (relevance.get(i)) {
                 Citation header = CitationParser.parseHeader(pool.get(i).getText());
-                found.add(header.pageNumber());
+                found.add(goldenCase.scoresByFile() ? header.fileName().toLowerCase(Locale.ROOT) : header.pageNumber());
             }
         }
-        double pageRecall = goldenCase.expectedPagesMode() == GoldenCase.ExpectedPagesMode.ANY
+        GoldenCase.ExpectedMode mode = goldenCase.scoresByFile() ? goldenCase.expectedFilesMode() : goldenCase.expectedPagesMode();
+        int expected = goldenCase.scoresByFile()
+                ? lowerCased(goldenCase.expectedFiles()).size()
+                : new HashSet<>(goldenCase.expectedPages()).size();
+        double recall = mode == GoldenCase.ExpectedMode.ANY
                 ? (found.isEmpty() ? 0.0 : 1.0)
-                : (double) found.size() / new HashSet<>(goldenCase.expectedPages()).size();
-        String vector = relevance(pool, goldenCase, goldenCase.referencePages()).stream()
-                                                                             .map(relevant -> relevant ? "1" : "0")
-                                                                             .collect(Collectors.joining(","));
-        return new ReferenceScores(ranking, pageRecall, vector);
+                : (double) found.size() / expected;
+        String vector = relevance(pool, goldenCase, true).stream()
+                                                        .map(relevant -> relevant ? "1" : "0")
+                                                        .collect(Collectors.joining(","));
+        return new ReferenceScores(ranking, recall, vector);
     }
 
     /**
-     * @param ranking    rank metrics with expected-page chunks as the relevant ones
-     * @param pageRecall expected pages found in the prompt, honouring the case's mode
-     * @param relevance  the pool's reference-page vector, "1,0,0,0,1,0,0,1,0,0" - what the judge's
-     *                   chunk grades are calibrated against
+     * @param ranking    rank metrics with expected-page (or expected-file) chunks as the relevant ones
+     * @param pageRecall expected pages - or, for a file-level case, expected files - found in the prompt,
+     *                   honouring the case's mode
+     * @param relevance  the pool's reference vector, "1,0,0,0,1,0,0,1,0,0" - what the judge's chunk grades
+     *                   are calibrated against
      */
     public record ReferenceScores(RetrievalRanking ranking, double pageRecall, String relevance) {
     }
 
     /**
-     * Per-rank relevance against the given pages of the case, in rank order.
+     * Per-rank relevance against the case's expected pages or files, in rank order.
      *
-     * <p>The one definition of "relevant" by page; rank and precision both use it so they cannot drift.
+     * <p>The one definition of "relevant"; rank and precision both use it so they cannot drift.
      */
     private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase) {
-        return relevance(retrieved, goldenCase, goldenCase.expectedPages());
+        return relevance(retrieved, goldenCase, false);
     }
 
-    private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase, List<Integer> pages) {
+    /**
+     * By file when the case lists files - every chunk of an expected file is relevant, since a page-less
+     * source gives nothing finer to match - and otherwise by page, within {@code expectedFile}.
+     *
+     * @param reference whether the relevant pages or files count too, not only the expected ones
+     */
+    private List<Boolean> relevance(@Nullable List<Document> retrieved, GoldenCase goldenCase, boolean reference) {
         if (retrieved == null || !goldenCase.scoresRecall()) {
             return List.of();
         }
+        Set<String> files = lowerCased(reference ? goldenCase.referenceFiles() : goldenCase.expectedFiles());
+        List<Integer> pages = reference ? goldenCase.referencePages() : goldenCase.expectedPages();
+
         List<Boolean> relevance = new ArrayList<>(retrieved.size());
         for (Document document : retrieved) {
             Citation header = CitationParser.parseHeader(document.getText());
-            boolean fileMatches = header != null
-                    && (goldenCase.expectedFile() == null
-                        || goldenCase.expectedFile().equalsIgnoreCase(header.fileName()));
-            relevance.add(fileMatches
-                                  && header.pageNumber() != null
-                                  && pages.contains(header.pageNumber()));
+            if (header == null) {
+                relevance.add(false);
+            } else if (goldenCase.scoresByFile()) {
+                relevance.add(files.contains(header.fileName().toLowerCase(Locale.ROOT)));
+            } else {
+                boolean fileMatches = goldenCase.expectedFile() == null
+                                      || goldenCase.expectedFile().equalsIgnoreCase(header.fileName());
+                relevance.add(fileMatches && header.pageNumber() != null && pages.contains(header.pageNumber()));
+            }
         }
         return relevance;
+    }
+
+    private static Set<String> lowerCased(List<String> files) {
+        return files.stream().map(file -> file.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
     }
 }

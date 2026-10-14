@@ -38,7 +38,7 @@ traffic:
 
 | | Golden suite | Live traffic |
 |---|---|---|
-| **Retrieval** - Recall@K, Precision@K, MRR, NDCG | against hand-checked expected pages, over the candidate pool | from the judge grading every chunk in the candidate pool |
+| **Retrieval** - Recall@K, Precision@K, MRR, NDCG | against hand-checked expected files or pages, over the candidate pool | from the judge grading every chunk in the candidate pool |
 | **Generation** - faithfulness, relevance, completeness, citation correctness | the same judges, on a judged run | the same judges, on every sampled turn |
 | **End to end** - success, task breakdown, debugging matrix | case pass rate and the judges' verdict | the judges' verdict, thumbs up/down, "asked again", human review |
 
@@ -120,28 +120,29 @@ verdict with the judges'. That comparison is the evidence for whether the model 
 
 ## The golden suite
 
-11 questions in `src/main/resources/eval/golden-dataset.yaml`. Each case has:
+24 questions in `src/main/resources/eval/golden-dataset.yaml`, scored against the Markdown library. Each case has:
 
 | Field | Meaning |
 |---|---|
-| `expectedPages` | The pages that hold the answer, checked by reading the retrieved chunks rather than guessed |
-| `expectedPagesMode` | For several pages: whether the answer needs all of them or any one |
-| `relevantPages` | Other pages that hold part of the answer, found by reading a whole pool by hand. Used only to calibrate the judge |
+| `expectedFiles` | The files that hold the answer, for sources without pages such as Markdown: every chunk of one counts as relevant. Checked by reading the retrieved chunks rather than guessed |
+| `expectedFilesMode` | For several files: whether the answer needs all of them (`ALL`) or any one (`ANY`) - `ANY` where projects share a page word for word |
+| `relevantFiles` | Other files that hold part of the answer. Used only to calibrate the judge |
+| `expectedFile`, `expectedPages`, `expectedPagesMode`, `relevantPages` | The same, by page, for one paged file (a PDF). A case uses files or pages, never both |
 | `task` | The kind of question, for the per-task breakdown |
 | `mustContain`, `mustNotContain` | Phrases the answer must or must not contain, case-insensitive |
 | `mustNotMatch` | Regular expressions the answer must not match - for a wrong answer that uses the same words as a right one |
 
-On top of the live metrics, the suite adds those that need known-correct pages: page-level Recall@K,
-hit rate, MRR, and precision and NDCG with expected-page chunks as the relevant ones. A judged run
+On top of the live metrics, the suite adds those that need known-correct sources: file- or page-level
+Recall@K, hit rate, MRR, and precision and NDCG with expected chunks as the relevant ones. A judged run
 also stores each case's turn in `eval_turn`, judged by the same stages as live traffic.
 
 **Context precision is scored three ways**, because each way of deciding "was this chunk useful?" is
 wrong in its own direction:
 
-- *Expected pages* - useful if it is on a page the dataset lists. A floor: the lists hold the pages with
-  the answer, not every useful page.
-- *Cited* - used if the answer cites its page. Free and exact, but a passage used without a citation
-  counts as unused.
+- *Expected* - useful if it is in a file, or on a page, the dataset lists. A floor: the lists hold the
+  sources with the answer, not every useful one.
+- *Cited* - used if the answer cites its file (or page). Free and exact, but a passage used without a
+  citation counts as unused.
 - *Judged* - the judge says per chunk whether the answer used it. Read only its run average, as a trend.
 
 ```mermaid
@@ -231,7 +232,7 @@ sections, top to bottom:
 - **ragr-eval — live answers** - live turns in the time range, filtered by the **Task** variable. Also
   human verdicts (correct, partly correct, wrong), user feedback and response time; the judge compared with human reviewers and with thumbs up/down; the
   review queue and failing answers; a collapsed **Judge workload** row (skips, errors, time per answer);
-  and running totals (refusals, citation outcomes, section numbers repaired) and search scores under
+  and running totals (refusals, citation outcomes) and search scores under
   Detail.
 - **ragr-eval — golden test set** - the latest run, plus one point per run over the time range (30 days
   by default). The judge compared with the hand-checked pages; every case of the latest run with why it

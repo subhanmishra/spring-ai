@@ -10,7 +10,8 @@ import java.util.stream.Stream;
  * One case in the curated regression dataset.
  *
  * <p>Every field beyond {@code id} and {@code query} is an optional assertion, because useful cases come
- * in different shapes: a recall case lists {@code expectedPages}; a hallucination case sets
+ * in different shapes: a recall case lists {@code expectedFiles} (sources without pages, such as
+ * Markdown) or {@code expectedPages} (one paged file); a hallucination case sets
  * {@code expectGrounded: false} and expects no invented citation; a conversational case sets
  * {@code expectRefusal: false}, so the assistant keeps answering general questions.
  *
@@ -36,6 +37,12 @@ import java.util.stream.Stream;
  * @param mustNotMatch   regular expressions the answer must not match, ignoring case - for a wrong answer
  *                       that uses the right words. Compiled on load, so a bad pattern fails before any
  *                       question is asked
+ * @param expectedFiles  files that hold the answer, for sources without pages: every chunk of one counts
+ *                       as relevant. Takes the place of {@code expectedFile} and {@code expectedPages}
+ * @param expectedFilesMode {@code ALL} (default) or {@code ANY}, as {@code expectedPagesMode} - {@code ANY}
+ *                       when several files carry the same text, as the Spring Data modules' shared chapters do
+ * @param relevantFiles  other files holding part of the answer; like {@code relevantPages}, read only by
+ *                       the judge's calibration
  */
 public record GoldenCase(String id,
                          String query,
@@ -46,10 +53,13 @@ public record GoldenCase(String id,
                          List<String> mustNotContain,
                          Boolean expectGrounded,
                          Boolean expectRefusal,
-                         ExpectedPagesMode expectedPagesMode,
+                         ExpectedMode expectedPagesMode,
                          @Nullable TaskType category,
                          List<Integer> relevantPages,
-                         List<String> mustNotMatch) {
+                         List<String> mustNotMatch,
+                         List<String> expectedFiles,
+                         ExpectedMode expectedFilesMode,
+                         List<String> relevantFiles) {
 
     /** Normalises the optional collections to empty and the optional flags to their defaults. */
     public GoldenCase {
@@ -58,10 +68,17 @@ public record GoldenCase(String id,
         mustNotContain = mustNotContain != null ? List.copyOf(mustNotContain) : List.of();
         expectGrounded = expectGrounded == null || expectGrounded;
         expectRefusal = expectRefusal != null && expectRefusal;
-        expectedPagesMode = expectedPagesMode != null ? expectedPagesMode : ExpectedPagesMode.ALL;
+        expectedPagesMode = expectedPagesMode != null ? expectedPagesMode : ExpectedMode.ALL;
         relevantPages = relevantPages != null ? List.copyOf(relevantPages) : List.of();
         mustNotMatch = mustNotMatch != null ? List.copyOf(mustNotMatch) : List.of();
         mustNotMatch.forEach(Pattern::compile);
+        expectedFiles = expectedFiles != null ? List.copyOf(expectedFiles) : List.of();
+        expectedFilesMode = expectedFilesMode != null ? expectedFilesMode : ExpectedMode.ALL;
+        relevantFiles = relevantFiles != null ? List.copyOf(relevantFiles) : List.of();
+        if (!expectedFiles.isEmpty() && !expectedPages.isEmpty()) {
+            throw new IllegalArgumentException("Golden case " + id + " lists both expectedFiles and expectedPages; "
+                                               + "a case is scored by one or the other");
+        }
     }
 
     /** {@link #mustNotMatch}, compiled. */
@@ -71,7 +88,12 @@ public record GoldenCase(String id,
 
     /** Whether this case asserts anything about retrieval. Recall is not scored when it does not. */
     public boolean scoresRecall() {
-        return !expectedPages.isEmpty();
+        return !expectedPages.isEmpty() || !expectedFiles.isEmpty();
+    }
+
+    /** Whether relevance is decided by file - every chunk of an expected file - rather than by page. */
+    public boolean scoresByFile() {
+        return !expectedFiles.isEmpty();
     }
 
     /** Every page a chunk relevant to the question may come from: the expected pages and the relevant ones. */
@@ -79,8 +101,13 @@ public record GoldenCase(String id,
         return Stream.concat(expectedPages.stream(), relevantPages.stream()).distinct().toList();
     }
 
-    /** Whether an answer needs every expected page, or any one of them. */
-    public enum ExpectedPagesMode {
+    /** The file-level counterpart of {@link #referencePages}. */
+    public List<String> referenceFiles() {
+        return Stream.concat(expectedFiles.stream(), relevantFiles.stream()).distinct().toList();
+    }
+
+    /** Whether an answer needs every expected page or file, or any one of them. */
+    public enum ExpectedMode {
         ALL,
         ANY
     }

@@ -31,7 +31,7 @@ class EvalScoringServiceTest {
     }
 
     private static GoldenCase caseOf(String id, String query, List<Integer> pages, List<String> mustContain) {
-        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null, null, null);
+        return new GoldenCase(id, query, null, "manual.pdf", pages, mustContain, List.of(), true, false, null, null, null, null, null, null, null);
     }
 
     @Nested
@@ -239,13 +239,77 @@ class EvalScoringServiceTest {
                                           chunk("manual.pdf", 158, "spring.datasource.*", 0.70),
                                           chunk("manual.pdf", 999, "unrelated", 0.65));
             GoldenCase goldenCase = new GoldenCase("datasource", "q", null, "manual.pdf", List.of(158), List.of(),
-                                                   List.of(), true, false, null, null, List.of(400), null);
+                                                   List.of(), true, false, null, null, List.of(400), null, null, null, null);
 
             EvalScoringService.ReferenceScores reference = service.referenceScores(pool, 2, goldenCase);
 
             assertThat(reference.relevance()).isEqualTo("1,1,0");
             assertThat(reference.ranking().reciprocalRank()).isEqualTo(0.5);
             assertThat(reference.pageRecall()).isEqualTo(1.0);
+        }
+
+        /** A Markdown chunk: a citation line without a page, then the section line. */
+        private static Document markdownChunk(String fileName, String body, double score) {
+            return Document.builder()
+                           .text("[%s]\nSection: Spring Boot 4.1.1 > Task Execution\n\n%s".formatted(fileName, body))
+                           .metadata(Map.of("fileName", fileName))
+                           .score(score)
+                           .build();
+        }
+
+        private static GoldenCase fileCase(List<String> files, GoldenCase.ExpectedMode mode, List<String> relevantFiles) {
+            return new GoldenCase("executor", "q", null, null, null, List.of(), List.of(), true, false, null, null,
+                                  null, null, files, mode, relevantFiles);
+        }
+
+        @Test
+        @DisplayName("a file-level case counts every chunk of an expected file as relevant, ignoring case")
+        void fileLevelRelevance() {
+            List<Document> pool = List.of(markdownChunk("02-other.md", "unrelated", 0.80),
+                                          markdownChunk("01-spring-boot__028-task.md", "applicationTaskExecutor", 0.78),
+                                          markdownChunk("01-spring-boot__028-task.md", "more", 0.74));
+            GoldenCase goldenCase = fileCase(List.of("01-Spring-Boot__028-task.md"), null, null);
+
+            assertThat(goldenCase.scoresRecall()).isTrue();
+            assertThat(service.firstRelevantRank(pool, goldenCase)).isEqualTo(2);
+            assertThat(service.contextPrecision(pool, goldenCase).relevance()).containsExactly(false, true, true);
+            assertThat(service.referenceScores(pool, 3, goldenCase).pageRecall()).isEqualTo(1.0);
+        }
+
+        @Test
+        @DisplayName("file recall honours ALL and ANY, and relevant files widen only the judge's reference")
+        void fileRecallModes() {
+            List<Document> pool = List.of(markdownChunk("24-jpa__query-methods.md", "derived queries", 0.80),
+                                          markdownChunk("27-mongo__query-methods.md", "derived queries", 0.79),
+                                          markdownChunk("26-redis__query-methods.md", "derived queries", 0.60));
+            List<String> files = List.of("24-jpa__query-methods.md", "26-redis__query-methods.md");
+
+            assertThat(service.referenceScores(pool, 2, fileCase(files, GoldenCase.ExpectedMode.ALL, null)).pageRecall())
+                    .isEqualTo(0.5);
+            assertThat(service.referenceScores(pool, 2, fileCase(files, GoldenCase.ExpectedMode.ANY, null)).pageRecall())
+                    .isEqualTo(1.0);
+            assertThat(service.referenceScores(pool, 2, fileCase(files, null, List.of("27-mongo__query-methods.md"))).relevance())
+                    .isEqualTo("1,1,1");
+        }
+
+        @Test
+        @DisplayName("a cited page-less source marks its chunks as used")
+        void citedPrecisionWithoutPages() {
+            List<Document> retrieved = List.of(markdownChunk("01-spring-boot__028-task.md", "applicationTaskExecutor", 0.78),
+                                               markdownChunk("02-other.md", "unrelated", 0.70));
+
+            ContextPrecisionScores cited = service.citedPrecision("Name the bean applicationTaskExecutor "
+                                                                  + "(01-spring-boot__028-task.md).", retrieved);
+
+            assertThat(cited.relevance()).containsExactly(true, false);
+        }
+
+        @Test
+        @DisplayName("a case cannot be scored by files and pages at once")
+        void filesAndPagesAreExclusive() {
+            assertThatThrownBy(() -> new GoldenCase("both", "q", null, "manual.pdf", List.of(3), List.of(), List.of(), true,
+                                                    false, null, null, null, null, List.of("a.md"), null, null))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 
@@ -259,7 +323,7 @@ class EvalScoringServiceTest {
             // Guards the system prompt's General Knowledge capability. This is the case that breaks if
             // anyone restores QuestionAnswerAdvisor's stock "not prior knowledge" closing line.
             GoldenCase goldenCase = new GoldenCase("general", "what is a queue", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null, null, null, null);
 
             EvalScores scores = service.score(
                     "I don't have enough information to answer that.", List.of(), goldenCase);
@@ -284,7 +348,7 @@ class EvalScoringServiceTest {
         @DisplayName("an out-of-corpus case is not failed for retrieving nothing")
         void outOfCorpusCaseToleratesNoRetrieval() {
             GoldenCase goldenCase = new GoldenCase("out-of-corpus", "Acme revenue 2019", null, null,
-                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null);
+                                                   List.of(), List.of(), List.of(), false, false, null, null, null, null, null, null, null);
 
             EvalScores scores = service.score("I don't have data on Acme Corporation.", List.of(), goldenCase);
 
@@ -316,7 +380,7 @@ class EvalScoringServiceTest {
         @DisplayName("a malformed pattern fails when the dataset loads")
         void malformedPatternFailsAtLoad() {
             assertThatThrownBy(() -> new GoldenCase("bad", "q", null, null, null, null, null, null, null, null, null,
-                                                    null, List.of("(unclosed")))
+                                                    null, List.of("(unclosed"), null, null, null))
                     .isInstanceOf(java.util.regex.PatternSyntaxException.class);
         }
 
