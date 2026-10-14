@@ -1,68 +1,51 @@
 package com.example.subhanmishra.service;
 
+import com.example.subhanmishra.chunk.ChunkMetadata;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Covers the headings that move a chunk's section on. The case behind it: the manual's appendices are
- * numbered "10.A.11." and titled "Appendix A: ...", neither of which a numbered-heading match saw, so all
- * 315 appendix chunks were tagged with the last how-to section, "Use Testcontainers for integration testing".
+ * Covers what the {@code Section:} line of a chunk's header names. The product and version matter because
+ * several projects share pages word for word, and the section line is the only text that differs.
  */
 class DocumentIngestionServiceTest {
 
     @Test
-    @DisplayName("chapter and appendix titles count as headings, in order with the numbered ones")
-    void chapterAndAppendixTitles() {
-        String text = """
-                testing values to the Spring Environment.
+    @DisplayName("the line names the product and version, then the heading path")
+    void productVersionAndPath() {
+        Map<String, Object> metadata = Map.of(ChunkMetadata.SECTION, "Task Execution and Scheduling > Customizing the Executor",
+                                              ChunkMetadata.PROJECT, "Spring Boot",
+                                              ChunkMetadata.PROJECT_VERSION, "4.1.1");
 
-                Chapter 10. Appendices
-
-                Appendix A: Common Application properties
-
-                10.A.1. Core Properties
-                | debug | false | Enable debug logs. |
-                """;
-
-        assertThat(DocumentIngestionService.sectionHeadings(text))
-                .containsExactly("Chapter 10. Appendices", "Appendix A: Common Application properties",
-                                 "10.A.1. Core Properties");
+        assertThat(DocumentIngestionService.sectionLine(metadata))
+                .isEqualTo("Spring Boot 4.1.1 > Task Execution and Scheduling > Customizing the Executor");
     }
 
     @Test
-    @DisplayName("an appendix with no numbered sections still names itself")
-    void appendixWithoutNumberedSections() {
-        String text = """
-                Appendix C: Auto-configuration Classes
+    @DisplayName("an unversioned page names its product alone")
+    void unversionedPage() {
+        Map<String, Object> metadata = Map.of(ChunkMetadata.SECTION, "Circular dependency between beans > Fix",
+                                              ChunkMetadata.PROJECT, "Troubleshooting: playbook");
 
-                This appendix contains details of all of the auto-configuration classes.
-                """;
-
-        assertThat(DocumentIngestionService.sectionHeadings(text))
-                .containsExactly("Appendix C: Auto-configuration Classes");
+        assertThat(DocumentIngestionService.sectionLine(metadata))
+                .isEqualTo("Troubleshooting: playbook > Circular dependency between beans > Fix");
     }
 
     @Test
-    @DisplayName("a title broken across lines at a hyphen is joined")
-    void hyphenatedTitle() {
-        String text = """
-                Chapter 5. Spring Boot Actuator: Production-
-
-                ready Features
-
-                Spring Boot includes a number of additional features.
-                """;
-
-        assertThat(DocumentIngestionService.sectionHeadings(text))
-                .containsExactly("Chapter 5. Spring Boot Actuator: Production-ready Features");
+    @DisplayName("Markdown without front matter gets the heading path alone")
+    void noFrontMatter() {
+        assertThat(DocumentIngestionService.sectionLine(Map.of(ChunkMetadata.SECTION, "Notes > Setup")))
+                .isEqualTo("Notes > Setup");
     }
 
     @Test
-    @DisplayName("a mention of a chapter inside a sentence is not a heading")
-    void mentionInProse() {
-        assertThat(DocumentIngestionService.sectionHeadings("As described in Chapter 4. Spring Boot Features, set it."))
-                .isEmpty();
+    @DisplayName("a chunk with no section - every PDF and Tika chunk - gets no line, even with a product")
+    void noSectionNoLine() {
+        assertThat(DocumentIngestionService.sectionLine(Map.of(ChunkMetadata.PROJECT, "Spring Boot"))).isNull();
+        assertThat(DocumentIngestionService.sectionLine(Map.of(ChunkMetadata.PAGE_NUMBER, 12))).isNull();
     }
 }

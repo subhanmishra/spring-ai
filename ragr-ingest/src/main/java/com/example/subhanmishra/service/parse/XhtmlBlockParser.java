@@ -87,6 +87,17 @@ public final class XhtmlBlockParser {
     }
 
     /**
+     * Reads an HTML fragment, such as a {@code <table>} written inside a Markdown file. Unlike Tika's
+     * output this is not guaranteed to be well-formed XML ({@code <br>}), so the HTML parser reads it.
+     */
+    public static List<ContentBlock> parseHtml(String html) {
+        Collector collector = new Collector();
+        collector.walk(Jsoup.parseBodyFragment(html).body());
+        collector.flushProse();
+        return List.copyOf(collector.blocks);
+    }
+
+    /**
      * Walks the body in document order so prose and tables come out interleaved as they were written. A
      * table closes whatever prose preceded it, which is what stops the two from sharing a chunk later.
      */

@@ -9,11 +9,14 @@ How it fits with the other applications is in the [root README](../README.md).
 
 ## Design choices
 
-- **Tables are kept whole.** Parsing produces prose blocks and table blocks separately, so a chunk never
-  cuts through a table or mixes it with the text around it. A large table is split by rows, with its
-  header repeated in every piece.
-- **Every chunk says where it came from.** The citation line `[filename, p. N]` is part of the chunk's
-  text, embedded and stored with it. It is the only way the chat model knows which page it is reading.
+- **Tables and code are kept whole.** Parsing produces prose, table and code blocks separately, so a
+  chunk never cuts through a table or a code block. A large table is split by rows, with its header
+  repeated in every piece.
+- **Every chunk says where it came from.** The citation line `[filename, p. N]` - or `[filename]` for a
+  source without pages - is part of the chunk's text, embedded and stored with it. It is the only way the
+  chat model knows which document, and page, it is reading.
+- **Sections come only from real headings.** A Markdown `#` heading names the section a chunk is in. No
+  heading is ever guessed from plain text: on the PDF manual, guessing mislabelled about 2,400 chunks.
 - **One page per chunk.** PDF pages are parsed one at a time, so a chunk never spans two pages and its
   page number is always exact.
 - **All or nothing.** If any batch fails, every chunk already written for that document is deleted and
@@ -31,8 +34,8 @@ flowchart TD
     up[POST /api/v1/documents/upload] --> type{supported type?}
     type -- no --> r415[415, nothing stored]
     type -- yes --> meta[document_metadata: UPLOADING<br/>history row]
-    meta --> parse[parse into content blocks<br/>prose and tables kept apart]
-    parse --> chunk[chunk on the parse pool:<br/>paragraphs joined up to 400 tokens,<br/>a new chunk at each numbered heading,<br/>tables split by rows, header repeated]
+    meta --> parse[parse into content blocks<br/>prose, tables, code and headings kept apart]
+    parse --> chunk[chunk on the parse pool:<br/>paragraphs joined up to 400 tokens,<br/>a new chunk at each Markdown heading,<br/>code kept whole, tables split by rows]
     chunk --> proc[history row: PROCESSING]
     proc --> head[add the citation line and Section: line<br/>add the chunk metadata]
     head --> batch[batches of 35 chunks: the first alone,<br/>then up to 4 at once on virtual threads<br/>embed with the passage prefix,<br/>insert into vector_store]
@@ -46,28 +49,50 @@ flowchart TD
   from how the text lines up in columns (`table-detection`). Two things are removed because they offered
   the model a second, wrong page number to cite: the printed page numbers in footers, and the entries of
   a table of contents.
-- **Everything else** - DOCX, XLSX, PPTX, HTML, TXT, MD and CSV - goes through Apache Tika, whose XHTML
-  output keeps table markup. These formats have no pages, so their chunks have no page number.
+- **Markdown** (`.md`, `.markdown`) is read by `MarkdownBlockReader`, built on commonmark. Tika would
+  flatten a Markdown file to one line.
+  - **Front matter** (`project`, `version`, `online_url`, `kind`) becomes chunk metadata, not text.
+  - **Code blocks** keep their fences, language and indentation exactly, and are never cut at a blank
+    line. One bigger than the embedding model reads is cut at blank lines, then lines, and each piece is
+    fenced again.
+  - **Pipe tables** become table blocks. An HTML `<table>` is read the way Tika's tables are.
+  - **Links keep their text and lose their target**, outside code: doc URLs add tokens to every embedding
+    and say nothing.
+  - **Example tabs that repeat the Java one** - `**Kotlin**` and `**Xml**` beside `**Java**` - are
+    dropped (`app.ingestion.markdown.drop-tab-labels`). Other tab groups, such as Maven and Gradle, stay.
+  - **Converter leftovers** - a `[TABLE]` placeholder, an unresolved `include::` - are dropped with a
+    warning in the log.
+  - **A small table joins the prose around it** when it fits the chunk. Reference pages describe each
+    option in a sentence over a three-row table; kept apart, each made two chunks of about 80 tokens.
+- **Everything else** - DOCX, XLSX, PPTX, HTML, TXT and CSV - goes through Apache Tika, whose XHTML
+  output keeps table markup. These formats, and Markdown, have no pages, so their chunks have no page
+  number.
 
 ### What a stored chunk looks like
 
-```
-[spring-boot-reference.pdf, p. 301]
-Section: Customizing the Management Server Port
+````
+[01-spring-boot__028-reference-features-task-execution-and-scheduling.md]
+Section: Spring Boot 4.1.1 > Task Execution and Scheduling > Customizing the Executor
 
-Properties
-management.server.port=8081 ...
-```
+## Customizing the Executor
 
-- **The citation line** is the first line. For formats without pages it is just `[filename]`.
-- **The `Section:` line** appears when a chunk starts part-way through a numbered section. It tells the
-  model what the text is about when the heading fell in the chunk before. Without it, the model gave
-  this chunk's `management.server.port` as the way to move the *application* off port 8080. Chunks break
-  at numbered headings, so a chunk that opens with its own heading needs no section line.
-- **What counts as a heading.** Numbered sections (`9.17.5.`), appendix sections (`10.A.11.`), and the
-  chapter and appendix titles above them (`Chapter 10. Appendices`, `Appendix C: ...`). Without the last
-  two kinds, every appendix chunk was labelled with the last how-to section before it. A heading with
-  only a table under it opens that table's first chunk, rather than being stored as a chunk of one line.
+```java
+@Bean("applicationTaskExecutor")
+SimpleAsyncTaskExecutor applicationTaskExecutor() { ...
+```
+````
+
+- **The citation line** is the first line: `[filename]`, or `[filename, p. N]` for a PDF.
+- **The `Section:` line** names the product and version from the front matter, then the heading path
+  where the chunk starts. It tells the model what a chunk is about when its heading fell in the chunk
+  before - without it, the model once gave the actuator's `management.server.port` as the way to move
+  the *application* off port 8080. The product and version tell apart pages that several projects share
+  word for word. A page without a version (release notes, troubleshooting) names the product alone;
+  Markdown without front matter, the path alone.
+- **What counts as a heading.** Only a Markdown `#` heading. PDF and Tika chunks have no section line.
+  A chunk starts at a heading once the open one holds 80 tokens; a shorter tail joins the heading
+  instead. A heading with only a table or a large code block under it opens that block's first chunk,
+  rather than being stored as a chunk of one line.
 - **Anything that reads chunks back** - export, re-ranking, re-chunking - must remove both lines first,
   with `CitationParser.stripHeader`.
 
@@ -80,7 +105,8 @@ management.server.port=8081 ...
 | `chunkIndex` | Its position in the document |
 | `blockType` | `prose` or `table` |
 | `tableIndex`, `tableRows` | For table chunks only |
-| `section` | The heading it falls under: the first one inside it, or else the last one before it |
+| `section` | The Markdown heading path where it starts, `Task Execution and Scheduling > Customizing the Executor`; absent for PDF and Tika chunks |
+| `project`, `projectVersion`, `sourceUrl`, `docKind` | From a Markdown file's front matter (`project`, `version`, `online_url`, `kind`), when present |
 | `pipelineVersion` | A hash of everything that shaped it: the chunk settings, `IngestionProperties.PARSER_REVISION`, the embedding model and its task prefix |
 
 **Bump `PARSER_REVISION`** with any parsing change that alters chunk text. No setting changes in that
@@ -102,12 +128,13 @@ every document.** `batch-size`, `concurrency` and the retry settings only change
 
 | Property | Default | Purpose |
 |---|---|---|
-| `chunk-size` | `400` | Target chunk size, in **tokens**. Paragraphs are joined until the next would go over it. Tables are chunked separately, by rows |
+| `chunk-size` | `400` | Target chunk size, in **tokens**. Paragraphs are joined until the next would go over it. Tables are chunked separately, by rows; a code block over it gets a chunk of its own |
 | `min-chunk-length-to-embed` | `100` | A chunk shorter than this many **characters** is merged into the one before it - never thrown away |
 | `min-chunk-size-chars` | `150` | Where the splitter starts looking for a sentence end when cutting an over-long chunk. Not a minimum length |
 | `max-num-chunks` | `10000` | Most chunks per document |
-| `max-embed-tokens` | `2048` | The embedding model's input limit. Only a single very wide table row can go over it, and the parser warns when one does |
+| `max-embed-tokens` | `2048` | The embedding model's input limit. Code blocks are cut to fit under it; only a single very wide table row can go over it, and the parser warns when one does |
 | `table-detection` | `auto` | Find tables in PDFs: `off`, `auto`, `lattice` (ruling lines) or `stream` (text alignment). `auto` decides per page. `off` uses the plain page-text reader |
+| `markdown.drop-tab-labels` | `Kotlin, Xml` | Markdown example tabs dropped when their group also has a `Java` tab. Compared ignoring case; empty keeps every tab |
 | `batch-size` | `35` | Chunks per embedding call and insert. What it really controls is tokens: ~9,100 per batch at today's chunk size. Revisit it if `chunk-size` changes |
 | `concurrency` | `4` | Batches stored at once. Must stay well below the database pool size (20) |
 | `max-attempts` / `retry-backoff` | `3` / `2s` | Retries, only when the Ollama model runner cannot be reached. Every other failure fails at once |
@@ -137,8 +164,9 @@ curl "http://localhost:8081/api/v1/documents/<id>/history"
 OpenAPI docs: `http://localhost:8081/swagger-ui.html`.
 
 **Uploads are synchronous.** The request returns only once the document is fully stored, with the
-number of chunks created. A large document takes minutes - the 645-page, 13.6 MB reference manual takes
-3-4 minutes with the integrated GPU on - so set a generous client timeout.
+number of chunks created. A large document takes minutes - the old 645-page, 13.6 MB PDF manual took
+3-4 minutes with the integrated GPU on - so set a generous client timeout. A Markdown page takes under
+a second at the median and 26 s at most; the whole 1,935-page library took 50 minutes, one file at a time.
 
 **A failed upload leaves nothing searchable.** Every chunk already written is removed and the document
 is marked `FAILED`. Upload it again to retry.

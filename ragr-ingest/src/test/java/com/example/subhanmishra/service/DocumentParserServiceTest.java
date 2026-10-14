@@ -39,62 +39,183 @@ class DocumentParserServiceTest {
 
     @BeforeEach
     void setUp() {
-        IngestionProperties ingestionProperties = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 5, 10000, CEILING_TOKENS,
-                                                        200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
-        parserService = new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), ingestionProperties);
+        parserService = new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), properties(CHUNK_SIZE_TOKENS, 5));
     }
 
+    private static IngestionProperties properties(int chunkSize, int minChunkLengthToEmbed) {
+        return new IngestionProperties(chunkSize, 150, minChunkLengthToEmbed, 10000, CEILING_TOKENS, 200, 4, 3,
+                                       Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF,
+                                       new IngestionProperties.Markdown(List.of("Kotlin", "Xml")));
+    }
+
+    /** The production budget of 400 tokens, so a chunk can hold a section break's worth of text. */
+    private static DocumentParserService realisticBudget() {
+        return new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), properties(400, 5));
+    }
+
+    private static final String FILLER = "Gradle dependency substitution swaps the Netty starter for Undertow. ".repeat(10).strip();
+
     @Test
-    @DisplayName("a numbered section heading starts a new chunk, so the section is not buried in the last one")
-    void sectionHeadingStartsAChunk() {
-        // The case behind the rule: Gradle substitution text filling a chunk, then "9.3.3. Change the HTTP
-        // Port" trailing it. With room in the budget for both, the heading still opens its own chunk.
-        String previous = "Gradle dependency substitution swaps the Netty starter for Undertow. ".repeat(10).strip();
-        Document page = new Document(previous + "\n\n9.3.3. Change the HTTP Port\n\nSet server.port.", Map.of());
+    @DisplayName("a heading starts a new chunk once the open one holds enough, so the section is not buried")
+    void headingStartsAChunk() {
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Prose(FILLER), new ContentBlock.Heading(2, "Change the HTTP Port"),
+                        new ContentBlock.Prose("Set server.port.")), Map.of(), true);
 
-        List<Document> groups = realisticBudget().coalesceParagraphs(page);
-
-        assertThat(groups).extracting(Document::getText)
-                          .containsExactly(previous, "9.3.3. Change the HTTP Port\n\nSet server.port.");
+        assertThat(chunks).extracting(Document::getText)
+                          .containsExactly(FILLER, "## Change the HTTP Port\n\nSet server.port.");
     }
 
     @Test
     @DisplayName("a heading after only a short tail joins it, rather than leaving the tail as a chunk of noise")
     void headingAfterAShortTailJoinsIt() {
-        Document page = new Document("Short tail.\n\n9.3.3. Change the HTTP Port\n\nSet server.port.", Map.of());
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Prose("Short tail."), new ContentBlock.Heading(2, "Change the HTTP Port"),
+                        new ContentBlock.Prose("Set server.port.")), Map.of(), true);
 
-        assertThat(realisticBudget().coalesceParagraphs(page)).hasSize(1);
+        assertThat(chunks).hasSize(1);
     }
 
     @Test
-    @DisplayName("a number that is not a heading - a version, a list item - does not break a chunk")
-    void onlyHeadingsBreak() {
-        String previous = "Gradle dependency substitution swaps the Netty starter for Undertow. ".repeat(10).strip();
-        Document page = new Document(previous + "\n\n3.2.1 of the framework is required.\n\n1. Add the plugin.", Map.of());
+    @DisplayName("a numbered line in plain text is not a heading: PDF and Tika chunks get no section")
+    void plainTextNeverMakesASection() {
+        Document page = new Document(FILLER + "\n\n9.3.3. Change the HTTP Port\n\nSet server.port.", Map.of());
 
-        assertThat(realisticBudget().coalesceParagraphs(page)).hasSize(1);
+        List<Document> chunks = realisticBudget().coalesceParagraphs(page);
+
+        assertThat(chunks).hasSize(1);
+        assertThat(chunks.getFirst().getMetadata()).doesNotContainKey(ChunkMetadata.SECTION);
+    }
+
+    @Test
+    @DisplayName("each chunk records the heading path where it starts, and a heading forgets deeper ones")
+    void sectionIsTheHeadingPathAtTheStart() {
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Heading(1, "Task Execution"),
+                        new ContentBlock.Heading(2, "Customizing the Executor"),
+                        new ContentBlock.Prose(FILLER),
+                        new ContentBlock.Heading(3, "Thread Names"),
+                        new ContentBlock.Prose(FILLER),
+                        new ContentBlock.Heading(2, "Scheduling"),
+                        new ContentBlock.Prose(FILLER)), Map.of(), true);
+
+        assertThat(chunks).extracting(chunk -> chunk.getMetadata().get(ChunkMetadata.SECTION))
+                          .containsExactly("Task Execution > Customizing the Executor",
+                                           "Task Execution > Customizing the Executor > Thread Names",
+                                           "Task Execution > Scheduling");
     }
 
     @Test
     @DisplayName("a heading with only a table under it opens the table's chunk rather than being a chunk alone")
     void loneHeadingOpensItsTable() {
         String previous = "Templating properties configure the view engines Spring Boot supports. ".repeat(10).strip();
-        ContentBlock.Table table = new ContentBlock.Table(List.of("Key", "Default Value"),
-                                                          List.of(List.of("server.port", "8080")), null);
+        List<List<String>> rows = java.util.stream.IntStream.rangeClosed(1, 60)
+                                                            .mapToObj(i -> List.of("server.property-" + i, "value " + i))
+                                                            .toList();
+        ContentBlock.Table table = new ContentBlock.Table(List.of("Key", "Default Value"), rows, null);
 
         List<Document> chunks = realisticBudget().coalesceBlocks(
-                List.of(new ContentBlock.Prose(previous + "\n\n10.A.11. Server Properties"), table), Map.of());
+                List.of(new ContentBlock.Prose(previous), new ContentBlock.Heading(2, "Server Properties"), table), Map.of(), true);
 
-        assertThat(chunks).hasSize(2);
         assertThat(chunks.get(0).getText()).isEqualTo(previous);
-        assertThat(chunks.get(1).getText()).startsWith("10.A.11. Server Properties\n\n| Key |");
+        assertThat(chunks.get(1).getText()).startsWith("## Server Properties\n\n| Key |");
+        assertThat(chunks.get(1).getMetadata()).containsEntry(ChunkMetadata.SECTION, "Server Properties");
     }
 
-    /** The production budget of 400 tokens, so a chunk can hold a section break's worth of text. */
-    private static DocumentParserService realisticBudget() {
-        IngestionProperties properties = new IngestionProperties(400, 150, 5, 10000, CEILING_TOKENS, 200, 4, 3,
-                                                                 Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
-        return new DocumentParserService(new TokenTextSplitter(), ForkJoinPool.commonPool(), properties);
+    @Test
+    @DisplayName("in Markdown a small table joins the prose it belongs to")
+    void smallMarkdownTableJoinsProse() {
+        ContentBlock.Table small = new ContentBlock.Table(List.of("Name", "`layout`"), List.of(List.of("Type", "`LayoutType`")), null);
+
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Heading(4, "`layout`"), new ContentBlock.Prose("The type of archive."), small),
+                Map.of(), true);
+
+        assertThat(chunks).singleElement().satisfies(chunk -> assertThat(chunk.getText())
+                .isEqualTo("#### `layout`\n\nThe type of archive.\n\n| Name | `layout` |\n| --- | --- |\n| Type | `LayoutType` |"));
+    }
+
+    @Test
+    @DisplayName("a code block is never cut at its blank lines, and goes into a chunk whole")
+    void codeIsNeverSplitAtBlankLines() {
+        String code = "```java\nclass A {\n\n    void a() {}\n\n    void b() {}\n}\n```";
+
+        List<Document> chunks = realisticBudget().coalesceBlocks(
+                List.of(new ContentBlock.Prose(FILLER), new ContentBlock.Code("java", code), new ContentBlock.Prose("After.")),
+                Map.of(), true);
+
+        assertThat(chunks).anySatisfy(chunk -> assertThat(chunk.getText()).contains(code));
+    }
+
+    @Test
+    @DisplayName("a code block bigger than the embedding model reads is cut at blank lines, every piece fenced again")
+    void oversizedCodeIsSplitAndRefenced() {
+        String method = "    void method%d() {\n        System.out.println(\"a line that takes a few tokens %d\");\n    }\n";
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            body.append(method.formatted(i, i)).append('\n');
+        }
+        String code = "```java\nclass Big {\n" + body + "}\n```";
+
+        List<String> pieces = DocumentParserService.splitCode(code, 600);
+
+        assertThat(pieces).hasSizeGreaterThan(1);
+        assertThat(pieces).allSatisfy(piece -> {
+            assertThat(piece).startsWith("```java\n").endsWith("\n```");
+            assertThat(TokenCounter.count(piece)).isLessThanOrEqualTo(600);
+        });
+        assertThat(String.join("", pieces)).contains("method0()").contains("method299()");
+    }
+
+    @Test
+    @DisplayName("a chunk within the budget never reaches the splitter, which would cut it at its last line break")
+    void withinBudgetIsLeftAlone() {
+        String table = "Intro.\n\n| Name | `layout` |\n| --- | --- |\n| Type | `LayoutType` |";
+
+        assertThat(realisticBudget().splitIfOverBudget(new Document(table, Map.of(ChunkMetadata.BLOCK_TYPE, ChunkMetadata.PROSE))))
+                .extracting(Document::getText)
+                .containsExactly(table);
+    }
+
+    @Test
+    @DisplayName("a Markdown upload is read by the Markdown reader: front matter becomes chunk metadata")
+    void markdownUploadEndToEnd() {
+        String markdown = """
+                ---
+                title: "Task Execution"
+                project: "Spring Boot"
+                version: "4.1.1"
+                online_url: "https://docs.spring.io/spring-boot/reference/features/task-execution-and-scheduling.html"
+                ---
+
+                # Task Execution
+
+                Spring Boot auto-configures an `AsyncTaskExecutor`.
+
+                ```yaml
+                spring:
+                  task:
+                    execution:
+                      pool:
+                        max-size: 16
+                ```
+                """;
+
+        Map<String, Object> result = realisticBudget().parse(
+                new MockMultipartFile("file", "01-spring-boot__task.md", "text/markdown", markdown.getBytes(StandardCharsets.UTF_8)));
+
+        @SuppressWarnings("unchecked")
+        List<Document> chunks = ((Stream<Document>) result.get("documentStream")).toList();
+
+        assertThat(chunks).singleElement().satisfies(chunk -> {
+            assertThat(chunk.getText()).startsWith("# Task Execution\n\n")
+                                       .contains("```yaml\nspring:\n  task:\n    execution:\n      pool:\n        max-size: 16\n```")
+                                       .doesNotContain("online_url");
+            assertThat(chunk.getMetadata()).containsEntry(ChunkMetadata.PROJECT, "Spring Boot")
+                                           .containsEntry(ChunkMetadata.PROJECT_VERSION, "4.1.1")
+                                           .containsEntry(ChunkMetadata.SECTION, "Task Execution")
+                                           .containsKey(ChunkMetadata.SOURCE_URL);
+        });
     }
 
     @Test
@@ -188,8 +309,7 @@ class DocumentParserServiceTest {
     void noContentIsLostThroughTheWholePipeline() {
         // Built with the app's own splitter configuration, because the content loss came from the
         // interaction between the budget and the splitter's discard-below-floor behaviour.
-        IngestionProperties appLike = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
+        IngestionProperties appLike = properties(CHUNK_SIZE_TOKENS, 100);
         DocumentParserService service = new DocumentParserService(
                 new ChunkingConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 
@@ -212,8 +332,7 @@ class DocumentParserServiceTest {
     @Test
     @DisplayName("a short trailing piece is merged into the chunk before it, never dropped")
     void shortTailIsMergedNotDropped() {
-        IngestionProperties appLike = new IngestionProperties(CHUNK_SIZE_TOKENS, 150, 100, 10000, CEILING_TOKENS,
-                                                  200, 4, 3, Duration.ofSeconds(2), IngestionProperties.TableDetection.OFF);
+        IngestionProperties appLike = properties(CHUNK_SIZE_TOKENS, 100);
         DocumentParserService service = new DocumentParserService(
                 new ChunkingConfig().tokenTextSplitter(appLike), ForkJoinPool.commonPool(), appLike);
 

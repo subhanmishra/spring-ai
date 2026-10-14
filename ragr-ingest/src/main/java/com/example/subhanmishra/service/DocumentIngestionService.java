@@ -2,7 +2,6 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.citation.CitationParser;
-import com.example.subhanmishra.citation.CitationResolver;
 import com.example.subhanmishra.config.IngestionProperties;
 import com.example.subhanmishra.entity.DocumentMetadata;
 import com.example.subhanmishra.entity.DocumentStatus;
@@ -23,7 +22,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -37,9 +35,6 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -51,14 +46,6 @@ public class DocumentIngestionService {
     /** Fragments of the Go dial error Ollama returns when its model runner is not listening. */
     private static final List<String> RUNNER_UNAVAILABLE_MARKERS =
             List.of("dial tcp", "connection refused", "actively refused", "connectex");
-
-    /** A chapter or appendix title at the start of a line; see {@link #sectionHeadings}. */
-    private static final Pattern CHAPTER_TITLE =
-            Pattern.compile("(?m)^[ \\t]*((?:Chapter \\d{1,2}\\.|Appendix \\p{Lu}:)[ \\t]+\\S[^\\n]*)");
-
-    /** The number a section line leaves off: "9.17.5. ", "10.A.11. ", "Chapter 10. ". */
-    private static final Pattern SECTION_NUMBER =
-            Pattern.compile("^(?:Chapter \\d{1,2}\\.|\\d{1,2}(?:\\.(?:\\p{Lu}|\\d{1,2}))+\\.)\\s*");
 
     private final VectorStore vectorStore;
     private final DocumentHistoryService historyService;
@@ -246,10 +233,8 @@ public class DocumentIngestionService {
             throw new IllegalStateException("Parsing result did not contain a document stream.");
         }
 
+        // chunkIndex assumes this stream is sequential and in document order.
         AtomicInteger chunkIndex = new AtomicInteger(0);
-        // The current section carries forward from chunk to chunk, so this stream must be sequential and
-        // in document order - as chunkIndex also assumes.
-        AtomicReference<@Nullable String> currentSection = new AtomicReference<>();
         return documentStream.map(chunk -> {
             Map<String, Object> newMetadata = new HashMap<>(chunk.getMetadata());
             newMetadata.put(ChunkMetadata.DOCUMENT_ID, metadata.getId().toString());
@@ -257,19 +242,6 @@ public class DocumentIngestionService {
             newMetadata.put(ChunkMetadata.CONTENT_TYPE, metadata.getContentType());
             newMetadata.put(ChunkMetadata.CHUNK_INDEX, chunkIndex.getAndIncrement());
             newMetadata.put(ChunkMetadata.PIPELINE_VERSION, pipelineVersion);
-            List<String> headings = sectionHeadings(chunk.getText());
-            // The section the chunk starts in, read before its own headings move it on. Named in the
-            // header only when the chunk does not open with that heading.
-            boolean opensWithHeading = CitationResolver.opensWithSectionHeading(chunk.getText())
-                                       || CHAPTER_TITLE.matcher(chunk.getText()).lookingAt();
-            String openedIn = opensWithHeading ? null : currentSection.get();
-            String section = headings.isEmpty() ? currentSection.get() : headings.getFirst();
-            if (!headings.isEmpty()) {
-                currentSection.set(headings.getLast());
-            }
-            if (section != null) {
-                newMetadata.put(ChunkMetadata.SECTION, section);
-            }
 
             // Normalize page number metadata
             Object pageNumber = chunk.getMetadata().get("page_number");
@@ -279,45 +251,34 @@ public class DocumentIngestionService {
             if (pageNumber != null) {
                 newMetadata.put(ChunkMetadata.PAGE_NUMBER, pageNumber);
             }
-            return new Document(citationHeader(metadata.getFilename(), pageNumber, openedIn) + chunk.getText(), newMetadata);
+            return new Document(citationHeader(metadata.getFilename(), pageNumber, sectionLine(newMetadata)) + chunk.getText(),
+                                newMetadata);
         });
     }
 
     /**
-     * The headings in a chunk that move the current section on, in order: the numbered ones, and the
-     * chapter and appendix titles above them - {@code "Chapter 10. Appendices"}, {@code "Appendix C:
-     * Auto-configuration Classes"}. Without the titles, a chapter opening with prose, or an appendix with
-     * no numbered sections, inherits the last section of the chapter before - every appendix once carried
-     * "Use Testcontainers for integration testing". The titles only name a section: they neither split a
-     * chunk nor resolve a citation.
+     * What the {@code Section:} line names: the product and version from the front matter, then the
+     * heading path - {@code "Spring Boot 4.1.1 > Task Execution and Scheduling > Customizing the
+     * Executor"}. Null when the chunk has no section, so PDF and Tika chunks get no line. A page without a
+     * version, such as a release note, names the product alone; a page without front matter, the path
+     * alone.
      */
-    static List<String> sectionHeadings(String text) {
-        record Mark(int at, String title) {
+    static @Nullable String sectionLine(Map<String, Object> chunkMetadata) {
+        String section = ChunkMetadata.asString(chunkMetadata.get(ChunkMetadata.SECTION));
+        if (section == null || section.isBlank()) {
+            return null;
         }
-        List<Mark> marks = new ArrayList<>();
-        int from = 0;
-        for (String heading : CitationResolver.sectionHeadings(text)) {
-            int at = text.indexOf(heading, from);
-            marks.add(new Mark(at, heading));
-            from = at + heading.length();
-        }
-        Matcher title = CHAPTER_TITLE.matcher(text);
-        while (title.find()) {
-            String line = title.group(1).strip();
-            // "Chapter 5. Spring Boot Actuator: Production-" continues on the next line.
-            if (line.endsWith("-")) {
-                String rest = text.substring(title.end()).strip();
-                int lineEnd = rest.indexOf('\n');
-                line += (lineEnd < 0 ? rest : rest.substring(0, lineEnd)).strip();
-            }
-            marks.add(new Mark(title.start(1), line));
-        }
-        return marks.stream().sorted(Comparator.comparingInt(Mark::at)).map(Mark::title).toList();
+        String product = Stream.of(chunkMetadata.get(ChunkMetadata.PROJECT), chunkMetadata.get(ChunkMetadata.PROJECT_VERSION))
+                               .map(ChunkMetadata::asString)
+                               .filter(value -> value != null && !value.isBlank())
+                               .collect(Collectors.joining(" "));
+        return product.isEmpty() ? section : product + " > " + section;
     }
 
     /**
-     * Builds the header at the start of every chunk's text: the citation line {@code [manual.pdf, p. 590]},
-     * and a {@code Section:} line when the chunk starts part-way through a section.
+     * Builds the header at the start of every chunk's text: the citation line - {@code [manual.pdf, p. 590]}
+     * for a paged source, {@code [file.md]} otherwise - and a {@code Section:} line when the chunk has a
+     * section.
      *
      * <p><b>Why it is part of the text, not only metadata.</b> Spring AI builds the prompt from each
      * chunk's text and drops its metadata, so a page number kept only in metadata could never reach the
@@ -329,8 +290,8 @@ public class DocumentIngestionService {
      * <p><b>Why the section line.</b> A chunk can start with an example whose heading fell in the chunk
      * before, and then nothing in it says what the example configures. Naming the section fixed answers
      * that took the actuator's {@code management.server.port} for the application's own port, where a
-     * prompt rule had not. The number is left off the title so the model is not offered a section number
-     * where it should cite a page.
+     * prompt rule had not. The product and version also tell apart pages that several projects share
+     * word for word.
      */
     private static String citationHeader(String fileName, Object pageNumber, @Nullable String section) {
         // Formats without pages get no page: a wrong citation is worse than a missing one.
@@ -341,8 +302,7 @@ public class DocumentIngestionService {
         if (section == null) {
             return citation + "\n\n";
         }
-        String title = SECTION_NUMBER.matcher(section).replaceFirst("");
-        return citation + "\n" + CitationParser.SECTION_LINE_PREFIX + title + "\n\n";
+        return citation + "\n" + CitationParser.SECTION_LINE_PREFIX + section + "\n\n";
     }
 
     // Splits the chunks into batches. This collects the whole stream first.

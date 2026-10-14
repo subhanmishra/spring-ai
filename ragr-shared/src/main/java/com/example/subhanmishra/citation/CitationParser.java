@@ -39,9 +39,10 @@ public final class CitationParser {
     public static final Pattern CITATION_LINE = Pattern.compile("^\\[[^\\]\\n]*]$");
 
     /**
-     * Starts the optional second header line, naming the section a chunk begins inside:
-     * {@code Section: Customizing the Management Server Port}. {@link #stripHeader} removes it with the
-     * citation line. {@code DocumentIngestionService.citationHeader} writes it, and says why.
+     * Starts the optional second header line, naming the product and the heading path a chunk begins
+     * under: {@code Section: Spring Boot 4.1.1 > Task Execution and Scheduling > Customizing the Executor}.
+     * {@link #stripHeader} removes it with the citation line. {@code DocumentIngestionService.citationHeader}
+     * writes it, and says why.
      */
     public static final String SECTION_LINE_PREFIX = "Section: ";
 

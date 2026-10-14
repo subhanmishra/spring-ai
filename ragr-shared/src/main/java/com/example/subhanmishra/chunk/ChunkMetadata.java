@@ -41,12 +41,24 @@ public final class ChunkMetadata {
     public static final String TABLE_ROWS = "tableRows";
 
     /**
-     * The numbered section the chunk belongs to, as its heading line - {@code "9.2.6. Set the Active
-     * Spring Profiles"}: the first heading inside the chunk, or else the last one before it in the same
-     * document. Absent before the first heading and for documents with none. Evaluation groups metrics
-     * and the human review view by it.
+     * The heading path where the chunk starts, outermost first - {@code "Task Execution and Scheduling >
+     * Customizing the Executor"}. Only from headings the source marks as such (Markdown {@code #}), never
+     * guessed from plain text, so PDFs and Tika documents have none. Evaluation groups metrics and the
+     * human review view by it.
      */
     public static final String SECTION = "section";
+
+    /** The product a Markdown page documents, from its front matter ({@code project}). */
+    public static final String PROJECT = "project";
+
+    /** The documented version, from the front matter ({@code version}); absent for unversioned pages. */
+    public static final String PROJECT_VERSION = "projectVersion";
+
+    /** Where the page lives online, from the front matter ({@code online_url}). */
+    public static final String SOURCE_URL = "sourceUrl";
+
+    /** The kind of page, from the front matter ({@code kind}), e.g. {@code troubleshooting}; for filtering. */
+    public static final String DOC_KIND = "docKind";
 
     /**
      * A short hash of everything that decides a chunk's content and vector - the chunk settings, the

@@ -140,6 +140,8 @@ app:
                                  # a single very wide table row can go over
     table-detection: auto        # off | auto | lattice | stream. auto decides per page. Anything but off
                                  # replaces the PDF reader, so prose is read differently too.
+    markdown:
+      drop-tab-labels: Kotlin, Xml   # example tabs dropped when the same group has a Java tab
     batch-size: 35               # chunks per embedding call. Cost follows tokens, not chunks: ~9.1k per
                                  # batch at today's mean of 261 tokens a chunk. Revisit if chunk-size changes.
     concurrency: 4               # batches written at once; well below the pool's 20 connections
