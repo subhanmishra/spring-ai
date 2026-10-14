@@ -1,18 +1,26 @@
-suite: spring-boot-reference
-corpus: spring-boot-reference.pdf
+suite: spring-docs-library
+corpus: spring-docs-library (Markdown, Spring Boot 4.1.1 stack, 1,935 pages)
 description: >-
-  Regression suite for the RAG pipeline, scored against the 645-page Spring Boot reference manual.
+  Regression suite for the RAG pipeline, scored against the Markdown documentation library of the Spring
+  Boot 4.1.1 stack: Boot, Framework, Cloud, Security, Kafka, Micrometer, Spring AI, Spring Data, release
+  notes, Spring Guides and a troubleshooting pack. Every page is uploaded under its library path with
+  "/" replaced by "__", and the file names below depend on that.
 
-  Every expectedPages value below was VERIFIED against the live corpus rather than guessed: each query
-  was run through the retrieval probe and the returned chunk text was read to confirm the page really
-  does contain the answer. A page that merely scored well was not accepted. Re-verify them after any
-  change that alters chunking, because page attribution comes from the chunk's citation header and a
-  different chunking produces different page boundaries.
+  Every expectedFiles value below was VERIFIED against the live corpus rather than guessed: each query
+  was run through the retrieval probe (top 10, no threshold) and the returned chunk text was read to
+  confirm the file really does contain the answer. A file that merely scored well was not accepted.
+  Verified 14 Oct 2026 on pipeline version 341bf7945c6b (12,444 chunks). Re-verify them after any change
+  that alters chunking or the upload names.
+
+  The cases are file-level: Markdown has no pages, so a chunk is relevant when it comes from an expected
+  file. expectedFilesMode says how recall reads a case with several files: ALL when the answer needs
+  every one, ANY when each answers on its own - the Spring Data modules, for one, repeat the same
+  chapter word for word.
 
   The suite deliberately mixes three kinds of case, because a dataset of nothing but "find the right
-  page" questions would miss most of the ways this pipeline has actually broken:
+  file" questions would miss most of the ways this pipeline has actually broken:
 
-    - recall cases, which assert a specific page is retrieved;
+    - recall cases, which assert a specific file is retrieved;
     - grounding cases, where the corpus cannot answer and the correct behaviour is to answer anyway
       without inventing a citation;
     - capability cases, which guard the system prompt's promise to handle ordinary conversation
@@ -20,184 +28,297 @@ description: >-
 
   Each case carries a category from the same closed task set live turns are classified into
   (CONFIG_LOOKUP, HOW_TO, TROUBLESHOOTING, CONCEPTUAL, GENERAL), so golden and live results break down
-  the same way.
-
-  expectedPagesMode says how page recall reads a case with several expected pages: ALL when the answer
-  needs every one, ANY when each answers on its own. Like the pages themselves, it is decided by reading
-  the chunk text.
-
-  relevantPages lists the further pages whose chunks in the candidate pool state part of the answer -
-  found by reading every chunk of the pool of a judged run in full and grading it by hand. They exist to
-  calibrate the chunk-grading judge: against expectedPages alone, the judge's correct calls on these
-  pages counted as disagreements. Recall, hit rate and MRR ignore them. They are page-level, so a page
-  listed here also makes its other chunks "relevant", and they describe one pool: a retrieval change
-  that brings a new page into the pool leaves it unlisted until someone reads it.
+  the same way. mustContain tokens are exact - a property, a class, an annotation - each checked to
+  appear in an expected file.
 
 cases:
+
+  # --- Spring Boot ---------------------------------------------------------------------------------
 
   - id: actuator-http-exposure
     query: How are actuator endpoints exposed over HTTP, and what URL prefix do they use?
     description: >-
-      Baseline retrieval case. Page 277 states the /actuator prefix and the mapping rule directly, and
-      is retrieved at a comfortable margin (0.87 against a 0.65 threshold), so a failure here means
-      something has broken in embedding or chunking rather than that the question was marginal.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [277, 278]
-    # Verified 6 Oct 2026: p. 277 alone states both the /actuator prefix and the id-to-URL mapping;
-    # 278 continues the endpoint table. Either page answers, so recall does not require both.
-    expectedPagesMode: ANY
+      Baseline retrieval case: the endpoints page states the /actuator prefix and the exposure
+      properties, and holds 7 of the top 10 (top 0.810). A failure here means embedding or chunking
+      broke rather than that the question was marginal.
+    expectedFiles: [01-spring-boot__087-reference-actuator-endpoints.md]
     category: CONCEPTUAL
-    # Verified 6 Oct 2026 by reading the pool: p. 299 opens section 5.3, which states the /actuator
-    # prefix again; p. 281 shows the management.endpoints.web.exposure.include setting.
-    relevantPages: [281, 299]
+    relevantFiles: [01-spring-boot__088-reference-actuator-monitoring.md]
     mustContain:
-      - actuator
-
-  - id: logging-level-property
-    query: Which property sets the log level for a specific logger, and what values does it accept?
-    description: >-
-      Asserts an exact property name reaches the answer. Pages 111 and 112 carry
-      logging.level.<logger-name> and the TRACE..OFF value list across a page boundary, which makes
-      this the case most sensitive to paragraph coalescing: the answer needs both halves, and they are
-      in different chunks because coalescing never spans a page.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [111, 112]
-    # Both halves are needed - see the description.
-    expectedPagesMode: ALL
-    category: CONFIG_LOOKUP
-    # Verified 6 Oct 2026 by reading the pool: p. 306 lists TRACE..OFF for the loggers endpoint; p. 582
-    # describes the logging.level property's keys and values in the metadata appendix.
-    relevantPages: [306, 582]
-    mustContain:
-      - logging.level
-
-  - id: profiles-activation
-    query: How do I activate a specific Spring profile?
-    description: >-
-      Page 107 names spring.profiles.active explicitly. A dotted property name is a good mustContain
-      token precisely because a model cannot paraphrase it - either it came from the context or it did
-      not.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [107]
-    category: HOW_TO
-    # Verified 6 Oct 2026 by reading the pool: p. 372 is the "Set the Active Spring Profiles" how-to;
-    # p. 108 shows --spring.profiles.active and setAdditionalProfiles.
-    relevantPages: [108, 372]
-    mustContain:
-      - spring.profiles.active
-
-  - id: starter-parent-purpose
-    query: What does the spring-boot-starter-parent POM provide to a project that uses it?
-    description: >-
-      Page 32 describes the dependency-management section and the Maven defaults. Retrieved at 0.80.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [32]
-    category: CONCEPTUAL
-    # Verified 6 Oct 2026 by reading the pool: p. 35 says the parent POM gives the project its run goal.
-    relevantPages: [35]
-    mustContain:
-      - spring-boot-starter-parent
-
-  - id: datasource-pool-configuration
-    query: How is a DataSource connection pool configured, and what happens if I define my own DataSource bean?
-    description: >-
-      Page 158 states both halves - the spring.datasource.* properties and the rule that defining your
-      own bean disables auto-configuration. A two-part question, which is where a retrieval system that
-      returns only the single best-matching chunk starts to show.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [158]
-    category: HOW_TO
-    # Verified 6 Oct 2026 by reading the pool: p. 159 continues the pool settings; pp. 400, 401, 403 and
-    # 404 are the custom-DataSource how-to, which says Boot reuses your bean and auto-configuration backs
-    # off. pp. 402 and 405 were read and left out: Hikari's jdbcUrl caveat and a second DataSource.
-    relevantPages: [159, 400, 401, 403, 404]
-    mustContain:
-      - spring.datasource
-
-  - id: executable-jar-maven-plugin
-    query: How do I use the Spring Boot Maven plugin to build an executable jar?
-    description: >-
-      Page 427 carries the actual plugin XML. Included because a code block is chunked differently
-      from prose and is a common casualty of a chunking change.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [343, 427]
-    # Verified 6 Oct 2026: p. 427 has the plugin XML, p. 343 the fully-executable-jar caveats. Each is a
-    # separate route to an answer, not two halves of one, so either counts as full recall.
-    expectedPagesMode: ANY
-    category: HOW_TO
-    # Verified 6 Oct 2026 by reading the pool: p. 36 adds the plugin and runs mvn package - the most
-    # direct answer in the pool. pp. 426, 428, 359 and 604 were read and left out: classifiers, a
-    # non-executable jar, an overview and the jar format appendix mention the plugin without the steps.
-    relevantPages: [36]
-    mustContain:
-      - spring-boot-maven-plugin
+      - /actuator
 
   - id: actuator-port-separation
     query: How do I make the actuator endpoints listen on a different port from the main application?
     description: >-
-      Page 419 answers this, and the case is here as a trap. The near-miss question "how do I change
-      the server port" retrieves this same page - the manual's own wording is about the ACTUATOR port -
-      so a pipeline that conflates the two looks correct on one phrasing and is wrong on the other.
-      Asserting the actuator phrasing pins down which of the two the corpus actually supports.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [419]
+      The how-to (rank 1, 0.792) and the monitoring page both give management.server.port. The pair to
+      port-in-use-startup-failure below: the property that is right here is the wrong answer there.
+    expectedFiles:
+      - 01-spring-boot__111-how-to-actuator.md
+      - 01-spring-boot__088-reference-actuator-monitoring.md
+    expectedFilesMode: ANY
     category: HOW_TO
-    # Verified 6 Oct 2026 by reading the pool: p. 300 is "Customizing the Management Server Port"; p. 294
-    # names management.server.port as how the actuator gets a separate port.
-    relevantPages: [294, 300]
     mustContain:
-      - management.server
+      - management.server.port
 
   - id: port-in-use-startup-failure
     query: My application fails to start because port 8080 is already in use. How do I fix it?
     description: >-
-      A troubleshooting question phrased the way a user hits it - by the symptom, not the feature. Page
-      64 shows the exact APPLICATION FAILED TO START report a FailureAnalyzer prints for this, and its
-      action: stop the process holding the port or listen on another one. Retrieved first, at 0.70.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [64]
+      A troubleshooting question phrased by the symptom. The failure-analyzer page shows the exact
+      APPLICATION FAILED TO START report and its action (rank 1, 0.816); the web server how-to gives
+      server.port. Carried over from the PDF suite for its trap: in Oct 2026 the model told users to set
+      the actuator's management.server.port to move the application.
+    expectedFiles:
+      - 29-troubleshooting__01-startup-failure-reports__017-port-in-use.md
+      - 01-spring-boot__101-how-to-webserver.md
+    expectedFilesMode: ANY
     category: TROUBLESHOOTING
-    # Verified 6 Oct 2026 by reading the pool: p. 376 gives server.port=0 for a free port - another way
-    # out, ranked 8th and so cut off by top-k. Since chunks break at section headings, p. 375 opens with
-    # "9.3.3. Change the HTTP Port" - server.port itself - and ranks 3rd, in context.
-    relevantPages: [375, 376]
-    # No mustContain: p. 64 names no property, and "server.port" is a substring of the wrong answer.
-    # The wrong answer is what is asserted against: on 6 Oct 2026 the model told users to set the
-    # actuator's management.server.port to move the application, in every one of four answers.
-    # A pattern, not mustNotContain, because a right answer can name the property too, as an aside
-    # about the management port - which failed this case once in run 8 after the fixes. So the property
-    # fails unless "management port" or "management server port" comes within 120 characters before it.
-    # Checked against the 15 answers to this question that named it on 6 Oct 2026: all 12 that offered
-    # it as the application's port fail, all 3 labelled asides pass.
+    # The property fails unless "management port" or "management server port" comes within 120
+    # characters before it, which lets a correctly labelled aside through. Checked against 15 answers on
+    # 6 Oct 2026: all 12 that offered it as the application's port fail, all 3 asides pass.
     mustNotMatch:
       - '(?<!\bmanagement (?:server )?port\b[\s\S]{0,120})management\.server\.port'
 
-  - id: autoconfig-not-applied
-    query: Auto-configuration is not doing what I expect. How can I find out why a particular auto-configuration was or was not applied?
+  - id: logging-level-property
+    query: Which property sets the log level for a specific logger, and what values does it accept?
     description: >-
-      The harder troubleshooting case, kept for what it shows about retrieval. Page 364 answers it
-      directly - the ConditionEvaluationReport, shown with DEBUG logging or by the actuator's conditions
-      endpoint - but ranks only 5th (0.771, probed 7 Oct 2026), the last chunk into the prompt, behind
-      pages about writing and testing auto-configurations that share every keyword. Page 590 gives the
-      short version (--debug, or the conditions endpoint) but is no longer in the top 10. A drop here
-      means 364 fell one place, out of the prompt - which is what the "relevant but cut off" panel
-      exists to show.
-    expectedFile: spring-boot-reference.pdf
-    expectedPages: [364, 590]
-    # Verified 6 Oct 2026: each page names both routes to the report on its own, so either counts as
-    # full recall.
-    expectedPagesMode: ANY
+      An exact property name reaches the answer. The logging page ranks 1st (0.735) beside the
+      loggers endpoint and the logging playbook entry, which both mention levels too.
+    expectedFiles: [01-spring-boot__024-reference-features-logging.md]
+    category: CONFIG_LOOKUP
+    relevantFiles: [01-spring-boot__091-reference-actuator-loggers.md, 29-troubleshooting__03-playbook__009-logging-config.md]
+    mustContain:
+      - logging.level
+
+  - id: devtools-restart-exclude
+    query: How do I stop DevTools from restarting the application when files under a particular folder change?
+    description: >-
+      A YAML/properties answer (spring.devtools.restart.exclude or additional-exclude). The devtools
+      page fills all ten slots, so this guards that its config examples survived parsing.
+    expectedFiles: [01-spring-boot__018-reference-using-devtools.md]
+    category: CONFIG_LOOKUP
+    mustContain:
+      - spring.devtools.restart
+
+  - id: custom-task-executor
+    query: How do I register my own AsyncTaskExecutor so that Spring MVC and @EnableAsync both use it?
+    description: >-
+      A code answer: a bean named applicationTaskExecutor (rank 1, 0.757). The page's Java examples had
+      Kotlin twins, which ingestion drops; a Kotlin "fun applicationTaskExecutor" in the answer means
+      the twin came back.
+    expectedFiles: [01-spring-boot__028-reference-features-task-execution-and-scheduling.md]
+    category: HOW_TO
+    mustContain:
+      - applicationTaskExecutor
+    mustNotMatch:
+      - '\bfun\s+applicationTaskExecutor\b'
+
+  # --- Spring Framework ----------------------------------------------------------------------------
+
+  - id: bean-scopes
+    query: What bean scopes does the Spring Framework support, and which ones need a web-aware ApplicationContext?
+    description: >-
+      The scopes page opens with a table of the six scopes (rank 1, 0.849, and 7 of the top 10).
+    expectedFiles: [04-spring-framework__014-core-beans-factory-scopes.md]
+    category: CONCEPTUAL
+    mustContain:
+      - prototype
+
+  - id: aop-advice-ordering
+    query: When two aspects have advice on the same join point, how is the order they run in decided?
+    description: >-
+      The @AspectJ advice page's "Advice Ordering" section: Ordered or @Order on the aspect. The schema
+      AOP page (rank 2) says the same for XML aspects.
+    expectedFiles: [04-spring-framework__081-core-aop-ataspectj-advice.md]
+    category: CONCEPTUAL
+    relevantFiles: [04-spring-framework__085-core-aop-schema.md]
+    mustContain:
+      - Order
+
+  - id: mvc-handler-arguments
+    query: Which method arguments can a Spring MVC @RequestMapping handler method declare?
+    description: >-
+      The method-arguments page is one large table - one of the 101 tables the first Markdown conversion
+      lost as a "[TABLE]" placeholder, so this case guards that gap. Rank 2 (0.817), behind the handler
+      methods overview.
+    expectedFiles: [04-spring-framework__173-web-webmvc-mvc-controller-ann-methods-arguments.md]
+    category: CONFIG_LOOKUP
+    relevantFiles: [04-spring-framework__172-web-webmvc-mvc-controller-ann-methods.md]
+    mustContain:
+      - '@RequestParam'
+
+  # --- Security, Cloud, Data, Kafka, Spring AI -----------------------------------------------------
+
+  - id: security-csrf-disable
+    query: How do I disable CSRF protection in Spring Security for a servlet application, and when is that safe?
+    description: >-
+      The servlet CSRF page holds 6 of the top 10 (0.834); the reactive page ranks 5th - the right
+      product but the wrong stack, which the section line names.
+    expectedFiles: [19-spring-security__105-servlet-exploits-csrf.md]
+    category: HOW_TO
+    relevantFiles: [19-spring-security__018-features-exploits-csrf.md]
+    mustContain:
+      - csrf
+
+  - id: gateway-path-predicate
+    query: How do I route requests to a backend by URL path in Spring Cloud Gateway?
+    description: >-
+      Gateway documents the Path predicate twice, for the WebMvc and the WebFlux server. The WebMvc
+      predicates page ranks 3rd (0.752); the WebFlux one is not in the top 10. Either answers.
+    expectedFiles:
+      - 11-spring-cloud-gateway__071-spring-cloud-gateway-server-webmvc-gateway-request-predicates.md
+      - 11-spring-cloud-gateway__007-spring-cloud-gateway-server-webflux-request-predicates-factories.md
+    expectedFilesMode: ANY
+    category: HOW_TO
+
+  - id: config-server-git
+    query: How do I point Spring Cloud Config Server at a Git repository for its configuration?
+    description: >-
+      spring.cloud.config.server.git.uri appears in four places: the server overview (rank 2), the Git
+      backend page (rank 4), the quickstart and the centralized-configuration guide (rank 1). Any of them
+      answers.
+    expectedFiles:
+      - 08-spring-cloud-config__002-server.md
+      - 08-spring-cloud-config__004-server-environment-repository-git-backend.md
+      - 08-spring-cloud-config__043-quickstart.md
+      - 28-spring-guides__050-gs-centralized-configuration.md
+    expectedFilesMode: ANY
+    category: CONFIG_LOOKUP
+    mustContain:
+      - spring.cloud.config.server.git.uri
+
+  - id: derived-query-keywords
+    query: Which keywords can I use in Spring Data derived query method names, such as findByLastnameAndFirstname?
+    description: >-
+      Every Spring Data module repeats the keyword table, in its query-methods page and its keyword
+      reference - the case the section line's product name exists for. Any module's copy answers. The
+      relational module's pages hold the top 7.
+    expectedFiles:
+      - 24-spring-data-jpa__010-jpa-query-methods.md
+      - 24-spring-data-jpa__026-repositories-query-keywords-reference.md
+      - 25-spring-data-relational__028-jdbc-query-methods.md
+      - 25-spring-data-relational__042-r2dbc-query-methods.md
+      - 25-spring-data-relational__018-repositories-query-keywords-reference.md
+      - 26-spring-data-redis__040-repositories-query-keywords-reference.md
+      - 27-spring-data-mongodb__044-mongodb-repositories-query-methods.md
+      - 27-spring-data-mongodb__052-repositories-query-keywords-reference.md
+    expectedFilesMode: ANY
+    category: CONFIG_LOOKUP
+
+  - id: jpa-entity-graph
+    query: How do I use @EntityGraph on a Spring Data JPA repository query method to load an association eagerly?
+    description: >-
+      A module-specific question. Rank 1 (0.769) as phrased; asked without the annotation's name the
+      same page fell to 9th, behind the JPA guide - noted for whoever rephrases it.
+    expectedFiles: [24-spring-data-jpa__010-jpa-query-methods.md]
+    category: HOW_TO
+    mustContain:
+      - '@EntityGraph'
+
+  - id: kafka-listener-errors
+    query: How do I handle exceptions thrown by a @KafkaListener and send failed records to a dead-letter topic?
+    description: >-
+      The annotation error-handling page holds 9 of the top 10 (0.844), with DefaultErrorHandler and
+      DeadLetterPublishingRecoverer in code.
+    expectedFiles: [20-spring-kafka__047-kafka-annotation-error-handling.md]
+    category: HOW_TO
+    mustContain:
+      - DeadLetterPublishingRecoverer
+
+  - id: spring-ai-chat-memory
+    query: How do I give a Spring AI ChatClient memory of the earlier messages in a conversation?
+    description: >-
+      The chat memory page holds 9 of the top 10 (0.811). This application itself uses the answer,
+      MessageChatMemoryAdvisor.
+    expectedFiles: [23-spring-ai__059-api-chat-memory.md]
+    category: HOW_TO
+    mustContain:
+      - MessageChatMemoryAdvisor
+
+  # --- Release notes and guides: content the PDFs did not have --------------------------------------
+
+  - id: boot4-starter-renames
+    query: When migrating to Spring Boot 4.0, which starter replaces spring-boot-starter-web?
+    description: >-
+      The migration guide's starter table maps spring-boot-starter-web to spring-boot-starter-webmvc.
+      The guide fills all ten slots (0.841).
+    expectedFiles: [00-release-notes-and-migration__001-spring-boot-4-0-migration-guide.md]
+    category: CONFIG_LOOKUP
+    mustContain:
+      - spring-boot-starter-webmvc
+
+  - id: guide-rest-service
+    query: Walk me through building a simple RESTful web service with Spring Boot that returns a JSON greeting.
+    description: >-
+      The REST service guide (rank 1, 0.836) beside its CORS and reactive variants, which share most of
+      the text. Guides carry the Boot version they target in their section line.
+    expectedFiles: [28-spring-guides__002-gs-rest-service.md]
+    category: HOW_TO
+    relevantFiles: [28-spring-guides__008-gs-rest-service-cors.md]
+    mustContain:
+      - '@RestController'
+
+  # --- Troubleshooting pack ------------------------------------------------------------------------
+
+  - id: startup-no-such-bean
+    query: >-
+      My app fails with APPLICATION FAILED TO START: Parameter 0 of constructor in com.example.OrderService
+      required a bean of type 'com.example.PaymentClient' that could not be found. What does it mean and
+      how do I fix it?
+    description: >-
+      A pasted startup report. The no-such-bean failure-analyzer page ranks 3rd (0.737) among other
+      failure reports that share its wording - the closest call in the suite, so a drop here is the
+      first sign of a retrieval regression.
+    expectedFiles: [29-troubleshooting__01-startup-failure-reports__001-no-such-bean.md]
+    category: TROUBLESHOOTING
+
+  - id: lazy-initialization-exception
+    query: >-
+      I get LazyInitializationException: could not initialize proxy - no Session when I read an entity's
+      collection outside the repository. How do I fix it?
+    description: >-
+      A runtime problem by its exception. The playbook entry holds the top 4 (0.850).
+    expectedFiles: [29-troubleshooting__03-playbook__025-lazy-initialization.md]
+    category: TROUBLESHOOTING
+
+  - id: moved-health-indicator
+    query: >-
+      After upgrading to Spring Boot 4, my import of org.springframework.boot.actuate.health.HealthIndicator
+      no longer compiles. Where does HealthIndicator live now?
+    description: >-
+      An exact-identifier lookup, kept as the hybrid-search tripwire. The upgrade map that lists the
+      move (013) is not in the top 10: embeddings do not match a fully qualified class name. The answer
+      is still reachable, because the actuator endpoints page's examples import the new package (rank
+      1, 0.793). If both stop being retrieved, keyword search is the fix, not a rephrase.
+    expectedFiles:
+      - 29-troubleshooting__02-upgrade-breakages__013-boot-classes-actuate-health.md
+      - 01-spring-boot__087-reference-actuator-endpoints.md
+    expectedFilesMode: ANY
     category: TROUBLESHOOTING
     mustContain:
-      - debug
+      - org.springframework.boot.health.contributor
+
+  - id: renamed-logging-property
+    query: After upgrading to Spring Boot 4.1, my logging.file.max-history setting has no effect. What property replaces it?
+    description: >-
+      The second exact-identifier lookup, and the one that works on embeddings alone: the 4.1
+      configuration changelog ranks 1st (0.777) and the property-changes map 2nd (0.769), both naming
+      logging.logback.rollingpolicy.max-history.
+    expectedFiles:
+      - 29-troubleshooting__02-upgrade-breakages__093-property-changes.md
+      - 00-release-notes-and-migration__007-spring-boot-4-1-configuration-changelog.md
+    expectedFilesMode: ANY
+    category: TROUBLESHOOTING
+    mustContain:
+      - logging.logback.rollingpolicy.max-history
+
+  # --- Grounding and capability ----------------------------------------------------------------------
 
   - id: out-of-corpus-no-fabrication
     query: What were the total quarterly revenue figures for Acme Corporation in 2019?
     description: >-
-      Nothing in a Spring Boot manual can answer this. The failure being guarded against is not a wrong
-      answer but a CONFIDENT one - the model attaching a plausible page number to an answer it invented.
-      expectGrounded false means any citation emitted here is by definition fabricated. Note this case
-      is not judged by the LLM judges: with no usable context there is nothing to judge against.
+      Nothing in the library can answer this; its best chunk scores 0.552, well under the 0.65
+      threshold. The failure being guarded against is a CONFIDENT answer - the model attaching a
+      plausible citation to something it invented.
     expectGrounded: false
     category: GENERAL
 
@@ -206,9 +327,9 @@ cases:
     description: >-
       Guards capability 2 of the system prompt, which promises to answer general questions that are not
       in the uploaded documents. This is the case that fails if anyone restores QuestionAnswerAdvisor's
-      stock closing line ("Given the context ... and not prior knowledge ... inform the user that you
-      can't answer"), which SpringAiConfig.QA_PROMPT_TEMPLATE softens for exactly this reason. A
-      refusal here is a regression even though it looks like caution.
+      stock closing line, which SpringAiConfig.QA_PROMPT_TEMPLATE softens for exactly this reason. Note:
+      on this corpus its best chunk (RabbitMQ consumer properties) scores 0.658, just over the
+      threshold, so one or two unrelated chunks reach the prompt.
     expectGrounded: false
     expectRefusal: false
     category: GENERAL
