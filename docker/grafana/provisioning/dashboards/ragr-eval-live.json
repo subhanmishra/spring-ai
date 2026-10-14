@@ -76,7 +76,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT h.created_at AS \"time\", 'Indexed ' || COALESCE(m.filename, 'a document since deleted') AS \"text\", 'ingest' AS \"tags\" FROM public.document_metadata_history h LEFT JOIN public.document_metadata m ON m.id = h.document_metadata_id WHERE h.status = 'INDEXED' AND $__timeFilter(h.created_at)",
+          "rawSql": "WITH h AS (\n  SELECT h.created_at AS t, m.filename,\n         CASE WHEN lag(h.created_at) OVER (ORDER BY h.created_at) IS NULL\n                OR h.created_at - lag(h.created_at) OVER (ORDER BY h.created_at) > interval '10 minutes'\n              THEN 1 ELSE 0 END AS starts\n  FROM public.document_metadata_history h\n  LEFT JOIN public.document_metadata m ON m.id = h.document_metadata_id\n  WHERE h.status = 'INDEXED' AND $__timeFilter(h.created_at)\n), b AS (SELECT t, filename, sum(starts) OVER (ORDER BY t) AS batch FROM h)\nSELECT min(t) AS \"time\", max(t) AS \"timeEnd\",\n       CASE WHEN count(*) = 1 THEN 'Indexed ' || COALESCE(min(filename), 'a document since deleted')\n            ELSE 'Indexed ' || count(*) || ' documents' END AS \"text\",\n       'ingest' AS \"tags\"\nFROM b GROUP BY batch ORDER BY 1",
           "refId": "A"
         }
       }
@@ -1911,7 +1911,7 @@
           "type": "timeseries",
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
             "y": 93
           },
@@ -1974,71 +1974,6 @@
               "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"ragr-eval\"})",
               "legendFormat": "Passages without a citation line",
               "refId": "C"
-            }
-          ]
-        },
-        {
-          "id": 31,
-          "type": "timeseries",
-          "title": "Section numbers cited instead of pages (Citation repair)",
-          "description": "When the model cites a section number where a page belongs, code maps it to a page it was shown when it can. A rising \"left as is\" line on its own means the model is guessing.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 93
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "min": 0,
-              "decimals": 0,
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "lineWidth": 2,
-                "fillOpacity": 0,
-                "showPoints": "auto",
-                "pointSize": 6,
-                "spanNulls": true
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "sum(rag_eval_online_citations_resolved_total{application=\"ragr-eval\", outcome=\"repaired\"})",
-              "legendFormat": "Fixed to a page",
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "sum(rag_eval_online_citations_resolved_total{application=\"ragr-eval\", outcome=\"abstained\"})",
-              "legendFormat": "Left as is (counts as made up)",
-              "refId": "B"
             }
           ]
         },

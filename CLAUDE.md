@@ -8,8 +8,8 @@ loaded on demand (see **Context documents**).
 
 A Retrieval-Augmented Generation system on Spring Boot and Spring AI. Users upload documents, which are
 parsed, chunked and stored as embeddings in Postgres/pgvector; a chat service answers from them, citing
-pages, with history in Redis; and every answer is scored in a separate service, live and against a
-curated dataset. Three applications - `ragr-ingest`, `ragr-app` (chat), `ragr-eval` - share one Postgres
+its sources, with history in Redis; and every answer is scored in a separate service, live and against a
+curated dataset. The corpus is a Markdown library of the Spring Boot 4.1 stack's documentation. Three applications - `ragr-ingest`, `ragr-app` (chat), `ragr-eval` - share one Postgres
 and talk through the vector store and two Kafka topics, never by calling each other, except the golden
 suite driving chat and ragr-eval reading chat's active-generations gauge so its judges wait for idle
 chat. The design principles are at the top of `README.md`.
@@ -67,7 +67,7 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 ├── ragr-shared      # plain library, no Spring Boot - the contracts between the applications
 │   └── .../subhanmishra/
 │       ├── chunk     # ChunkMetadata - the metadata keys every stored chunk carries
-│       ├── citation  # Citation, CitationParser, CitationResolver, AnswerCitations
+│       ├── citation  # Citation, CitationParser, AnswerCitations
 │       ├── embedding # TaskPrefixEmbeddingModel - the task prefix on every embedding request
 │       ├── event     # ChatTurnCompleted, ChatFeedbackSubmitted, TurnOrigin - the Kafka messages
 │       └── exception # ApiExceptionHandler (abstract; each app's advice extends it),
@@ -85,7 +85,7 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 │       │   └── service     # ChatService, ChatTurnPublisher, ChatFeedbackPublisher,
 │       │                   # RetrievalDiagnosticsService
 │       └── resources       # application.yaml (activates dev), application-dev.yaml (everything),
-│                           # logback-spring.xml, docs/ (the reference manual, the golden corpus)
+│                           # logback-spring.xml
 ├── ragr-ingest      # ingestion (8081, actuator 9097): upload, parse, chunk, embed, store
 │   └── src/main
 │       ├── java/.../subhanmishra/
@@ -96,7 +96,8 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 │       │   ├── dto, entity, repository, exception (IngestExceptionHandler, two exceptions)
 │       │   └── service     # DocumentMetadataService, DocumentParserService,
 │       │       │           # DocumentIngestionService, DocumentHistoryService
-│       │       └── parse   # ContentBlock (Prose | Table), the Tika/XHTML path, TableChunker
+│       │       └── parse   # ContentBlock (Prose | Table | Heading | Code), MarkdownBlockReader,
+│       │           │       # the Tika/XHTML path, TableChunker
 │       │           └── pdf # PdfBlockReader, table detection, the footer and contents strippers
 │       └── resources       # application.yaml (all of it), logback-spring.xml,
 │                           # db/migration (Flyway V1: public schema, vector_store)
@@ -128,8 +129,9 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 
 A fact is here only if the mistake it prevents happens in a file no route in `routes.json` covers.
 
-- **Every chunk's stored text begins with a `[filename, p. N]` citation line**, plus a `Section:` line
-  when it starts mid-section. Both are embedded and stored. Anything reading chunks back - export,
+- **Every chunk's stored text begins with a `[filename]` citation line** (`[filename, p. N]` for a
+  paged source), plus a `Section:` line when the chunk has a section - only Markdown headings make one.
+  Both are embedded and stored. Anything reading chunks back - export,
   re-ranking, re-chunking - must remove them with `CitationParser.stripHeader`.
 - **Never use a bare `parallelStream()` for parse work.** It runs on the common pool and bypasses
   `documentProcessingPool`, the bounded pool for parsing. Embedding and writing use virtual threads

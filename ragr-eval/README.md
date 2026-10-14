@@ -241,7 +241,7 @@ sections, top to bottom:
 
 Quality panels read the `eval` schema, by when each turn happened; Prometheus carries the judge queue
 and the running totals. Re-ingests (and, on the golden dashboard, golden runs) are marked on every time
-axis. Every rate is shown beside how many answers it rests on: at a few turns an hour, a rate can rest
+axis - a re-ingest as one shaded region per upload batch, uploads under 10 minutes apart merged. Every rate is shown beside how many answers it rests on: at a few turns an hour, a rate can rest
 on very few verdicts. Labels are plain words with the standard term in brackets - "Useful passages used (Recall@K)",
 "Backed by sources (Faithfulness)". Each panel's description (the ⓘ) says what it means, what to do when
 it is bad and, for the headline metrics, an example target. Targets are not colour-coded: the judge is

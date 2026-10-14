@@ -70,18 +70,6 @@
                     <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <configuration>
-                    <!-- docs/ holds the 13.6 MB reference manual, kept here only to be uploaded from disk.
-                         In the jar it was nearly all of the image's application layer, re-sent on every
-                         change. Excluded from the jar only, so it still reaches target/classes. -->
-                    <excludes>
-                        <exclude>docs/**</exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 

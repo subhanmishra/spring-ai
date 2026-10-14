@@ -91,8 +91,9 @@ is waiting on the same model.
 Otherwise the applications are tied together only by these contracts:
 
 - **`vector_store`, from ingest to chat.** Ingest writes chunks; chat searches them.
-  - Every chunk's text begins with a `[filename, p. N]` citation line - plus a `Section:` line when it
-    starts part-way through a section. This line is what lets the model cite pages at all.
+  - Every chunk's text begins with a `[filename]` citation line - `[filename, p. N]` for a paged
+    source - plus a `Section:` line naming the product and the Markdown heading path. This line is what
+    lets the model cite its sources at all.
   - Its metadata uses the keys in `ragr-shared`'s `ChunkMetadata`.
   - **Both applications must embed with the same model** (`nomic-embed-text`, 768 dimensions), since
     chat embeds each question to search what ingest embedded. A different dimension fails loudly; a
@@ -149,7 +150,7 @@ sequenceDiagram
     C->>C: top 5 at or above 0.65 into the prompt
     C->>O: generate
     C->>R: save the turn
-    C->>C: turn section numbers into pages, take citations out of the text
+    C->>C: take citations out of the text
     C-)K: ChatTurnCompleted, with the whole pool, not awaited
     C-->>U: turnId, answer, sources, citations
 ```
@@ -304,8 +305,7 @@ Logs reach Loki in either mode, so Grafana shows them whichever way an applicati
 **The images.** The root `Dockerfile` builds each one from the jar already in the module's `target/`,
 on `eclipse-temurin:26-jre-noble`. It copies Spring Boot's layers separately, so a code change rebuilds
 only the small application layer (~190 kB for ragr-app) and the ~90 MB of dependencies come from cache.
-The reference manual under ragr-app's `resources/docs` is kept out of the jar, since nothing reads it
-from the classpath. Only the connection addresses differ from a host run: `compose.yaml` sets them as
+Only the connection addresses differ from a host run: `compose.yaml` sets them as
 environment variables over the `localhost` defaults in each application's YAML.
 
 **The `apps` profile.** The three application containers sit behind it, so plain `docker compose`
@@ -327,7 +327,7 @@ JVM uses outside the heap - so a full heap ends in an `OutOfMemoryError` rather 
 | Container | Heap cap | Limit | Measured |
 |---|---|---|---|
 | `ai_ragr-app` | 384 MB | 650 MB | 367 MiB after a grounded answer, 218 MiB of it outside the heap |
-| `ai_ragr-ingest` | 512 MB | 850 MB | 631 MiB at peak, storing the 645-page reference manual |
+| `ai_ragr-ingest` | 512 MB | 850 MB | 650 MiB at peak, storing the 1,935-page Markdown library (14 Oct 2026); 631 MiB for the old PDF manual |
 | `ai_ragr-eval` | 256 MB | 480 MB | 276 MiB consuming turns |
 
 **Shutdown.** Each container has a 40 s `stop_grace_period`. Without it, Docker here waited only 3 s

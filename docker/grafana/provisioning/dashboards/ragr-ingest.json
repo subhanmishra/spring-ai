@@ -99,7 +99,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
-      "description": "One point per finished upload, at the time it finished, split into its two phases. Read from document_metadata_history, so every upload is here - including the first after a restart, which Prometheus-based panels cannot see. The 645-page reference manual takes about three to four minutes, nearly all of it embedding.",
+      "description": "One point per finished upload, at the time it finished, split into its two phases. Read from document_metadata_history, so every upload is here - including the first after a restart, which Prometheus-based panels cannot see. A Markdown page takes under a second at the median and 26 s at most; the whole 1,935-page library, uploaded one file at a time, took 50 minutes (14 Oct 2026), nearly all of it embedding.",
       "targets": [
         {
           "datasource": {

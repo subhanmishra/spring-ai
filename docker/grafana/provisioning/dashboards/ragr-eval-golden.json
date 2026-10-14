@@ -61,7 +61,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT h.created_at AS \"time\", 'Indexed ' || COALESCE(m.filename, 'a document since deleted') AS \"text\", 'ingest' AS \"tags\" FROM public.document_metadata_history h LEFT JOIN public.document_metadata m ON m.id = h.document_metadata_id WHERE h.status = 'INDEXED' AND $__timeFilter(h.created_at)",
+          "rawSql": "WITH h AS (\n  SELECT h.created_at AS t, m.filename,\n         CASE WHEN lag(h.created_at) OVER (ORDER BY h.created_at) IS NULL\n                OR h.created_at - lag(h.created_at) OVER (ORDER BY h.created_at) > interval '10 minutes'\n              THEN 1 ELSE 0 END AS starts\n  FROM public.document_metadata_history h\n  LEFT JOIN public.document_metadata m ON m.id = h.document_metadata_id\n  WHERE h.status = 'INDEXED' AND $__timeFilter(h.created_at)\n), b AS (SELECT t, filename, sum(starts) OVER (ORDER BY t) AS batch FROM h)\nSELECT min(t) AS \"time\", max(t) AS \"timeEnd\",\n       CASE WHEN count(*) = 1 THEN 'Indexed ' || COALESCE(min(filename), 'a document since deleted')\n            ELSE 'Indexed ' || count(*) || ' documents' END AS \"text\",\n       'ingest' AS \"tags\"\nFROM b GROUP BY batch ORDER BY 1",
           "refId": "A"
         }
       },
