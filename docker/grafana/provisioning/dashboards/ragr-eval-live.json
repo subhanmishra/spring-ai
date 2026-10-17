@@ -1953,7 +1953,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_refusals_total{application=\"ragr-eval\"})",
+              "expr": "sum(rag_eval_online_refusals_total{application=\"ragr-eval\",origin=\"live\"})",
               "legendFormat": "Refused to answer",
               "refId": "A"
             },
@@ -1962,7 +1962,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_instruction_echoes_total{application=\"ragr-eval\"})",
+              "expr": "sum(rag_eval_online_instruction_echoes_total{application=\"ragr-eval\",origin=\"live\"})",
               "legendFormat": "Repeated the citation rule",
               "refId": "B"
             },
@@ -1971,7 +1971,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"ragr-eval\"})",
+              "expr": "sum(rag_eval_online_chunks_without_header_total{application=\"ragr-eval\",origin=\"live\"})",
               "legendFormat": "Passages without a citation line",
               "refId": "C"
             }
@@ -2041,7 +2041,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_citations_total{application=\"ragr-eval\"}) by (outcome)",
+              "expr": "sum(rag_eval_online_citations_total{application=\"ragr-eval\",origin=\"live\"}) by (outcome)",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -2099,7 +2099,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_cited_context_precision_sum{application=\"ragr-eval\"}) / sum(rag_eval_online_cited_context_precision_count{application=\"ragr-eval\"})",
+              "expr": "sum(rag_eval_online_cited_context_precision_sum{application=\"ragr-eval\",origin=\"live\"}) / sum(rag_eval_online_cited_context_precision_count{application=\"ragr-eval\",origin=\"live\"})",
               "legendFormat": "Cited passages near the top (Context precision)",
               "refId": "A"
             },
@@ -2108,7 +2108,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "sum(rag_eval_online_cited_precision_at_k_sum{application=\"ragr-eval\"}) / sum(rag_eval_online_cited_precision_at_k_count{application=\"ragr-eval\"})",
+              "expr": "sum(rag_eval_online_cited_precision_at_k_sum{application=\"ragr-eval\",origin=\"live\"}) / sum(rag_eval_online_cited_precision_at_k_count{application=\"ragr-eval\",origin=\"live\"})",
               "legendFormat": "Passages cited (Precision@K)",
               "refId": "B"
             }
@@ -2142,7 +2142,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "rate(rag_eval_online_top_score_sum{application=\"ragr-eval\"}[1h]) / clamp_min(rate(rag_eval_online_top_score_count{application=\"ragr-eval\"}[1h]), 0.0000001)",
+              "expr": "rate(rag_eval_online_top_score_sum{application=\"ragr-eval\",origin=\"live\"}[1h]) / clamp_min(rate(rag_eval_online_top_score_count{application=\"ragr-eval\",origin=\"live\"}[1h]), 0.0000001)",
               "legendFormat": "Best match (Top similarity)",
               "refId": "A"
             },
@@ -2151,7 +2151,7 @@
                 "type": "prometheus",
                 "uid": "prometheus"
               },
-              "expr": "rate(rag_eval_online_score_spread_sum{application=\"ragr-eval\"}[1h]) / clamp_min(rate(rag_eval_online_score_spread_count{application=\"ragr-eval\"}[1h]), 0.0000001)",
+              "expr": "rate(rag_eval_online_score_spread_sum{application=\"ragr-eval\",origin=\"live\"}[1h]) / clamp_min(rate(rag_eval_online_score_spread_count{application=\"ragr-eval\",origin=\"live\"}[1h]), 0.0000001)",
               "legendFormat": "Gap between best and worst (Score spread)",
               "refId": "B"
             }

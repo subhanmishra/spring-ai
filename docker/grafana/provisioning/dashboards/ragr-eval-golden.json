@@ -1,7 +1,7 @@
 {
   "uid": "ragr-eval-golden",
   "title": "ragr-eval — golden test set",
-  "description": "How does the pipeline score on the curated questions with known answers? One point per run of the golden test set.",
+  "description": "How does the pipeline score on the curated questions with known answers? One run of the golden test set, picked at the top: its turns are scored and judged exactly as live turns are, so the shared panels read the same as on the live dashboard.",
   "tags": [
     "ragr",
     "spring-ai",
@@ -11,7 +11,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {
     "from": "now-30d",
@@ -30,7 +30,26 @@
     }
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "run",
+        "label": "Run",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "postgres"
+        },
+        "definition": "SELECT id::text AS __value, to_char(started_at, 'YYYY-MM-DD HH24:MI') || '  ' || status || '  ' || passed_count || '/' || case_count AS __text FROM eval.eval_run ORDER BY started_at DESC LIMIT 50",
+        "query": "SELECT id::text AS __value, to_char(started_at, 'YYYY-MM-DD HH24:MI') || '  ' || status || '  ' || passed_count || '/' || case_count AS __text FROM eval.eval_run ORDER BY started_at DESC LIMIT 50",
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "current": {},
+        "options": []
+      }
+    ]
   },
   "annotations": {
     "list": [
@@ -91,23 +110,23 @@
       "type": "row",
       "title": "At a glance",
       "collapsed": false,
+      "panels": [],
+      "id": 1,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 0
-      },
-      "panels": [],
-      "id": 1
+      }
     },
     {
       "id": 2,
       "title": "Last run",
-      "description": "How long ago the golden test set last ran. Every number below comes from that run, however old. It runs only when started by hand: ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT",
+      "description": "How long ago the golden test set last ran. Every number below comes from that run, however old. It runs only when started: ./ragr.ps1 golden, or POST http://localhost:9096/eval/golden/runs",
       "type": "stat",
       "gridPos": {
         "h": 5,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 1
       },
@@ -165,16 +184,76 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Latest run",
-      "description": "Cases passed: cases that met every check the test set states. Judged correct: the judge's verdict, from the latest run that ran the judge. Example target: End-to-end success above 0.7.",
+      "title": "Regression gate",
+      "description": "The run's verdict from its rule-based scores, never the judges': no invented pages, citation fabrication at most 0.10, hit rate at least 0.6. A loose guard against a pipeline that broke outright, not a quality bar.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
         "h": 5,
-        "w": 18,
-        "x": 6,
+        "w": 6,
+        "x": 4,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CASE WHEN e.gate_passed THEN 'passed' WHEN NOT e.gate_passed THEN 'FAILED: ' || e.gate_failures ELSE initcap(lower(e.status::text)) END AS \"Regression gate\" FROM eval.eval_run e WHERE e.id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "This run",
+      "description": "Cases passed: cases that met every rule-based check the test set states; the judges never change it. Judged correct: the judges' end-to-end verdict on the run's turns, filled in as the judge queue reaches them - Turns judged says how far it has got. Example target: End-to-end success above 0.7.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 14,
+        "x": 10,
         "y": 1
       },
       "fieldConfig": {
@@ -222,7 +301,255 @@
               "options": {
                 "mode": "include",
                 "names": [
-                  "Average answer time"
+                  "Turns judged"
+                ]
+              }
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.passed_count::float / NULLIF(e.case_count, 0) AS \"Cases passed (Case pass rate)\", (SELECT AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END) FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}') AS \"Judged correct (End-to-end success)\", e.case_count AS \"Cases\", (SELECT COUNT(*) FILTER (WHERE t.judge_status IN ('DONE','PARTIAL')) || '/' || COUNT(*) FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}') AS \"Turns judged\" FROM eval.eval_run e WHERE e.id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Quality per run (End-to-end success)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.started_at AS \"time\", e.passed_count::float / NULLIF(e.case_count, 0) AS \"Cases passed (Case pass rate)\", (SELECT AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"Judged correct (End-to-end success)\", (SELECT AVG(CASE WHEN t.retrieval_ok THEN 1.0 WHEN NOT t.retrieval_ok THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = e.id AND t.grounded) AS \"Found a useful passage (Retrieval hit)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "description": "Each point is one completed run. Cases passed is rule-based and final when the run completes; the judged lines fill in as the judge queue works through the run's turns."
+    },
+    {
+      "type": "row",
+      "title": "Retrieval - did the search find the right passages? (Recall@K, Precision@K, MRR, NDCG)",
+      "collapsed": false,
+      "panels": [],
+      "id": 6,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Search quality (Retrieval metrics)",
+      "description": "The judge grades each of the 10 passages the search returned. Useful passages used: of the useful ones, the share that reached the prompt. Prompt that was useful: share of the prompt's passages that were useful. Useful passage on top (MRR): 1 when the first passage was useful, 1/2 when the second was, and so on. Ranking quality (NDCG): like MRR, but counts every useful passage, weighted by how high it sits. Example targets: Recall above 0.8, Precision and MRR above 0.6, NDCG above 0.7 - a guide only, since the judge is the same small model that answers.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "include",
+                "names": [
+                  "Turns scored"
+                ]
+              }
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT AVG(t.recall_at_k) AS \"Useful passages used (Recall@K)\", AVG(t.precision_at_k) AS \"Prompt that was useful (Precision@K)\", AVG(t.mrr) AS \"Useful passage on top (MRR)\", AVG(t.ndcg_at_k) AS \"Ranking quality (NDCG@K)\", COUNT(t.recall_at_k) AS \"Turns scored\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Are the search settings too strict? (top-k, threshold)",
+      "description": "Useful passage left out: one was found, but the similarity threshold or top-k kept it out of the prompt - if this is often above zero, loosen one of them. Nothing useful found: the documents do not cover the question. All useful passages cut: no passage reached the prompt although a useful one was found.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "include",
+                "names": [
+                  "Search time (Retrieval latency)"
                 ]
               }
             },
@@ -274,94 +601,24 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.passed_count::float / NULLIF(e.case_count, 0) AS \"Cases passed (Case pass rate)\", (SELECT AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1)) AS \"Judged correct (End-to-end success)\", e.case_count AS \"Cases\", (SELECT AVG(r.latency_millis) FROM eval.eval_case_result r WHERE r.run_id = e.id) AS \"Average answer time\" FROM eval.eval_run e WHERE e.id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' ORDER BY started_at DESC LIMIT 1)",
+          "rawSql": "SELECT AVG(CASE WHEN t.relevant_cut_off IS NOT NULL THEN (CASE WHEN t.relevant_cut_off > 0 THEN 1.0 ELSE 0.0 END) END) AS \"Useful passage left out\", AVG(CASE WHEN t.relevant_in_pool IS NOT NULL THEN (CASE WHEN t.relevant_in_pool = 0 THEN 1.0 ELSE 0.0 END) END) AS \"Nothing useful found\", AVG(CASE WHEN NOT t.grounded AND t.relevant_in_pool IS NOT NULL THEN (CASE WHEN NOT t.grounded AND t.relevant_in_pool > 0 THEN 1.0 ELSE 0.0 END) END) AS \"All useful passages cut\", AVG(t.retrieval_millis) AS \"Search time (Retrieval latency)\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}'",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Quality per run (End-to-end success)",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "postgres"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 6
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "always",
-            "pointSize": 6,
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "postgres"
-          },
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"time\", e.passed_count::float / NULLIF(e.case_count, 0) AS \"Cases passed (Case pass rate)\", (SELECT AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"Judged correct (End-to-end success)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
-          "refId": "A"
-        }
-      ],
-      "description": "One point per run."
-    },
-    {
-      "type": "row",
-      "title": "Retrieval - did the search find the right pages? (Recall@K, Precision@K, MRR, NDCG)",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 13
-      },
-      "panels": [],
-      "id": 5
-    },
-    {
-      "id": 6,
+      "id": 9,
       "type": "stat",
-      "title": "Search quality (Retrieval metrics) - latest run",
-      "description": "Scored against the pages each case lists as holding the answer. Expected pages used: share of them that reached the prompt. Prompt that was useful: share of the prompt from those pages - a floor, since other pages can help too. Expected page on top (MRR): 1 when the first passage is from one, 1/2 when the second is, and so on. Ranking quality (NDCG): like MRR, but counts every useful passage, weighted by how high it sits. Any expected page used: share of cases with at least one. Example targets: Recall above 0.8, Precision and MRR above 0.6, NDCG above 0.7.",
+      "title": "Against the expected sources (Reference retrieval)",
+      "description": "The same ranking metrics with relevance decided by the test set's expected files or pages instead of the judge: free, exact, and final when the run completes. A floor - a useful passage from a source the case does not list counts as noise. Where it and the judge disagree, see Does the judge spot the right passages?",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 7,
-        "w": 14,
-        "x": 0,
+        "h": 10,
+        "w": 8,
+        "x": 16,
         "y": 14
       },
       "fieldConfig": {
@@ -374,36 +631,7 @@
           },
           "noValue": "not measured"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "include",
-                "names": [
-                  "Cases"
-                ]
-              }
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "text"
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "reduceOptions": {
@@ -433,25 +661,25 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.recall_at_k AS \"Expected pages used (Recall@K)\", e.precision_at_k AS \"Prompt that was useful (Precision@K)\", e.mean_reciprocal_rank AS \"Expected page on top (MRR)\", e.ndcg_at_k AS \"Ranking quality (NDCG@K)\", e.hit_rate AS \"Any expected page used (Hit rate)\", e.case_count AS \"Cases\" FROM eval.eval_run e WHERE e.id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' ORDER BY started_at DESC LIMIT 1)",
+          "rawSql": "SELECT e.recall_at_k AS \"Expected sources used (Recall@K)\", e.precision_at_k AS \"Prompt that was expected (Precision@K)\", e.mean_reciprocal_rank AS \"Expected source on top (MRR)\", e.ndcg_at_k AS \"Ranking quality (NDCG@K)\", e.hit_rate AS \"Any expected source used (Hit rate)\" FROM eval.eval_run e WHERE e.id = '${run}'",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 7,
+      "id": 10,
       "type": "timeseries",
       "title": "Search quality per run (Retrieval metrics)",
-      "description": "One point per run.",
+      "description": "Judged lines use the judge's grades, as on the live dashboard; reference lines use the test set's expected sources.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
         "h": 7,
-        "w": 10,
-        "x": 14,
-        "y": 14
+        "w": 24,
+        "x": 0,
+        "y": 24
       },
       "fieldConfig": {
         "defaults": {
@@ -488,9 +716,9 @@
             "type": "grafana-postgresql-datasource",
             "uid": "postgres"
           },
-          "format": "time_series",
+          "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"time\", e.recall_at_k AS \"Expected pages used (Recall@K)\", e.precision_at_k AS \"Prompt that was useful (Precision@K)\", e.mean_reciprocal_rank AS \"Expected page on top (MRR)\", e.ndcg_at_k AS \"Ranking quality (NDCG@K)\", e.hit_rate AS \"Any expected page used (Hit rate)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
+          "rawSql": "SELECT e.started_at AS \"time\", (SELECT AVG(t.recall_at_k) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"Useful passages used (Recall@K)\", (SELECT AVG(t.precision_at_k) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"Prompt that was useful (Precision@K)\", (SELECT AVG(t.mrr) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"Useful passage on top (MRR)\", e.recall_at_k AS \"Expected sources used (reference Recall@K)\", e.hit_rate AS \"Any expected source used (Hit rate)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
           "refId": "A"
         }
       ]
@@ -499,29 +727,29 @@
       "type": "row",
       "title": "Generation - is the answer itself good? (Faithfulness, Answer relevance, Completeness, Citation correctness)",
       "collapsed": false,
+      "panels": [],
+      "id": 11,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
-      },
-      "panels": [],
-      "id": 8
+        "y": 31
+      }
     },
     {
-      "id": 9,
+      "id": 12,
       "type": "stat",
-      "title": "Answer quality (Generation metrics) - latest run",
-      "description": "Judge scores come from the latest run that ran the judge; the citation check from the latest run of any kind. Backed by sources: share of the answer's statements the passages support. Citations check out: cited pages that really say what the sentence claims. Citations to shown pages: cited pages that were in the prompt. Example targets: Faithfulness and Citation support above 0.8.",
+      "title": "Answer quality (Generation metrics)",
+      "description": "Over answers that had passages in the prompt. Backed by sources: share of the answer's statements the passages support. On topic and Complete: the judge's verdicts. Citations check out: cited pages that really say what the sentence claims. Citations to shown pages: cited pages that were in the prompt - checked by code on every answer, not by the judge. Example targets: Faithfulness and Citation support above 0.8.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
-        "h": 7,
-        "w": 14,
+        "h": 10,
+        "w": 8,
         "x": 0,
-        "y": 22
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -592,25 +820,187 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(t.faithfulness) AS \"Backed by sources (Faithfulness)\", AVG(CASE WHEN t.relevancy_pass THEN 1.0 WHEN NOT t.relevancy_pass THEN 0.0 END) AS \"On topic (Answer relevance)\", AVG(CASE WHEN t.completeness_pass THEN 1.0 WHEN NOT t.completeness_pass THEN 0.0 END) AS \"Complete (Completeness)\", SUM(t.citations_supported)::float / NULLIF(SUM(t.citations_checked), 0) AS \"Citations check out (Citation support)\", (SELECT citation_validity FROM eval.eval_run WHERE id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' ORDER BY started_at DESC LIMIT 1)) AS \"Citations to shown pages (Citation validity)\", COUNT(t.faithfulness) AS \"Answers judged\" FROM eval.eval_turn t WHERE t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) AND t.grounded",
+          "rawSql": "SELECT AVG(t.faithfulness) AS \"Backed by sources (Faithfulness)\", AVG(CASE WHEN t.relevancy_pass THEN 1.0 WHEN NOT t.relevancy_pass THEN 0.0 END) AS \"On topic (Answer relevance)\", AVG(CASE WHEN t.completeness_pass THEN 1.0 WHEN NOT t.completeness_pass THEN 0.0 END) AS \"Complete (Completeness)\", SUM(t.citations_supported)::float / NULLIF(SUM(t.citations_checked), 0) AS \"Citations check out (Citation support)\", SUM(t.citations_valid)::float / NULLIF(SUM(t.citations_emitted), 0) AS \"Citations to shown pages (Citation validity)\", COUNT(t.faithfulness) AS \"Answers judged\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}' AND t.grounded",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 10,
+      "id": 13,
+      "type": "stat",
+      "title": "Answer problems",
+      "description": "All three should stay near zero. Made-up citations: cited pages the model was never shown. Cites nothing: answers that had passages in the prompt but cite no page. Cut off: answers that hit the length limit - the judge reads these as incomplete, so check this first when Complete drops.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "not measured",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(t.citations_fabricated)::float / NULLIF(SUM(t.citations_emitted), 0) AS \"Made-up citations (Citation fabrication)\", AVG(CASE WHEN t.grounded THEN (CASE WHEN t.citations_emitted = 0 THEN 1.0 ELSE 0.0 END) END) AS \"Cites nothing (Uncited)\", AVG(CASE WHEN t.finish_reason IS NOT NULL THEN (CASE WHEN t.finish_reason = 'length' THEN 1.0 ELSE 0.0 END) END) AS \"Cut off (Truncated)\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Against the test set (Expectations)",
+      "description": "Rule-based checks only the test set can make. Key phrases present: share of each case's mustContain phrases found in its answer. Invented pages: any page cited against a page-less source - the gate allows none.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "include",
+                "names": [
+                  "Invented pages",
+                  "Citations"
+                ]
+              }
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.phrase_coverage AS \"Key phrases present (Phrase coverage)\", e.citation_validity AS \"Citations to shown sources (Citation validity)\", e.citation_fabrication AS \"Made-up citations (Citation fabrication)\", e.invented_pages AS \"Invented pages\", e.citations_emitted AS \"Citations\" FROM eval.eval_run e WHERE e.id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
       "type": "timeseries",
       "title": "Answer quality per run (Generation metrics)",
-      "description": "One point per run; judge scores only on runs that ran the judge. Key phrases present: share of each case's required phrases found in the answer.",
+      "description": "Judged lines fill in as the judge queue reaches the run's turns; citation and phrase lines are rule-based and final when the run completes.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
       },
       "gridPos": {
         "h": 7,
-        "w": 10,
-        "x": 14,
-        "y": 22
+        "w": 24,
+        "x": 0,
+        "y": 42
       },
       "fieldConfig": {
         "defaults": {
@@ -647,31 +1037,31 @@
             "type": "grafana-postgresql-datasource",
             "uid": "postgres"
           },
-          "format": "time_series",
+          "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"time\", (SELECT AVG(t.faithfulness) FROM eval.eval_turn t WHERE t.run_id = e.id AND t.grounded) AS \"Backed by sources (Faithfulness)\", e.relevancy_rate AS \"On topic (Answer relevance)\", e.citation_validity AS \"Citations to shown pages (Citation validity)\", e.citation_fabrication AS \"Made-up citations (Citation fabrication)\", e.phrase_coverage AS \"Key phrases present (Phrase coverage)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
+          "rawSql": "SELECT e.started_at AS \"time\", (SELECT AVG(t.faithfulness) FROM eval.eval_turn t WHERE t.run_id = e.id AND t.grounded) AS \"Backed by sources (Faithfulness)\", (SELECT AVG(CASE WHEN t.relevancy_pass THEN 1.0 WHEN NOT t.relevancy_pass THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = e.id AND t.grounded) AS \"On topic (Answer relevance)\", (SELECT AVG(CASE WHEN t.completeness_pass THEN 1.0 WHEN NOT t.completeness_pass THEN 0.0 END) FROM eval.eval_turn t WHERE t.run_id = e.id AND t.grounded) AS \"Complete (Completeness)\", e.citation_validity AS \"Citations to shown sources (Citation validity)\", e.citation_fabrication AS \"Made-up citations (Citation fabrication)\", e.phrase_coverage AS \"Key phrases present (Phrase coverage)\" FROM eval.eval_run e WHERE e.status = 'COMPLETED' AND $__timeFilter(e.started_at) ORDER BY 1",
           "refId": "A"
         }
       ]
     },
     {
       "type": "row",
-      "title": "End to end - did the whole pipeline work? (End-to-end accuracy, Task-based metrics)",
+      "title": "End to end - did the whole pipeline work? (End-to-end accuracy, Task-based metrics, Latency)",
       "collapsed": false,
+      "panels": [],
+      "id": 16,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
-      },
-      "panels": [],
-      "id": 11
+        "y": 49
+      }
     },
     {
-      "id": 12,
+      "id": 17,
       "type": "table",
-      "title": "Where answers go wrong (RAG debugging matrix) - latest judged run",
-      "description": "Each judged case placed by two verdicts: did a useful passage reach the prompt, and was the answer correct. The diagnosis says which part to fix.",
+      "title": "Where answers go wrong (RAG debugging matrix)",
+      "description": "Each judged answer placed by two verdicts: did a useful passage reach the prompt, and was the answer correct. The diagnosis says which part to fix.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -680,7 +1070,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -705,16 +1095,16 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT q.quadrant AS \"passages × answer\", COUNT(t.turn_id) AS \"turns\", ROUND(100.0 * COUNT(t.turn_id) / NULLIF(SUM(COUNT(t.turn_id)) OVER (), 0), 0) AS \"%\", q.diagnosis FROM (VALUES (1, true, true, 'right × right', 'Working well'), (2, true, false, 'right × wrong', 'Generation problem - fix prompt, model or context handling'), (3, false, true, 'wrong × right', 'Partial retrieval, or the judge is wrong'), (4, false, false, 'wrong × wrong', 'Retrieval problem - fix the retriever first')) AS q(ord, r, a, quadrant, diagnosis) LEFT JOIN eval.eval_turn t ON t.retrieval_ok = q.r AND t.answer_ok = q.a AND t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) GROUP BY q.ord, q.quadrant, q.diagnosis ORDER BY q.ord",
+          "rawSql": "SELECT q.quadrant AS \"passages × answer\", COUNT(t.turn_id) AS \"turns\", ROUND(100.0 * COUNT(t.turn_id) / NULLIF(SUM(COUNT(t.turn_id)) OVER (), 0), 0) AS \"%\", q.diagnosis FROM (VALUES (1, true, true, 'right × right', 'Working well'), (2, true, false, 'right × wrong', 'Generation problem - fix prompt, model or context handling'), (3, false, true, 'wrong × right', 'Partial retrieval, or the judge is wrong'), (4, false, false, 'wrong × wrong', 'Retrieval problem - fix the retriever first')) AS q(ord, r, a, quadrant, diagnosis) LEFT JOIN eval.eval_turn t ON t.retrieval_ok = q.r AND t.answer_ok = q.a AND t.origin = 'GOLDEN' AND t.run_id = '${run}' GROUP BY q.ord, q.quadrant, q.diagnosis ORDER BY q.ord",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 13,
+      "id": 18,
       "type": "table",
-      "title": "By kind of question (Task-based metrics) - latest judged run",
-      "description": "The main measures split by the kind of question the classifier assigned. The test set has no troubleshooting case yet.",
+      "title": "By kind of question (Task-based metrics)",
+      "description": "The main measures split by the kind of question the classifier assigned. Ignores the Task filter, so every kind stays visible.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "postgres"
@@ -723,7 +1113,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -748,7 +1138,156 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"passages found % (retrieved)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\" FROM eval.eval_turn t WHERE t.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) GROUP BY 1 ORDER BY 2 DESC",
+          "rawSql": "SELECT COALESCE(t.task_type, 'unclassified') AS \"task\", COUNT(*) AS \"turns\", ROUND(100 * AVG(CASE WHEN t.grounded THEN 1.0 WHEN NOT t.grounded THEN 0.0 END), 0) AS \"passages found % (retrieved)\", ROUND(100 * AVG(CASE WHEN t.answer_ok THEN 1.0 WHEN NOT t.answer_ok THEN 0.0 END), 0) AS \"judged correct % (e2e success)\", ROUND(AVG(t.faithfulness)::numeric, 2) AS \"backed by sources (faithfulness)\", ROUND(AVG(t.recall_at_k)::numeric, 2) AS \"useful passages used (recall@k)\", ROUND(AVG(t.ndcg_at_k)::numeric, 2) AS \"ranking quality (NDCG)\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}' GROUP BY 1 ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Response time (Latency)",
+      "description": "Answer time: from request to finished answer. First words: streaming endpoint only. With few turns, the slowest 5% is just one or two answers - see Turns.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "include",
+                "names": [
+                  "Turns"
+                ]
+              }
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY t.total_millis) AS \"Answer time, median (p50)\", percentile_cont(0.95) WITHIN GROUP (ORDER BY t.total_millis) AS \"Answer time, slowest 5% (p95)\", percentile_cont(0.5) WITHIN GROUP (ORDER BY t.first_token_millis) AS \"First words, median (Time to first token)\", AVG(t.retrieval_millis) AS \"Search, average (Retrieval latency)\", COUNT(t.total_millis) AS \"Turns\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Judge time per answer",
+      "description": "Model time spent scoring each answer, spent only while chat was idle.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "not measured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT AVG(t.judge_millis) FILTER (WHERE t.grounded) AS \"Passages found (Retrieved)\", AVG(t.judge_millis) FILTER (WHERE NOT t.grounded) AS \"No passages found\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}' AND t.judge_status IN ('DONE','PARTIAL')",
           "refId": "A"
         }
       ]
@@ -757,17 +1296,17 @@
       "type": "row",
       "title": "Can we trust the judge? (Judge calibration)",
       "collapsed": false,
+      "panels": [],
+      "id": 21,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
-      },
-      "panels": [],
-      "id": 14
+        "y": 66
+      }
     },
     {
-      "id": 15,
+      "id": 22,
       "type": "stat",
       "title": "Does the judge spot the right passages?",
       "description": "Every passage of the latest judged run: the judge's \"useful\" compared with the hand-checked list of pages that hold each answer. The live search scores rest on this. The checklist marks whole pages, so some \"checklist said useful\" passages are a listed page's unhelpful parts.",
@@ -779,7 +1318,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
@@ -852,7 +1391,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(CASE WHEN (c.judge_grade >= 2) = (r.v = '1') THEN 1.0 ELSE 0.0 END) AS \"Agrees with the checklist (Judge-reference agreement)\", COUNT(*) FILTER (WHERE c.judge_grade >= 2 AND r.v = '0') AS \"Judge said useful, checklist didn't\", COUNT(*) FILTER (WHERE c.judge_grade < 2 AND r.v = '1') AS \"Checklist said useful, judge didn't\", COUNT(*) AS \"Passages compared\" FROM eval.eval_case_result cr JOIN eval.eval_turn_chunk c ON c.turn_id = cr.turn_id CROSS JOIN LATERAL (SELECT u.v FROM unnest(string_to_array(cr.reference_relevance, ',')) WITH ORDINALITY AS u(v, ord) WHERE u.ord = c.rank) r WHERE cr.run_id = (SELECT id FROM eval.eval_run WHERE status = 'COMPLETED' AND judged ORDER BY started_at DESC LIMIT 1) AND c.judge_grade IS NOT NULL",
+          "rawSql": "SELECT AVG(CASE WHEN (c.judge_grade >= 2) = (r.v = '1') THEN 1.0 ELSE 0.0 END) AS \"Agrees with the checklist (Judge-reference agreement)\", COUNT(*) FILTER (WHERE c.judge_grade >= 2 AND r.v = '0') AS \"Judge said useful, checklist didn't\", COUNT(*) FILTER (WHERE c.judge_grade < 2 AND r.v = '1') AS \"Checklist said useful, judge didn't\", COUNT(*) AS \"Passages compared\" FROM eval.eval_case_result cr JOIN eval.eval_turn_chunk c ON c.turn_id = cr.turn_id CROSS JOIN LATERAL (SELECT u.v FROM unnest(string_to_array(cr.reference_relevance, ',')) WITH ORDINALITY AS u(v, ord) WHERE u.ord = c.rank) r WHERE cr.run_id = '${run}' AND c.judge_grade IS NOT NULL",
           "refId": "A"
         }
       ]
@@ -861,25 +1400,25 @@
       "type": "row",
       "title": "Drill-down - which cases, and why",
       "collapsed": false,
+      "panels": [],
+      "id": 23,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
-      },
-      "panels": [],
-      "id": 16
+        "y": 72
+      }
     },
     {
-      "id": 17,
-      "title": "Cases in the latest run",
+      "id": 24,
+      "title": "Cases in this run",
       "description": "Every case of the most recent run, failures first, with the reason. Empty judge columns mean the run did not run the judge, not that the case failed. The full answer is in eval.eval_case_result.",
       "type": "table",
       "gridPos": {
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 73
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -945,13 +1484,159 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT r.case_id AS \"case\", r.passed, r.failure_reasons AS \"why it failed\", r.query, r.retrieved_count AS \"passages\", r.first_relevant_rank AS \"rank of expected page\", r.citations_emitted AS \"citations\", r.citations_fabricated AS \"made up\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"key phrases % (phrase coverage)\", r.relevancy_pass AS \"on topic (answer relevance)\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval.eval_case_result r WHERE r.run_id = (SELECT id FROM eval.eval_run ORDER BY started_at DESC LIMIT 1) ORDER BY r.passed ASC, r.citations_fabricated DESC, r.case_id",
+          "rawSql": "SELECT r.case_id AS \"case\", r.status, r.passed, r.failure_reasons AS \"why it failed\", r.query, r.retrieved_count AS \"passages\", r.first_relevant_rank AS \"rank of expected source\", r.citations_emitted AS \"citations\", r.citations_fabricated AS \"made up\", ROUND((r.phrase_coverage * 100)::numeric, 0) AS \"key phrases % (phrase coverage)\", t.judge_status AS \"judging\", t.answer_ok AS \"judged correct (e2e)\", t.relevancy_pass AS \"on topic (answer relevance)\", ROUND(t.faithfulness::numeric, 2) AS \"backed by sources (faithfulness)\", LEFT(r.answer, 160) AS \"answer (truncated)\", r.latency_millis AS \"ms\" FROM eval.eval_case_result r LEFT JOIN eval.eval_turn t ON t.turn_id = r.turn_id WHERE r.run_id = '${run}' ORDER BY r.passed ASC, r.citations_fabricated DESC, r.case_id",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 18,
+      "id": 25,
+      "type": "table",
+      "title": "Failed or partly judged answers",
+      "description": "Answers the judge failed, or could only partly judge because a step timed out. One column per check, so the failing one stands out. Passage grades: 2 useful, 1 on topic, 0 not useful; prompt passages before the bar.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            },
+            "wrapHeaderText": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "retrieval"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "right"
+                      },
+                      "false": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "wrong"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "on topic (answer relevance)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "yes"
+                      },
+                      "false": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "no"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "complete (completeness)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "yes"
+                      },
+                      "false": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "no"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT t.occurred_at AS \"when\", t.task_type AS \"task\", t.query, t.judge_status AS \"judging\", t.retrieval_ok AS \"retrieval\", t.relevancy_pass AS \"on topic (answer relevance)\", ROUND(t.faithfulness::numeric, 2) AS \"backed by sources (faithfulness)\", t.completeness_pass AS \"complete (completeness)\", t.citations_fabricated AS \"made-up citations (citation fabrication)\", t.citations_supported || '/' || t.citations_checked AS \"citations check out (citation support)\", (SELECT string_agg(COALESCE(c.judge_grade::text, '?'), ',' ORDER BY c.rank) FILTER (WHERE c.in_context) || ' | ' || COALESCE(string_agg(COALESCE(c.judge_grade::text, '?'), ',' ORDER BY c.rank) FILTER (WHERE NOT c.in_context), '') FROM eval.eval_turn_chunk c WHERE c.turn_id = t.turn_id) AS \"passage grades (prompt | unused)\", LEFT(t.answer, 160) AS \"answer (truncated)\" FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}' AND (t.answer_ok = false OR t.judge_status = 'PARTIAL') ORDER BY t.occurred_at DESC LIMIT 100",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
       "title": "Pass history by case (Flaky cases)",
       "description": "How each case behaved across runs. A case that flips between pass and fail with no pipeline change is flaky: loosen it or remove it.",
       "type": "table",
@@ -959,7 +1644,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 92
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -991,7 +1676,7 @@
       ]
     },
     {
-      "id": 19,
+      "id": 27,
       "title": "Run history",
       "description": "Every run and the settings that produced it. Compare scores only between runs with the same models, top-k and threshold, and no re-ingest in between (marked on the time axis). A run stuck in RUNNING was stopped partway.",
       "type": "table",
@@ -999,7 +1684,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 101
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -1025,7 +1710,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", ROUND(e.recall_at_k::numeric, 3) AS \"expected pages used (recall@k)\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"expected page on top (MRR)\", ROUND(e.ndcg_at_k::numeric, 3) AS \"ranking quality (NDCG)\", ROUND(e.hit_rate::numeric, 3) AS \"any expected page used (hit rate)\", ROUND(e.citation_validity::numeric, 3) AS \"citations to shown pages (citation validity)\", ROUND(e.citation_fabrication::numeric, 3) AS \"made-up citations (citation fabrication)\", e.chat_model AS \"chat model\", CASE WHEN e.judged THEN e.judge_model ELSE 'not judged' END AS \"judge\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.duration_millis AS \"ms\" FROM eval.eval_run e ORDER BY e.started_at DESC LIMIT 50",
+          "rawSql": "SELECT e.started_at AS \"started\", e.suite, e.status, e.passed_count || '/' || e.case_count AS \"passed\", CASE WHEN e.gate_passed THEN 'passed' WHEN NOT e.gate_passed THEN 'FAILED: ' || e.gate_failures END AS \"gate\", (SELECT COUNT(*) FILTER (WHERE t.judge_status IN ('DONE','PARTIAL')) || '/' || COUNT(*) FROM eval.eval_turn t WHERE t.run_id = e.id) AS \"judged\", ROUND(e.recall_at_k::numeric, 3) AS \"expected sources used (recall@k)\", ROUND(e.mean_reciprocal_rank::numeric, 3) AS \"expected source on top (MRR)\", ROUND(e.hit_rate::numeric, 3) AS \"any expected source used (hit rate)\", ROUND(e.citation_validity::numeric, 3) AS \"citations to shown sources (citation validity)\", ROUND(e.citation_fabrication::numeric, 3) AS \"made-up citations (citation fabrication)\", e.invented_pages AS \"invented pages\", e.chat_model AS \"chat model\", e.top_k AS \"top-k\", e.similarity_threshold AS \"threshold\", e.duration_millis AS \"ms\", e.error_message AS \"error\" FROM eval.eval_run e ORDER BY e.started_at DESC LIMIT 50",
           "refId": "A"
         }
       ]
@@ -1033,166 +1718,131 @@
     {
       "type": "row",
       "title": "Detail - ranking measured three ways",
-      "collapsed": true,
+      "collapsed": false,
+      "panels": [],
+      "id": 28,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 110
+      }
+    },
+    {
+      "id": 29,
+      "title": "Share of the prompt that was useful (Precision@K)",
+      "description": "The same question three ways, for this run. Expected: the test set's sources (a floor). Judged: the judge's grade 2, as on the live dashboard. Cited: the answer cited the passage (under-counts passages used without a citation).",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 111
       },
-      "panels": [
-        {
-          "id": 21,
-          "title": "Useful passages ranked first (Context precision)",
-          "description": "Whether the useful passages sat at the top of the prompt (RAGAS context precision). It rewards order, not quantity: one useful passage in first place scores 1.0. Measured against the expected pages (a floor), by the judge (judged runs only), and by what the answer cited. Compare between runs.",
-          "type": "stat",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 73
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "decimals": 3,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "text",
-                    "value": null
-                  }
-                ]
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
               }
-            },
-            "overrides": []
-          },
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "none",
-            "text": {
-              "titleSize": 16,
-              "valueSize": 26
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_context_precision{application=\"ragr-eval\"})",
-              "legendFormat": "by expected pages",
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_judged_context_precision{application=\"ragr-eval\"})",
-              "legendFormat": "by the judge",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_cited_context_precision{application=\"ragr-eval\"})",
-              "legendFormat": "by citations",
-              "refId": "C"
-            }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
           ]
         },
-        {
-          "id": 22,
-          "title": "Share of the prompt that was useful (Precision@K)",
-          "description": "Useful passages over passages in the prompt, measured the same three ways. Low here with a high score beside it means well ordered but mostly filler: lower top-k or raise the threshold.",
-          "type": "stat",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 73
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "decimals": 3,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "text",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "none",
-            "text": {
-              "titleSize": 16,
-              "valueSize": 26
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_precision_at_k{application=\"ragr-eval\"})",
-              "legendFormat": "by expected pages",
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_judged_precision_at_k{application=\"ragr-eval\"})",
-              "legendFormat": "by the judge",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              },
-              "expr": "max(rag_eval_golden_cited_precision_at_k{application=\"ragr-eval\"})",
-              "legendFormat": "by citations",
-              "refId": "C"
-            }
-          ]
+        "colorMode": "none",
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
         }
-      ],
-      "id": 20
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.precision_at_k AS \"Expected sources\", (SELECT AVG(t.precision_at_k) FROM eval.eval_turn t WHERE t.origin = 'GOLDEN' AND t.run_id = '${run}') AS \"Judged\", e.cited_precision_at_k AS \"Cited\" FROM eval.eval_run e WHERE e.id = '${run}'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "title": "Useful passages ranked first (Context precision)",
+      "description": "Rank-weighted context precision, by expected sources and by citations. The judge's ranking counterpart is MRR and NDCG in the Retrieval row.",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 111
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "text": {
+          "titleSize": 16,
+          "valueSize": 26
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.context_precision AS \"Expected sources\", e.cited_context_precision AS \"Cited\" FROM eval.eval_run e WHERE e.id = '${run}'",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
