@@ -285,10 +285,10 @@ cases:
       After upgrading to Spring Boot 4, my import of org.springframework.boot.actuate.health.HealthIndicator
       no longer compiles. Where does HealthIndicator live now?
     description: >-
-      An exact-identifier lookup, kept as the hybrid-search tripwire. The upgrade map that lists the
-      move (013) is not in the top 10: embeddings do not match a fully qualified class name. The answer
-      is still reachable, because the actuator endpoints page's examples import the new package (rank
-      1, 0.793). If both stop being retrieved, keyword search is the fix, not a rephrase.
+      An exact-identifier lookup. The upgrade map that lists the move (013) ranks 3rd-5th (0.765-0.747)
+      under exact search, beside the actuator endpoints page (1st, 0.793). It failed while vector_store
+      had an HNSW index: the approximate search returned none of the map's chunks. If it fails again,
+      compare the pool with an exact search before blaming the embeddings.
     expectedFiles:
       - 29-troubleshooting__02-upgrade-breakages__013-boot-classes-actuate-health.md
       - 01-spring-boot__087-reference-actuator-endpoints.md

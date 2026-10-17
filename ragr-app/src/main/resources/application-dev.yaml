@@ -131,7 +131,7 @@ spring:
         table-name: vector_store
         schema-name: public
         initialize-schema: false     # created by ragr-ingest's Flyway V1
-        index-type: HNSW
+        index-type: NONE             # exact search; see the vector_store comment in ragr-ingest V1
         distance-type: COSINE_DISTANCE
         dimensions: 768              # nomic-embed-text
     #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
