@@ -17,6 +17,10 @@ public record RetrievedChunkDto(
         @Schema(description = "Similarity to the query, higher is closer", example = "0.8194")
         Double score,
 
+        @Schema(description = "\"keyword\" when the chunk is here because it contains an exact name from the "
+                + "query, which lets it skip the threshold; otherwise \"vector\"", example = "vector")
+        String retrievedBy,
+
         @Schema(description = "Id of the document this chunk came from")
         String documentId,
 

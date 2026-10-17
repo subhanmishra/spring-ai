@@ -14,13 +14,20 @@ How it fits with the other applications is in the [root README](../README.md).
 
 - **Evaluation never slows down an answer.** The turn is handed to Kafka without waiting. If Kafka
   is down, the turn is counted as dropped and the user still gets the answer.
-- **Citations come back as data, not text.** The model cites inline as `(filename, p. N)`. Those
-  citations are checked, fixed where possible, and then taken out of the answer and returned in a
+- **Citations come back as data, not text.** The model cites inline by copying a passage's source
+  line: `(filename)`, or `(filename, p. N)` for a paged source. The prompt only describes the page
+  form when some passage in it has a page. Those citations are checked and then taken out of the answer and returned in a
   separate `citations` list, so a client never has to parse prose.
 - **Retrieval fetches more than the prompt needs.** One vector query fetches a pool of 10 chunks.
   The prompt gets the top 5 above the similarity threshold, exactly what Spring AI's stock
   `QuestionAnswerAdvisor` would give it. The rest of the pool goes to evaluation, which uses it to
   measure what retrieval left out. A pool of 10 costs the same as 5.
+- **Exact names are searched as exact text too (hybrid search).** The vector index (HNSW) is
+  approximate, and embeddings are weakest on names like
+  `org.springframework.boot.actuate.health.HealthIndicator`. When the question contains one - a
+  dotted name, an `@Annotation` or a camelCase word - the chunks containing it take up to 2 of the 5
+  prompt places, replacing the weakest vector chunks. A question with no such name is vector search
+  alone.
 - **Nothing about a turn is stored here.** Redis holds the conversation window and nothing else. Turns,
   scores and ratings live in ragr-eval.
 
@@ -31,7 +38,8 @@ flowchart TD
     req[POST /ai/generate or /ai/generateStream] --> id[conversation id<br/>from X-Conversation-Id, or a new one]
     id --> mem[MessageChatMemoryAdvisor<br/>adds the last 10 messages from Redis]
     mem --> qa[PooledQuestionAnswerAdvisor<br/>embeds the question with the query prefix<br/>and fetches a pool of 10 chunks]
-    qa --> split{top 5 at or above 0.65?}
+    qa --> kw[KeywordSearchService<br/>only if the question names a class, property<br/>or annotation: chunks containing it as exact text]
+    kw --> split{top 5 at or above 0.65,<br/>up to 2 replaced by keyword matches}
     split -- in the prompt --> gen[gemma4:e2b answers<br/>each passage closed by an end marker,<br/>citing inline as filename, or filename, p. N]
     split -- the rest of the pool --> pool[kept for evaluation]
     gen --> save[the turn is saved to Redis]
@@ -47,6 +55,11 @@ and holds its judges until chat is idle, because both share one Ollama runner.
 
 Some details of each step:
 
+- **Keyword matches are chosen strictly.** A name found in more than 20 chunks (`JdbcTemplate`, `OAuth2`)
+  is too common to point anywhere and is ignored. Matches are ranked by their rarest name, then by
+  similarity. They skip the threshold, since the exact name is the evidence. A match already among the
+  vector top 5 keeps its place and takes no extra one. It costs one query of about 30 ms, plus a second
+  embedding of the question when a match is found.
 - **The question is searched as written.** A follow-up that only makes sense in context ("and what
   about the port?") retrieves poorly, because the conversation is not part of the search.
 - **Each passage in the prompt ends with `(end of passage)`.** Without it the model attached a passage
@@ -74,6 +87,9 @@ The embedding model (`nomic-embed-text`, 768 dimensions) must be the same as rag
 | `app.rag.similarity-threshold` | `0.65` | Lowest score a chunk needs to reach the prompt |
 | `app.rag.pool-size` | `10` | Chunks the one vector query fetches; those beyond the prompt go to evaluation |
 | `app.rag.pool-floor` | `0.0` | Lowest score a chunk needs to be in the pool at all |
+| `app.rag.keyword.enabled` | `true` | Search exact names from the question beside the vector search |
+| `app.rag.keyword.max-matches` | `20` | A name found in more chunks than this is ignored as too common |
+| `app.rag.keyword.slots` | `2` | Most prompt places keyword matches can take from the weakest vector chunks |
 | `app.ai.max-chat-messages` | `10` | Messages kept per conversation, and replayed to the model on every turn |
 | `app.events.chat-turns.enabled` | `true` | Publish finished turns to Kafka |
 | `app.events.chat-turns.topic` | `rag.chat.turn.completed` | The turn topic, created at startup |
@@ -203,7 +219,7 @@ authentication: if the `dev` profile ever runs somewhere reachable, block `/api/
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/admin/retrieval/search` | What the vector store returns for a query, with scores, without generating an answer |
+| POST | `/api/v1/admin/retrieval/search` | What retrieval returns for a query, with scores, without generating an answer |
 
 This runs the same search as chat, so it separates a **retrieval** failure (the passage the answer
 needed was never found) from a **generation** failure (it was found and ignored).
@@ -217,7 +233,7 @@ curl -s -X POST http://localhost:8080/api/v1/admin/retrieval/search \
 - `topK` and `similarityThreshold` default to chat's values, and the response says which were used.
   Pass `{"query":"...","topK":20,"similarityThreshold":0.0}` to see the near misses the threshold cut.
 - Pass `documentId` to search one document only.
-- Each hit has its `score`, its ingestion metadata (`pageNumber`, `chunkIndex`, `blockType`, and
+- Each hit has its `score`, `retrievedBy` (`vector`, or `keyword` for an exact-name match), its ingestion metadata (`pageNumber`, `chunkIndex`, `blockType`, and
   `tableIndex` / `tableRows` for tables), and the stored content in two parts: `citation` and `text`.
   `text` starts with the `Section:` line when the chunk has one.
 - `hasCitationHeader: false` marks a chunk stored before citation lines existed. The model cannot cite

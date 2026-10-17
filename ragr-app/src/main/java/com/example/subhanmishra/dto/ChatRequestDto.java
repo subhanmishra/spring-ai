@@ -14,8 +14,8 @@ import jakarta.validation.constraints.Size;
 public record ChatRequestDto(
 
         /*
-         * 4000 characters, about 1,000 tokens. The model's 8192-token window must also hold the system
-         * prompt, the passages and the answer; a much longer question would crowd out the passages.
+         * About 1,000 tokens: the model's context window must also hold the system prompt, the passages
+         * and the answer.
          */
         @NotBlank(message = "prompt must not be blank")
         @Size(max = 4000, message = "prompt must be at most 4000 characters")

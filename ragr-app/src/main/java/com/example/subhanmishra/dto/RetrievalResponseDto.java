@@ -26,7 +26,7 @@ public record RetrievalResponseDto(
         @Schema(description = "Chunks returned. Fewer than topK means the threshold excluded the rest.")
         int hitCount,
 
-        @Schema(description = "Wall-clock time for the embedding call plus the pgvector query")
+        @Schema(description = "Wall-clock time for the embedding call, the pgvector query and the keyword search")
         long tookMillis,
 
         List<RetrievedChunkDto> hits) {

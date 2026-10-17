@@ -1,5 +1,6 @@
 package com.example.subhanmishra.config;
 
+import com.example.subhanmishra.service.KeywordSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -22,17 +23,10 @@ import java.util.HexFormat;
 public class SpringAiConfig {
 
     /**
-     * Spring AI's default RAG template, changed in three ways. {@link PooledQuestionAnswerAdvisor}
-     * renders it.
-     * <ul>
-     *   <li><b>The citation rule is repeated right after the passages.</b> In the system prompt alone it
-     *       sat thousands of tokens away, and the model ignored it.</li>
-     *   <li><b>The closing line is softened.</b> The default ("not prior knowledge ... say you can't
-     *       answer") forbids the general-knowledge answers the system prompt allows.</li>
-     *   <li><b>The passages are said to come from the library, not the user.</b> They are added to the
-     *       <em>user</em> message, so the model thanked the user for "providing the context" - and, with
-     *       nothing retrieved, asked for some. The no-preamble rule sits here too, beside the passages.</li>
-     * </ul>
+     * Spring AI's default RAG template, rendered by {@link PooledQuestionAnswerAdvisor}, adapted so the
+     * citation rules sit right after the passages, general knowledge stays allowed, and the passages are
+     * attributed to the document library rather than the user. {@code citation_rules} is one of
+     * {@link #CITATION_RULES}, chosen by whether any passage has a page.
      */
     private static final PromptTemplate QA_PROMPT_TEMPLATE = new PromptTemplate("""
             {query}
@@ -46,18 +40,7 @@ public class SpringAiConfig {
             {question_answer_context}
             ---------------------
 
-            Each passage above begins with its source on its own line, in square brackets:
-            either [filename] or [filename, p. N].
-
-            When you use a passage, cite it inline by copying that passage's source line exactly,
-            with round brackets instead of square ones:
-            - [filename] becomes (filename) - no page, because the source has none;
-            - [filename, p. N] becomes (filename, p. N).
-            Copy the whole filename, including any number and folder prefix at its start. Never
-            add a page number that is not in the source line, and do not cite a filename that
-            does not appear in a source line above.
-
-            A heading or number inside a passage, such as "5.3. Endpoints", is never a page.
+            {citation_rules}
 
             Prefer the passages over prior knowledge. If part of the answer goes beyond them,
             say so at that point in the answer, not as an opening disclaimer.
@@ -67,13 +50,34 @@ public class SpringAiConfig {
             """);
 
     /**
-     * Indented 24 spaces inside the text block on purpose: that is what the model has always been sent.
-     * Re-indenting would change every prompt, and with it every measurement so far.
+     * How to cite, in two forms: page-less passages are never shown a page format to imitate.
      */
+    private static final PooledQuestionAnswerAdvisor.CitationRules CITATION_RULES =
+            new PooledQuestionAnswerAdvisor.CitationRules("""
+                    Each passage above begins with its source on its own line, in square brackets:
+                    either [filename] or [filename, p. N].
+
+                    When you use a passage, cite it inline by copying that passage's source line exactly,
+                    with round brackets instead of square ones:
+                    - [filename] becomes (filename) - no page, because the source has none;
+                    - [filename, p. N] becomes (filename, p. N).
+                    Copy the whole filename, including any number and folder prefix at its start. Never
+                    add a page number that is not in the source line, and do not cite a filename that
+                    does not appear in a source line above.
+
+                    A heading or number inside a passage, such as "5.3. Endpoints", is never a page.""", """
+                    Each passage above begins with its source on its own line, as [filename].
+
+                    When you use a passage, cite it inline by copying that passage's source line exactly,
+                    with round brackets instead of square ones: [filename] becomes (filename). Copy the
+                    whole filename, including any number and folder prefix at its start, and do not cite
+                    a filename that does not appear in a source line above.""");
+
+    /** Indented 24 spaces on purpose: re-indenting changes the prompt the model is sent. */
     private static final String SYSTEM_PROMPT = """
                                 You are DocAI, an intelligent, versatile AI document intelligence assistant.
                                 Your Capabilities:
-                                1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing document names and page numbers when available. Each retrieved passage begins with its source on its own line, either [filename] or [filename, p. N]. Cite by copying that line exactly, the whole filename included: (filename) for a source without pages, (filename, p. N) only when the line has a page. Never add a page number that does not appear in such a line; a heading number inside a passage, such as "5.3", is never a page.
+                                1. Document-Grounded Q&A: When context from the user's uploaded documents is provided, prioritize and base your answer directly on that context, citing each passage you use by copying its source line, as the instructions beside the passages describe.
                                 2. General Knowledge & Conversation: If the user engages in general conversation (greetings, chit-chat, programming questions, math, explanations, summaries, or general knowledge) that may not be present in the uploaded documents, answer helpfully, accurately, and naturally.
                                 3. Hybrid Synthesis: If the document context partially covers a topic, synthesize the document facts with your broader knowledge to give a complete, high-quality answer.
                                 4. Tone & Format: Be polite but direct - lead with the answer. No greetings, no restating the question, no thanking the user, no closing offers of further help. Use Markdown (headings, bullet points, bold text, code blocks) to make responses easy to read.
@@ -81,11 +85,11 @@ public class SpringAiConfig {
         """;
 
     /**
-     * A short hash of everything the model is told besides the conversation, sent with every turn so
-     * evaluation can split a metric at a prompt change. It includes the passage marker: layout changes
-     * answers as much as wording does.
+     * A short hash of everything the model is told besides the conversation, passage marker included,
+     * sent with every turn so evaluation can split a metric at a prompt change.
      */
     public static final String PROMPT_VERSION = promptVersion(SYSTEM_PROMPT + QA_PROMPT_TEMPLATE.getTemplate()
+                                                              + CITATION_RULES.paged() + CITATION_RULES.pageless()
                                                               + PooledQuestionAnswerAdvisor.PASSAGE_END);
 
     private static String promptVersion(String prompts) {
@@ -98,8 +102,10 @@ public class SpringAiConfig {
     }
 
     @Bean
-    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory, VectorStore vectorStore, RagProperties ragProperties) {
-        var qaAdvisor = new PooledQuestionAnswerAdvisor(vectorStore, QA_PROMPT_TEMPLATE, ragProperties);
+    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory, VectorStore vectorStore,
+                                 KeywordSearchService keywordSearch, RagProperties ragProperties) {
+        var qaAdvisor = new PooledQuestionAnswerAdvisor(vectorStore, keywordSearch, QA_PROMPT_TEMPLATE, CITATION_RULES,
+                                                        ragProperties);
         return builder.defaultSystem(SYSTEM_PROMPT)
                     .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                     .defaultAdvisors(qaAdvisor)

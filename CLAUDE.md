@@ -82,8 +82,10 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 │       │   │               # EventsProperties, WebConfig, EmbeddingConfig (query prefix), OpenApiConfig
 │       │   ├── controller  # ChatController, AdminDiagnosticsController, ConversationIdInterceptor
 │       │   ├── dto, exception (ChatExceptionHandler)
+│       │   ├── entity, repository # KeywordChunk, KeywordChunkRepository: read-only Spring Data JDBC
+│       │   │               # queries on vector_store (ragr-ingest owns it)
 │       │   └── service     # ChatService, ChatTurnPublisher, ChatFeedbackPublisher,
-│       │                   # RetrievalDiagnosticsService
+│       │                   # KeywordSearchService (exact-name hybrid search), RetrievalDiagnosticsService
 │       └── resources       # application.yaml (activates dev), application-dev.yaml (everything),
 │                           # logback-spring.xml
 ├── ragr-ingest      # ingestion (8081, actuator 9097): upload, parse, chunk, embed, store

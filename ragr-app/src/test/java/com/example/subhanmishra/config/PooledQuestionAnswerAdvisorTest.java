@@ -62,6 +62,78 @@ class PooledQuestionAnswerAdvisorTest {
                 (end of passage)""");
     }
 
+    @Test
+    @DisplayName("without keyword matches the prompt is the threshold-filtered prefix, the rest excluded")
+    void selectWithoutKeyword() {
+        List<Document> pool = pool(0.9, 0.8, 0.7, 0.6, 0.5);
+
+        var selection = PooledQuestionAnswerAdvisor.select(pool, List.of(), 5, 0.65);
+
+        assertThat(selection.inContext()).containsExactlyElementsOf(pool.subList(0, 3));
+        assertThat(selection.excluded()).containsExactlyElementsOf(pool.subList(3, 5));
+    }
+
+    @Test
+    @DisplayName("keyword matches replace the weakest vector chunks, below the threshold or not")
+    void keywordReplacesWeakest() {
+        List<Document> pool = pool(0.9, 0.85, 0.8, 0.75, 0.7, 0.6);
+        List<Document> keyword = pool(0.55, 0.5);
+
+        var selection = PooledQuestionAnswerAdvisor.select(pool, keyword, 5, 0.65);
+
+        assertThat(selection.inContext()).containsExactly(pool.get(0), pool.get(1), pool.get(2),
+                                                          keyword.get(0), keyword.get(1));
+        assertThat(selection.excluded()).containsExactly(pool.get(3), pool.get(4), pool.get(5));
+    }
+
+    @Test
+    @DisplayName("a keyword match already in the vector prompt keeps its place and takes no extra one")
+    void keywordAlreadyInPrompt() {
+        List<Document> pool = pool(0.9, 0.85, 0.8, 0.75, 0.7);
+        List<Document> keyword = List.of(pool.get(1));
+
+        var selection = PooledQuestionAnswerAdvisor.select(pool, keyword, 5, 0.65);
+
+        assertThat(selection.inContext()).containsExactlyElementsOf(pool);
+        assertThat(selection.excluded()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a keyword match from lower in the pool moves into the prompt and leaves the excluded list")
+    void keywordFromExcluded() {
+        List<Document> pool = pool(0.9, 0.85, 0.8, 0.75, 0.7, 0.6);
+
+        var selection = PooledQuestionAnswerAdvisor.select(pool, List.of(pool.get(5)), 5, 0.65);
+
+        assertThat(selection.inContext()).containsExactly(pool.get(0), pool.get(1), pool.get(2), pool.get(3),
+                                                          pool.get(5));
+        assertThat(selection.excluded()).containsExactly(pool.get(4));
+    }
+
+    @Test
+    @DisplayName("with few vector chunks above the threshold, keyword matches are added, not swapped in")
+    void keywordAddedToShortPrompt() {
+        List<Document> pool = pool(0.7, 0.5);
+        List<Document> keyword = pool(0.45);
+
+        var selection = PooledQuestionAnswerAdvisor.select(pool, keyword, 5, 0.65);
+
+        assertThat(selection.inContext()).containsExactly(pool.get(0), keyword.get(0));
+        assertThat(selection.excluded()).containsExactly(pool.get(1));
+    }
+
+    @Test
+    @DisplayName("page-less passages get the page-less citation rules; one paged passage switches to the paged ones")
+    void citationRulesFollowThePassages() {
+        var rules = new PooledQuestionAnswerAdvisor.CitationRules("paged", "pageless");
+        Document markdown = new Document("[01-spring-boot__087-reference-actuator-endpoints.md]\n\ntext");
+        Document pdf = new Document("[manual.pdf, p. 375]\n\ntext");
+
+        assertThat(rules.forPassages(List.of(markdown))).isEqualTo("pageless");
+        assertThat(rules.forPassages(List.of())).isEqualTo("pageless");
+        assertThat(rules.forPassages(List.of(markdown, pdf))).isEqualTo("paged");
+    }
+
     private static List<Document> pool(double... scores) {
         return Arrays.stream(scores)
                      .mapToObj(score -> Document.builder().text("chunk " + score).score(score).build())

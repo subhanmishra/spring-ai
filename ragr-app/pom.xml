@@ -13,8 +13,7 @@
     <description>The chat service: grounded Q&amp;A over the indexed corpus, publishing each turn to Kafka</description>
 
     <properties>
-        <!-- Uncapped, the JVM took 726 MB, against 471 MB under the cap. SerialGC: 333 MB in total
-             against 448 MB under G1, over three chat answers. -->
+        <!-- The heap cap. -->
         <ragr.heap>384m</ragr.heap>
     </properties>
 
@@ -40,6 +39,11 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-model-chat-memory-repository-redis</artifactId>
+        </dependency>
+        <!-- KeywordChunkRepository: read-only native queries on vector_store, which ragr-ingest owns. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jdbc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>

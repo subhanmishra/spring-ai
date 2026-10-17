@@ -2,6 +2,7 @@ package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.chunk.ChunkMetadata;
 import com.example.subhanmishra.citation.CitationParser;
+import com.example.subhanmishra.config.PooledQuestionAnswerAdvisor;
 import com.example.subhanmishra.config.RagProperties;
 import com.example.subhanmishra.dto.RetrievalRequestDto;
 import com.example.subhanmishra.dto.RetrievalResponseDto;
@@ -18,7 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Runs the same similarity search the chat path runs, and reports what came back.
+ * Runs the same search the chat path runs - vector and keyword - and reports what came back.
  *
  * <p>It tells a retrieval failure from a generation failure: when an answer is wrong, was the right
  * chunk never found, or found and ignored? Nothing else in the application can say.
@@ -35,10 +36,13 @@ public class RetrievalDiagnosticsService {
     private static final Logger log = LoggerFactory.getLogger(RetrievalDiagnosticsService.class);
 
     private final VectorStore vectorStore;
+    private final KeywordSearchService keywordSearch;
     private final RagProperties ragProperties;
 
-    public RetrievalDiagnosticsService(VectorStore vectorStore, RagProperties ragProperties) {
+    public RetrievalDiagnosticsService(VectorStore vectorStore, KeywordSearchService keywordSearch,
+                                       RagProperties ragProperties) {
         this.vectorStore = vectorStore;
+        this.keywordSearch = keywordSearch;
         this.ragProperties = ragProperties;
     }
 
@@ -69,9 +73,12 @@ public class RetrievalDiagnosticsService {
 
         long startedAt = System.nanoTime();
         List<Document> results = vectorStore.similaritySearch(searchRequest.build());
+        List<Document> keyword = keywordSearch.search(request.query(), documentId);
         long tookMillis = (System.nanoTime() - startedAt) / 1_000_000;
 
-        List<Document> hits = results != null ? results : List.of();
+        // Keyword matches placed exactly as chat places them.
+        List<Document> hits = PooledQuestionAnswerAdvisor.select(results != null ? results : List.of(), keyword,
+                                                                 topK, threshold).inContext();
         log.info("Retrieval probe returned {} hit(s) in {}ms [topK={}, threshold={}, documentId={}]",
                  hits.size(), tookMillis, topK, threshold, documentId);
 
@@ -90,6 +97,7 @@ public class RetrievalDiagnosticsService {
 
         return new RetrievedChunkDto(document.getId(),
                                      document.getScore(),
+                                     "keyword".equals(metadata.get(KeywordSearchService.RETRIEVED_BY)) ? "keyword" : "vector",
                                      ChunkMetadata.asString(metadata.get(ChunkMetadata.DOCUMENT_ID)),
                                      ChunkMetadata.asString(metadata.get(ChunkMetadata.FILE_NAME)),
                                      ChunkMetadata.asInteger(metadata.get(ChunkMetadata.PAGE_NUMBER)),

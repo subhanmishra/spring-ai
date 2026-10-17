@@ -37,8 +37,8 @@ management:
       application: ${spring.application.name}
       env: local
     distribution:
-      # Histograms only for the timers the dashboard takes percentiles from. Buckets for every timer
-      # were 92% of each scrape; everything else still exports _count, _sum and _max, which is all
+      # Histograms only for the timers the dashboard takes percentiles from; buckets for every timer
+      # would dominate each scrape. Everything else still exports _count, _sum and _max, which is all
       # rates and averages need.
       #
       # The keys match by PREFIX, so `spring.ai.advisor` also turns on `spring.ai.advisor.active`.
@@ -54,8 +54,8 @@ management:
         "[spring.ai.advisor.active]": false
         "[db.vector.client.operation.active]": false
         "[spring.ai.chat.client.active]": false
-      # Where the buckets stop. The default, 30s, is shorter than a chat turn (up to ~85s), so slow turns
-      # all read as 30s. 300s is above the slowest answer num-predict allows.
+      # Where the buckets stop. The default, 30s, is shorter than a slow chat turn, which would read as
+      # 30s. 300s is above the slowest answer num-predict allows.
       maximum-expected-value:
         "[http.server.requests]": 300s
         "[gen_ai.client.operation]": 300s
@@ -88,9 +88,9 @@ spring:
         # How long a send may wait for broker metadata. The default, 60s, would hold a thread for a
         # minute while Kafka is down. Sends are already off the chat thread; this bounds each one.
         max.block.ms: 500
-        # Longest wait between reconnect attempts to a broker that is down. At the default, 1s, the
-        # disconnect warning floods the logs; 10s cuts it by about four. The cost: up to ~10s after
-        # the broker returns before sends resume, and turns in that gap are dropped and counted.
+        # Longest wait between reconnect attempts to a broker that is down; at the default, 1s, the
+        # disconnect warning floods the logs. The cost: up to 10s after the broker returns before sends
+        # resume, and turns in that gap are dropped and counted.
         reconnect.backoff.max.ms: 10000
         # Plain JSON, with no header naming this application's class: the consumer has its own type.
         spring.json.add.type.headers: false
@@ -151,26 +151,23 @@ spring:
         model: nomic-embed-text
         keep-alive: "-1"   # keep the model loaded: no ~28s cold start on the first question
       chat:
-        # Chosen for citations, the thing the whole pipeline exists to produce: with the same prompts
-        # and context, llama3.2 cited nothing and gemma4:e2b cited only pages it was given. It is
-        # heavier than Ollama reports, but once loaded it stays alongside nomic-embed-text.
+        # Chosen for citations, the thing the whole pipeline exists to produce: it cites only the pages
+        # it was given.
         model: gemma4:e2b
-        # Do not remove. Thinking output is returned separately and never read, and with it on, answers
-        # ran into num-predict and were cut off mid-sentence. Quoted because it binds to an enum, not
-        # a boolean.
+        # Do not remove. Thinking output is never read, and with it on answers run into num-predict and
+        # are cut off mid-sentence. Quoted because it binds to an enum, not a boolean.
         think: "false"
         # The model's own default is 1.0, and Spring AI sends nothing unless it is set here. Grounded
         # answers want a low temperature.
         temperature: 0.2
-        # The only limit on answer length. Without it a looping generation once ran for 29 minutes.
-        # Answers need at most ~840 tokens with thinking off.
+        # The only limit on answer length, so a looping generation cannot run unbounded. Well above
+        # the longest answer.
         num-predict: 1024
         # Do not remove. Spring AI sends nothing unless set, and the runner's own default disables the
-        # repetition penalty - the 29-minute loop above ran with it off.
+        # repetition penalty, which lets a generation loop.
         repeat-penalty: 1.1
-        # Far below the model's native 131072, to keep memory down (a bigger context cache once evicted
-        # the embedding model). Must stay well above the largest prompt (~2,430 tokens measured):
-        # Ollama cuts an over-long prompt from the START, silently dropping the system prompt.
+        # Far below the model's native 131072, to keep memory down. Must stay well above the largest
+        # prompt: Ollama cuts an over-long prompt from the START, silently dropping the system prompt.
         num-ctx: 8192
     chat:
       # The final prompt sent to Ollama, after the retrieved passages were added.
@@ -204,14 +201,20 @@ app:
   rag:
     # Retrieval only. What is chunked and stored is set in ragr-ingest, under app.ingestion.
     top-k: 5
-    # Sits between the weakest useful chunk (0.667) and the best chunk for a question the corpus cannot
-    # answer (0.618), measured over the golden questions with the task prefixes on. Re-measure after
-    # any embedding change: the scores belong to the model, not the corpus.
+    # Between the weakest useful chunk and the best chunk for a question the corpus cannot answer, over
+    # the golden questions. Re-measure after any embedding change: the scores belong to the model.
     similarity-threshold: 0.65
     # One query fetches this many chunks above pool-floor. The top-k above the threshold go into the
-    # prompt; the rest go to ragr-eval, to measure what retrieval left out. 10 costs the same as 5.
+    # prompt; the rest go to ragr-eval, to measure what retrieval left out.
     pool-size: 10
     pool-floor: 0.0
+    # Hybrid search: names from the question searched as exact text beside the vector search.
+    keyword:
+      enabled: true
+      # A name found in more chunks than this is ignored as too common.
+      max-matches: 20
+      # Keyword matches take at most this many of the top-k prompt places, from the weakest vector chunks.
+      slots: 2
   ai:
     max-chat-messages: 10
 

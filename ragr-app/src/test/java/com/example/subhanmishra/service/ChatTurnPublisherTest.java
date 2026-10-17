@@ -92,7 +92,7 @@ class ChatTurnPublisherTest {
                 new EventsProperties.ChatTurns(enabled, TOPIC, Duration.ofDays(3)),
                 new EventsProperties.Feedback("rag.chat.feedback", Duration.ofDays(3)));
         // Runs the send on the calling thread so the outcome can be asserted straight away.
-        RagProperties rag = new RagProperties(5, 0.6, 10, 0.0);
+        RagProperties rag = new RagProperties(5, 0.6, 10, 0.0, new RagProperties.Keyword(true, 20, 2));
         return new ChatTurnPublisher(template, properties, rag, registry, Runnable::run);
     }
 

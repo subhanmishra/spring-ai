@@ -147,7 +147,10 @@ sequenceDiagram
     C->>R: load the last 10 messages
     C->>O: embed the question, with the query prefix
     C->>P: similarity search, a pool of 10
-    C->>C: top 5 at or above 0.65 into the prompt
+    opt the question names a class, property or annotation
+        C->>P: chunks containing that exact name
+    end
+    C->>C: top 5 at or above 0.65 into the prompt, up to 2 replaced by exact-name matches
     C->>O: generate
     C->>R: save the turn
     C->>C: take citations out of the text
