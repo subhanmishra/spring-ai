@@ -12,7 +12,7 @@
 ARG JAVA_IMAGE=eclipse-temurin:26-jre-noble
 
 # Splits the jar into Spring Boot's four layers, least often changed first, so a code change rebuilds
-# only the small application layer and the ~90 MB of dependencies come from cache. ragr-shared lands in
+# only the small application layer and the dependencies come from cache. ragr-shared lands in
 # the application layer too, as a module of the same build.
 FROM ${JAVA_IMAGE} AS extract
 ARG MODULE

@@ -67,10 +67,7 @@ public class GoldenEvalService {
 
     private static final Logger log = LoggerFactory.getLogger(GoldenEvalService.class);
 
-    /**
-     * Well above a grounded answer (about a minute) plus a cold model load (~35 s). It exists so a hung
-     * chat service fails the run instead of hanging it.
-     */
+    /** Well above a grounded answer plus a cold model load, so a hung chat service fails the run. */
     private static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(5);
 
     private final RestClient chat;
@@ -194,9 +191,8 @@ public class GoldenEvalService {
     /**
      * The two phases.
      *
-     * <p>Every answer first, then every judgement. With a separate judge model, interleaving them would
-     * swap the two models in and out of memory twice per case instead of once per run. Today the judge is
-     * the chat model, so it costs nothing either way; the order is kept for the day it is not.
+     * <p>Every answer first, then every judgement, so a separate judge model would be swapped in once per
+     * run rather than twice per case.
      *
      * <p>Judging is synchronous here, unlike live: no user is waiting, and a run's numbers mean nothing
      * until every case is judged.
@@ -671,9 +667,8 @@ public class GoldenEvalService {
      *                            sits beside it.
      * @param inventedPageCount   citations naming a plain page number the context never offered - the
      *                            failure the citation header and the strippers exist to prevent. Kept
-     *                            apart from {@code citationFabrication}, which moves from run to run with
-     *                            the model's section-number habit; this one is stable, so the build fails
-     *                            on it (see {@code EvalSuiteIT}).
+     *                            apart from {@code citationFabrication}, which moves from run to run; this
+     *                            one is stable, so the build fails on it (see {@code EvalSuiteIT}).
      */
     public record GoldenRunResult(String suite,
                                   int caseCount,

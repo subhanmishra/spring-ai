@@ -41,7 +41,7 @@ public final class PdfBlockReader {
      * The pages that carry content, and how many pages the file actually has.
      *
      * <p>The two differ - pages with no text, or only a footer or contents entries, are dropped - so the
-     * count is kept separately. Otherwise the 645-page manual would report 627 pages.
+     * count is kept separately.
      */
     public record Pdf(int pageCount, List<Page> pages) {
     }

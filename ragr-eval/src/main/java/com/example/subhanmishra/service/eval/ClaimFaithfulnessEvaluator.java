@@ -18,8 +18,8 @@ import java.util.regex.Pattern;
  * unsupported sentence fails that judge exactly as a fabricated answer does; this one tells them apart.
  *
  * <p>Two calls, not one per claim: first list the claims from the answer alone, then show the passages
- * once and ask for a verdict per numbered claim. Reading the passages costs ~10 s, so once per claim would
- * cost ~10 s per claim.
+ * once and ask for a verdict per numbered claim. Reading the passages dominates each call, so it is done
+ * once.
  *
  * <p>The price is a longer reply to keep in order. A claim left without a verdict abandons the
  * measurement (null) rather than being guessed.

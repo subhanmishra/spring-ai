@@ -15,9 +15,9 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li><b>Wrong citations.</b> The printed number is rarely the PDF page number - front matter shifts it
  *       - and the model prefers the printed one at the bottom of a passage over the correct one in its
- *       header. Readers following those citations landed 19 pages early.</li>
+ *       header.</li>
  *   <li><b>Useless chunks.</b> A page whose last block is only the footer makes a chunk holding just a
- *       number, and those were retrieved in place of real content.</li>
+ *       number, which can be retrieved in place of real content.</li>
  * </ul>
  *
  * <p><b>Found by agreement across the document</b>, not by pattern alone, since a code block or a table

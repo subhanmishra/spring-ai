@@ -29,7 +29,3 @@ datasources:
           field: job
           target:
             expr: '{app="$${job}"}'
-      #
-      # A per-endpoint link on the `uri` label was tried and removed: no log line contains the URI.
-      # To make it work, put the URI in MDC, emit it as structured metadata in logback-spring.xml, and
-      # key the correlation on that.

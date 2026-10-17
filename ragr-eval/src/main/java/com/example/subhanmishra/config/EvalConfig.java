@@ -26,13 +26,9 @@ import org.springframework.util.StringUtils;
  * retrieval or memory advisor: it would grade the answer against passages the answer never saw, or let
  * each verdict lean on the ones before it - and nothing would throw or look wrong.
  *
- * <p><b>The judges reuse the chat model</b> - a memory decision, not a quality one. With the chat and
- * embedding models loaded the machine has about 1 GB of RAM left, and the smallest dedicated judge
- * ({@code bespoke-minicheck}) needs 4.39 GiB. The resident chat model costs nothing more.
- *
- * <p><b>The price is self-judging bias.</b> A model grading itself is more generous than an independent
- * judge, so the rates are optimistic. They still show <em>change</em>: the bias is roughly constant, so a
- * drop after a prompt or model change is real. Read them as a trend, never as a score to quote.
+ * <p><b>The judges reuse the chat model</b> - a memory decision, not a quality one: a dedicated judge does
+ * not fit beside the chat and embedding models. The price is self-judging bias, so the rates are
+ * optimistic: read them as a trend, never as a score to quote.
  */
 @Configuration
 @ConditionalOnProperty(prefix = "app.eval", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -46,8 +42,8 @@ public class EvalConfig {
      *       which the same answer gets different verdicts run to run.</li>
      *   <li><b>A small {@code num-predict}.</b> A verdict is one word; without a cap a judge that starts
      *       explaining holds the one model runner for minutes.</li>
-     *   <li><b>Thinking off.</b> It is returned separately and never read, and it used up the whole output
-     *       budget before the YES or NO - an empty verdict.</li>
+     *   <li><b>Thinking off.</b> It is never read, and it uses up the output budget before the YES or NO,
+     *       leaving an empty verdict.</li>
      * </ul>
      */
     private OllamaChatOptions.Builder judgeOptions(EvalProperties properties) {
@@ -124,9 +120,7 @@ public class EvalConfig {
                        .defaultAdvisors(new JudgeLineEndingAdvisor());
     }
 
-    /**
-     * Most citation checks per answer. Answers cite 2-3 pages on average, so this only bounds outliers.
-     */
+    /** Most citation checks per answer; bounds outliers. */
     private static final int MAX_CITATION_CHECKS = 6;
 
     /** Grades every chunk of a turn's pool for the question - the source of live retrieval metrics. */

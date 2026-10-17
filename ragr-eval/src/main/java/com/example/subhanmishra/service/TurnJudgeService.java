@@ -53,9 +53,8 @@ import java.util.concurrent.TimeoutException;
  *   <li><b>completeness</b> - whether every part of the question was answered.</li>
  * </ol>
  *
- * <p><b>Cost.</b> Whole grounded turns have taken 42-66 s of judge time; adding up each stage's slowest
- * case gives up to ~90-100 s. Either way the idle gate makes it affordable: it is spent only while nobody
- * is waiting.
+ * <p><b>Cost.</b> Tens of seconds of judge time per grounded turn, affordable because the idle gate spends
+ * it only while nobody is waiting.
  *
  * <p>A stage that times out or returns nonsense leaves its fields null and the turn PARTIAL, and the
  * later stages still run. A worker stopped mid-turn is different: it throws {@link Interrupted}, so the

@@ -13,9 +13,7 @@
     <description>Document ingestion: upload, parse, chunk, embed and index into pgvector</description>
 
     <properties>
-        <!-- Uncapped, the JVM sized its heap to 4 GB. Storing the reference manual peaks at ~354 MB of
-             heap under this cap. SerialGC: 516 MB in total against 688 MB under G1, for under a second
-             more GC over a whole upload. -->
+        <!-- The heap cap. -->
         <ragr.heap>512m</ragr.heap>
     </properties>
 

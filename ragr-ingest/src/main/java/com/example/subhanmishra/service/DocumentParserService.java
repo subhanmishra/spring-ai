@@ -355,8 +355,7 @@ public class DocumentParserService {
      * Groups one source unit's blocks into chunks that fill {@code app.ingestion.chunk-size} tokens.
      * <p>
      * Paragraphs are joined until the next one would go over the budget, or until a heading starts a new
-     * section (see {@link ProseGroups#addHeading}). Without joining, every short paragraph was a chunk of
-     * its own.
+     * section (see {@link ProseGroups#addHeading}).
      * <p>
      * A code block joins the prose around it, but whole: if it does not fit the open group, the group is
      * closed first, and a block bigger than the budget gets chunks of its own (see {@link #splitCode}).
@@ -371,9 +370,8 @@ public class DocumentParserService {
      * @param blocks          the blocks of one page, one Tika document or one Markdown file, in reading order
      * @param sourceMetadata  metadata carried onto every chunk produced from this unit
      * @param tablesJoinProse Markdown only: a table that is one piece and fits the open group joins it,
-     *                        like a code block. Reference pages describe each option in a sentence over
-     *                        a three-row table, and kept apart each made two chunks of about 80 tokens,
-     *                        half of them header. PDF tables stay apart: their detection can be wrong.
+     *                        like a code block, so a sentence and the small table it introduces stay one
+     *                        chunk. PDF tables stay apart: their detection can be wrong.
      */
     List<Document> coalesceBlocks(List<ContentBlock> blocks, Map<String, Object> sourceMetadata, boolean tablesJoinProse) {
         List<Document> chunks = new ArrayList<>();

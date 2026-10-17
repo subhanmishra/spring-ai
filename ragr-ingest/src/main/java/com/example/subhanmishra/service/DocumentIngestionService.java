@@ -288,10 +288,8 @@ public class DocumentIngestionService {
      * {@code CitationParser.stripHeader}.
      *
      * <p><b>Why the section line.</b> A chunk can start with an example whose heading fell in the chunk
-     * before, and then nothing in it says what the example configures. Naming the section fixed answers
-     * that took the actuator's {@code management.server.port} for the application's own port, where a
-     * prompt rule had not. The product and version also tell apart pages that several projects share
-     * word for word.
+     * before, and then nothing in it says what the example configures; the section line says it. The
+     * product and version also tell apart pages that several projects share word for word.
      */
     private static String citationHeader(String fileName, Object pageNumber, @Nullable String section) {
         // Formats without pages get no page: a wrong citation is worse than a missing one.

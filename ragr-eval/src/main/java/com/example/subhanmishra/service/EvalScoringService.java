@@ -58,8 +58,8 @@ public class EvalScoringService {
     private static final int REFUSAL_WINDOW_CHARS = 200;
 
     /**
-     * The model repeating its instructions instead of following them - it has happened, and looks like a
-     * normal answer to every other metric here.
+     * The model repeating its instructions instead of following them, which looks like a normal answer to
+     * every other metric here.
      */
     private static final Pattern ECHOED_INSTRUCTION = Pattern.compile(
             "(remember to cite|be sure to cite|cite your sources|don't forget to cite)",

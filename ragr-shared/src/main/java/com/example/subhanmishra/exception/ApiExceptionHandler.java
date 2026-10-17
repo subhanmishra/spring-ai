@@ -103,7 +103,7 @@ public abstract class ApiExceptionHandler {
      * <ul>
      *   <li><b>Spring MVC's own exceptions pass through</b> with their own status - 405 for a wrong
      *       method, 415 for a wrong {@code Content-Type}, and so on - because most are an
-     *       {@link ErrorResponse}. Without this check every one became a 500. Not all of them are, so
+     *       {@link ErrorResponse}. Without this check every one would be a 500. Not all of them are, so
      *       check before assuming one is covered: the unreadable-body case above is the exception.</li>
      *   <li><b>Anything else is a 500 with a fixed message.</b> The real message (JDBC, Ollama, internal)
      *       is no use to a caller and should not reach one; it is logged with its stack trace.</li>

@@ -18,10 +18,9 @@
 
     <properties>
         <spring-boot.run.skip>false</spring-boot.run.skip>
-        <!-- Each application sets its heap cap, ragr.heap. Every JVM is capped and runs SerialGC: the
-             machine has only a few hundred MB to spare beside the two models, and SerialGC used a
-             quarter less memory than G1 with no pause anyone noticed. The same options must reach the
-             IntelliJ run configurations and JDK_JAVA_OPTIONS in compose.yaml. -->
+        <!-- Each application sets its heap cap, ragr.heap. Every JVM is capped and runs SerialGC, to fit
+             beside the two models. The same options must reach the IntelliJ run configurations and
+             JDK_JAVA_OPTIONS in compose.yaml. -->
         <ragr.jvm.options>-Xmx${ragr.heap} -XX:+UseSerialGC</ragr.jvm.options>
     </properties>
 

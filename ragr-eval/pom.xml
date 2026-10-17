@@ -13,8 +13,7 @@
     <description>Scores answer quality: live chat turns from Kafka, and the curated golden suite</description>
 
     <properties>
-        <!-- Measured at 265 MB in total, 63 MB of heap. The test JVM, which runs EvalSuiteIT beside
-             ragr-app and both models, reached 930 MB uncapped. -->
+        <!-- The heap cap, for the application and the EvalSuiteIT test JVM alike. -->
         <ragr.heap>256m</ragr.heap>
     </properties>
 

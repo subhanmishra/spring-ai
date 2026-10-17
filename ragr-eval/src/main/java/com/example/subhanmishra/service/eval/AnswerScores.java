@@ -9,8 +9,8 @@ import java.util.List;
  *                       (the {@code think} setting in ragr-app's application-dev.yaml)
  * @param refused        whether the assistant declined. Tracked because restoring Spring AI's stock
  *                       template wording would make it refuse general questions it is meant to answer
- * @param echoedInstruction whether the answer repeats the citation instruction instead of following it -
- *                       which has happened, and looks like a normal answer to every other metric
+ * @param echoedInstruction whether the answer repeats the citation instruction instead of following it,
+ *                       which looks like a normal answer to every other metric
  * @param matchedPhrases expected phrases found, for a golden case that declared them
  * @param missingPhrases expected phrases absent
  * @param forbiddenFound forbidden phrases present

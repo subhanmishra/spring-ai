@@ -103,8 +103,8 @@ services:
     volumes:
       # Persisted, so retained turns survive a restart and can be replayed through a new metric.
       - ./docker-volume/kafka:/var/lib/kafka/data
-    # Without this, `up --wait` calls the broker ready while it is still recovering its log (about a
-    # minute), and the applications cannot connect. The image has no Kafka tools, so it probes the port,
+    # Without this, `up --wait` calls the broker ready while it is still recovering its log, and the
+    # applications cannot connect. The image has no Kafka tools, so it probes the port,
     # which opens exactly when the broker starts serving.
     healthcheck:
       test: [ "CMD", "nc", "-z", "localhost", "29092" ]
@@ -116,14 +116,13 @@ services:
 
   # A browser view of Kafka: the stored turns and ratings as JSON, and the ragr-eval group's offsets.
   # Grafana shows rates and lag; this shows the messages. Redpanda Console because it is a small Go
-  # binary (~50 MiB), not a JVM. The limit is ~2.5x that, so a leak ends in a kill rather than taking
-  # memory from the models. Pinned, not latest, for the same reason.
+  # binary, not a JVM. The limit makes a leak end in a kill rather than take memory from the models.
+  # Pinned, not latest.
   kafka-console:
     image: redpandadata/console:v3.12.0
     container_name: ai_kafka-console
     mem_limit: 128m
-    # It gives up after ~31 s without the broker, and a Kafka restart takes about a minute, so it is
-    # restarted until the broker answers.
+    # It gives up soon without the broker, so it is restarted until the broker answers.
     restart: on-failure
     environment:
       KAFKA_BROKERS: 'kafka:29092'
@@ -272,8 +271,7 @@ services:
   # - depends_on lists only infrastructure, never another application, so each starts alone. No restart
   #   policy, so Docker Desktop starting at login does not bring them up behind an IntelliJ session.
   #
-  # Ollama is not in a container (the WSL2 VM cannot use the iGPU) nor replaced by Docker Model Runner
-  # (slower prompt reading and more memory, measured 2 Oct 2026).
+  # Ollama runs on the host, not in a container: the WSL2 VM cannot use the iGPU.
   ragr-app:
     profiles: [ "apps" ]
     image: ragr-app:local
@@ -282,12 +280,11 @@ services:
       context: .
       args:
         MODULE: ragr-app
-    # Above the JVM's worst case (heap cap plus ~218 MiB outside the heap, measured), so a full heap is an
+    # Above the JVM's worst case - the heap cap plus what it uses outside the heap - so a full heap is an
     # OutOfMemoryError the log explains, never a silent kill. The limit stops a native leak taking memory
     # from the models; it reserves nothing.
     mem_limit: 650m
-    # Docker here waited only 3 s before killing the JVM, cutting off requests, logs and traces. 40 s
-    # covers Spring Boot's 30 s graceful shutdown.
+    # Covers Spring Boot's 30 s graceful shutdown, so requests, logs and traces are not cut off.
     stop_grace_period: 40s
     environment:
       <<: *ragr-common-env
@@ -321,7 +318,7 @@ services:
       context: .
       args:
         MODULE: ragr-ingest
-    # 512 MB heap cap plus ~245 MiB outside it, with room for upload threads - see ragr-app above.
+    # The heap cap plus what the JVM uses outside it, with room for upload threads - see ragr-app.
     mem_limit: 850m
     environment:
       <<: *ragr-common-env
@@ -349,7 +346,7 @@ services:
       context: .
       args:
         MODULE: ragr-eval
-    # 256 MB heap cap plus ~184 MiB outside it - see ragr-app above.
+    # The heap cap plus what the JVM uses outside it - see ragr-app.
     mem_limit: 480m
     # Covers app.eval.judge.shutdown-wait-seconds (20) for the judgement in flight; raise both together.
     stop_grace_period: 40s

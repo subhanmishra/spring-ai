@@ -8,16 +8,14 @@ import java.util.List;
  * One piece of a document as a reader found it, before chunking: prose, a table, and - from Markdown
  * only - a heading or a code block.
  * <p>
- * Plain text cannot say "these lines are one table", so tables used to be merged with the prose around
- * them and cut in half, leaving rows without their header. Marking the kind lets the chunker keep a
- * table, or a code block, together.
+ * Plain text cannot say "these lines are one table"; marking the kind lets the chunker keep a table, with
+ * its header, or a code block together.
  */
 public sealed interface ContentBlock {
 
     /**
      * A heading the source marked as one ({@code ## Title} in Markdown). It moves the section path on and
-     * may start a new chunk. Headings are never guessed from plain text: the PDF guesses mislabelled
-     * thousands of chunks.
+     * may start a new chunk. Headings are never guessed from plain text.
      *
      * @param level 1 to 6
      * @param text  the heading's words, without the {@code #} marks

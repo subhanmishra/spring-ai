@@ -14,9 +14,9 @@ import java.time.Duration;
  *                          rule-based metrics
  * @param topic             where ragr-app publishes turns; the live consumer and the golden suite read it
  * @param feedbackTopic     where ragr-app publishes ratings
- * @param judgeModel        the judges' Ollama model: the chat model, on purpose. With it and the embedding
- *                          model loaded the machine has ~1 GB left, so any other judge would evict one of
- *                          them on every call. The price is self-judging bias (see {@code EvalConfig}).
+ * @param judgeModel        the judges' Ollama model: the chat model, on purpose, since any other judge
+ *                          would evict a resident model on every call. The price is self-judging bias (see
+ *                          {@code EvalConfig}).
  *                          To move the judges elsewhere, point {@code spring.ai.ollama.base-url} at another
  *                          server, and the idle gate can be turned off.
  * @param judgeTemperature  judges answer YES or NO, so near-deterministic. Spring AI sends nothing unless
@@ -49,9 +49,8 @@ public record EvalProperties(boolean enabled,
      *
      * @param enabled          whether live turns are scored at all
      * @param judgeSampleRate  share of turns queued for the judges, 0.0 to 1.0. Zero keeps the free
-     *                         rule-based metrics. A grounded turn costs about a minute of judge time (see
-     *                         {@code TurnJudgeService}); the queue absorbs bursts, and
-     *                         {@link Judge#maxBacklogAge} bounds how far behind it may fall.
+     *                         rule-based metrics. The queue absorbs bursts, and {@link Judge#maxBacklogAge}
+     *                         bounds how far behind it may fall.
      * @param reviewSampleRate random share of live turns put in the human review queue, beside every
      *                         thumbs-down and every user-judge disagreement. Without a random share the
      *                         reviewed set would hold only failures, and judge-human agreement would mean

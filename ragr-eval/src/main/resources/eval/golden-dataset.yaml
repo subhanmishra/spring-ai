@@ -73,8 +73,7 @@ cases:
     expectedFilesMode: ANY
     category: TROUBLESHOOTING
     # The property fails unless "management port" or "management server port" comes within 120
-    # characters before it, which lets a correctly labelled aside through. Checked against 15 answers on
-    # 6 Oct 2026: all 12 that offered it as the application's port fail, all 3 asides pass.
+    # characters before it, which lets a correctly labelled aside through.
     mustNotMatch:
       - '(?<!\bmanagement (?:server )?port\b[\s\S]{0,120})management\.server\.port'
 
@@ -285,10 +284,10 @@ cases:
       After upgrading to Spring Boot 4, my import of org.springframework.boot.actuate.health.HealthIndicator
       no longer compiles. Where does HealthIndicator live now?
     description: >-
-      An exact-identifier lookup, kept as the hybrid-search tripwire. The upgrade map that lists the
-      move (013) is not in the top 10: embeddings do not match a fully qualified class name. The answer
-      is still reachable, because the actuator endpoints page's examples import the new package (rank
-      1, 0.793). If both stop being retrieved, keyword search is the fix, not a rephrase.
+      An exact-identifier lookup, guarding keyword search. The upgrade map that lists the move (013) is
+      the only chunk containing the fully qualified name, so keyword search puts it in the prompt even
+      when the approximate vector index misses it - as the index built during ingestion did (exact
+      search ranks it 3rd-5th, 0.765-0.747). The actuator endpoints page ranks 1st (0.793).
     expectedFiles:
       - 29-troubleshooting__02-upgrade-breakages__013-boot-classes-actuate-health.md
       - 01-spring-boot__087-reference-actuator-endpoints.md

@@ -47,7 +47,7 @@ spring:
       base-url: http://localhost:11434
       embedding:
         model: nomic-embed-text
-        keep-alive: "-1"   # keep the model loaded: no ~28s cold start, and no startup race for batches
+        keep-alive: "-1"   # keep the model loaded: no cold start, and no startup race for batches
 
 server:
   port: 8081
@@ -62,8 +62,7 @@ management:
       application: ${spring.application.name}
   server:
     port: 9097
-  # The Spring Boot 4 key. The old management.otlp.tracing.endpoint is accepted silently but ignored,
-  # and with it no traces reached Tempo at all.
+  # The Spring Boot 4 key; the old management.otlp.tracing.endpoint is silently ignored.
   opentelemetry:
     tracing:
       export:
@@ -100,8 +99,8 @@ management:
         "[http.server.requests.active]": false
         "[gen_ai.client.operation.active]": false
         "[db.vector.client.operation.active]": false
-      # Where the buckets stop. The default, 30s, is far shorter than one upload (~240s for the manual),
-      # so every upload read as 30s. 900s covers a file near the 25MB limit.
+      # Where the buckets stop. The default, 30s, is far shorter than one upload, which would read as
+      # 30s. 900s covers a file near the 25MB limit.
       maximum-expected-value:
         "[http.server.requests]": 900s
         "[gen_ai.client.operation]": 300s
@@ -142,8 +141,8 @@ app:
                                  # replaces the PDF reader, so prose is read differently too.
     markdown:
       drop-tab-labels: Kotlin, Xml   # example tabs dropped when the same group has a Java tab
-    batch-size: 35               # chunks per embedding call. Cost follows tokens, not chunks: ~9.1k per
-                                 # batch at today's mean of 261 tokens a chunk. Revisit if chunk-size changes.
+    batch-size: 35               # chunks per embedding call. Cost follows tokens, not chunks: revisit if
+                                 # chunk-size changes.
     concurrency: 4               # batches written at once; well below the pool's 20 connections
     max-attempts: 3              # only when Ollama's model runner is unreachable; anything else fails at once
     retry-backoff: 2s            # doubled on each retry

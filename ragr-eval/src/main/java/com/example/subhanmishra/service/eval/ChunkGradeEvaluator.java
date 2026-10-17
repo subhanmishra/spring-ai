@@ -18,15 +18,14 @@ import org.springframework.ai.document.Document;
  * judge answers YES to anything on topic. Grade 1 gives "on topic, but no answer" somewhere to go; only 2
  * counts as relevant.
  *
- * <p><b>Asked on four points, stored on three.</b> On 0/1/2 the model graded nearly every on-topic chunk
- * 2. Splitting "the whole answer" (3) from "part of the answer" (2) gave the best agreement with grades
- * assigned by hand; both are stored as 2, so stored grades keep their meaning.
+ * <p><b>Asked on four points, stored on three.</b> "The whole answer" (3) and "part of the answer" (2) are
+ * both stored as 2, so stored grades keep their meaning.
  *
  * <p>No examples in the prompt: they could only come from the hand-graded golden cases, and would make
  * agreement there overstate agreement on live traffic.
  *
- * <p>One short call per chunk (1-3.5 s), not one call for the whole pool, so a user arriving mid-call
- * waits seconds, not the whole pool.
+ * <p>One short call per chunk, not one for the whole pool, so a user arriving mid-call waits seconds, not
+ * the whole pool.
  */
 public class ChunkGradeEvaluator {
 

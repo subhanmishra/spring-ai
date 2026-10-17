@@ -52,8 +52,7 @@ management:
   observations:
     key-values:
       application: ${spring.application.name}
-  # The Spring Boot 4 key. The old management.otlp.tracing.endpoint is accepted silently but ignored,
-  # and with it no traces reached Tempo at all.
+  # The Spring Boot 4 key; the old management.otlp.tracing.endpoint is silently ignored.
   opentelemetry:
     tracing:
       export:
@@ -91,8 +90,8 @@ app:
     # Where ragr-app publishes ratings.
     feedback-topic: rag.chat.feedback
     enabled: true
-    # The SAME model as chat - a memory decision, not a quality one. With the chat and embedding models
-    # loaded the machine has ~1 GB left; the smallest dedicated judge needs 4.39 GiB.
+    # The SAME model as chat - a memory decision, not a quality one: a dedicated judge does not fit
+    # beside the chat and embedding models.
     # The price is self-judging bias: the rates are optimistic. Read them as a TREND (the bias is roughly
     # constant, so a drop after a change is real), never as a score to quote.
     judge-model: gemma4:e2b
@@ -107,9 +106,8 @@ app:
     judge-num-ctx: 8192
     online:
       enabled: true
-      # Which turns are QUEUED for the judges. The rule-based metrics run on every turn regardless. It no
-      # longer protects chat latency - the idle gate does that - only how far behind the queue falls, at
-      # about a minute of judge time per grounded turn.
+      # Which turns are QUEUED for the judges. The rule-based metrics run on every turn regardless. It
+      # bounds how far behind the queue falls; the idle gate protects chat latency.
       judge-sample-rate: 1.0
       # Random share put in the human review queue, beside every thumbs-down and every user-judge
       # disagreement, so the reviewed set is not only failures.
@@ -124,7 +122,7 @@ app:
       poll-interval: 2s
       # A queued turn not reached by then is SKIPPED and counted, so the queue never runs hours behind.
       max-backlog-age: 6h
-      # Per judge call; the slowest seen was 22 s. This catches a stuck Ollama, not a slow one.
+      # Per judge call. This catches a stuck Ollama, not a slow one.
       call-timeout-seconds: 120
       # How long shutdown lets the call in flight finish before interrupting it (the turn goes back to
       # PENDING). Must fit inside the container's 40 s stop_grace_period.

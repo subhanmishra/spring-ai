@@ -12,12 +12,10 @@
 --   live or golden, with its deterministic scores, the judges' verdicts, the user's rating and any human
 --   review. Live rows are purged after app.eval.retention.live-days by EvalRetentionService.
 --
--- Live turns were once deliberately NOT stored, because a row per turn would have meant a database write
--- on the chat path. That reason went when evaluation moved to its own application behind Kafka: the write
--- now happens in ragr-eval, off the chat path entirely. What storing them buys is everything a counter
--- cannot hold - which turn failed and why, the joint outcome of retrieval and generation on the SAME turn
--- (the debugging matrix), a queue the judges can work through at their own pace, and rows a human can
--- review. Prometheus still carries the rates; these tables carry the evidence.
+-- Live turns are stored - written here, off the chat path - for what a counter cannot hold: which turn
+-- failed and why, the joint outcome of retrieval and generation on the SAME turn (the debugging matrix),
+-- a queue the judges work through at their own pace, and rows a human can review. Prometheus carries
+-- the rates; these tables carry the evidence.
 --
 -- Unlike document_metadata_history, whose missing foreign key is deliberate so that an audit trail
 -- survives the deletion of its document, a case result has no meaning without its run. The foreign key
