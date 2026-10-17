@@ -1,22 +1,22 @@
 package com.example.subhanmishra.entity;
 
+import com.example.subhanmishra.service.eval.GoldenRunResult;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * One execution of the curated evaluation suite.
+ * One execution of the curated evaluation suite, with its rule-based aggregates and regression verdict.
  *
- * <p>A record: rows are written once and never changed. A null {@code id} lets Postgres generate one.
+ * <p>A null {@code id} lets Postgres generate one. The judges' verdicts on the run's turns are aggregated
+ * from {@code eval_turn} by {@code run_id}, since they arrive after the run completes.
  *
- * <p><b>The settings columns are the point of the table.</b> A score without the chat model, judge
- * model, top-k and threshold behind it cannot be compared with any other.
- *
- * <p>The corpus is not recorded here, but each case's turn carries its chunks' pipeline versions, and
- * the dashboard marks every re-ingest: runs either side of one scored different chunks.
+ * <p><b>The settings columns are the point of the table.</b> A score without the chat model, top-k and
+ * threshold behind it cannot be compared with any other.
  */
 @Table(name = "eval_run")
 public record EvalRun(@Id @Nullable UUID id,
@@ -27,102 +27,62 @@ public record EvalRun(@Id @Nullable UUID id,
                       int caseCount,
                       int passedCount,
                       @Nullable String chatModel,
-                      @Nullable String judgeModel,
-                      boolean judged,
                       @Nullable Integer topK,
                       @Nullable Double similarityThreshold,
                       @Nullable Double hitRate,
                       @Nullable Double meanReciprocalRank,
                       @Nullable Double contextPrecision,
                       @Nullable Double precisionAtK,
-                      @Nullable Double judgedContextPrecision,
-                      @Nullable Double judgedPrecisionAtK,
                       @Nullable Double citedContextPrecision,
                       @Nullable Double citedPrecisionAtK,
                       @Nullable Double recallAtK,
                       @Nullable Double ndcgAtK,
                       @Nullable Double citationValidity,
                       @Nullable Double citationFabrication,
-                      @Nullable Double relevancyRate,
-                      @Nullable Double groundednessRate,
+                      int citationsEmitted,
+                      int inventedPages,
                       @Nullable Double phraseCoverage,
                       @Nullable Long durationMillis,
-                      @Nullable String errorMessage) {
+                      @Nullable String errorMessage,
+                      @Nullable Boolean gatePassed,
+                      @Nullable String gateFailures) {
 
-    /**
-     * A run about to start. Chat's settings are not known yet; {@link #withPipeline} fills them in from the
-     * first turn.
-     */
-    public static EvalRun starting(String suite,
-                                   int caseCount,
-                                   @Nullable String judgeModel,
-                                   boolean judged) {
+    /** A run about to start. Chat's settings are filled in from its turns when it completes. */
+    public static EvalRun starting(String suite, int caseCount) {
         return new EvalRun(null, suite, EvalRunStatus.RUNNING, Instant.now(), null, caseCount, 0,
-                           null, judgeModel, judged, null, null,
-                           null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                           null, null, null);
+                           null, null, null, null, null, null, null, null, null, null, null, null, null,
+                           0, 0, null, null, null, null, null);
     }
 
     /**
-     * The chat model and retrieval settings the run's answers were produced with, as the first turn
-     * reported them.
+     * @param chatModel           the chat model and retrieval settings the run's turns reported
+     * @param gateFailures        each regression threshold the run missed; empty when it passed
      */
-    public EvalRun withPipeline(@Nullable String chatModel, int topK, double similarityThreshold) {
-        return new EvalRun(id, suite, status, startedAt, finishedAt, caseCount, passedCount,
-                           chatModel, judgeModel, judged, topK, similarityThreshold,
-                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
-                           judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
-                           citedPrecisionAtK, recallAtK, ndcgAtK, citationValidity, citationFabrication,
-                           relevancyRate, groundednessRate, phraseCoverage,
-                           durationMillis, errorMessage);
-    }
-
-    /**
-     * @param contextPrecision       reference-based, from the dataset's expected pages. Null when no
-     *                               case in the run scored recall.
-     * @param judgedContextPrecision from the per-chunk judge; null (not zero) on an unjudged run, the
-     *                               default
-     * @param citedContextPrecision  a chunk counted as used when the answer cites its page. Free, so on
-     *                               every run; null only when no case retrieved anything.
-     * @param recallAtK              page-level recall against expected pages, averaged over the cases that
-     *                               declare them; null when none does. {@code ndcgAtK} likewise.
-     * @param phraseCoverage         share of expected phrases found, over the cases that declare any.
-     */
-    public EvalRun completed(int passedCount,
-                             double hitRate,
-                             double meanReciprocalRank,
-                             @Nullable Double contextPrecision,
-                             @Nullable Double precisionAtK,
-                             @Nullable Double judgedContextPrecision,
-                             @Nullable Double judgedPrecisionAtK,
-                             @Nullable Double citedContextPrecision,
-                             @Nullable Double citedPrecisionAtK,
-                             @Nullable Double recallAtK,
-                             @Nullable Double ndcgAtK,
-                             double citationValidity,
-                             double citationFabrication,
-                             @Nullable Double relevancyRate,
-                             @Nullable Double groundednessRate,
-                             @Nullable Double phraseCoverage) {
+    public EvalRun completed(GoldenRunResult result,
+                             @Nullable String chatModel,
+                             @Nullable Integer topK,
+                             @Nullable Double similarityThreshold,
+                             List<String> gateFailures) {
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.COMPLETED, startedAt, finished, caseCount,
-                           passedCount, chatModel, judgeModel, judged, topK, similarityThreshold,
-                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
-                           judgedContextPrecision, judgedPrecisionAtK, citedContextPrecision,
-                           citedPrecisionAtK, recallAtK, ndcgAtK, citationValidity, citationFabrication,
-                           relevancyRate, groundednessRate, phraseCoverage,
-                           finished.toEpochMilli() - startedAt.toEpochMilli(), null);
+                           result.passedCount(), chatModel, topK, similarityThreshold,
+                           result.hitRate(), result.meanReciprocalRank(),
+                           result.contextPrecision(), result.precisionAtK(),
+                           result.citedContextPrecision(), result.citedPrecisionAtK(),
+                           result.recallAtK(), result.ndcgAtK(),
+                           result.citationValidity(), result.citationFabrication(),
+                           result.citationsEmitted(), result.inventedPageCount(), result.phraseCoverage(),
+                           finished.toEpochMilli() - startedAt.toEpochMilli(), null,
+                           gateFailures.isEmpty(), gateFailures.isEmpty() ? null : String.join("; ", gateFailures));
     }
 
     public EvalRun failed(String message) {
         Instant finished = Instant.now();
         return new EvalRun(id, suite, EvalRunStatus.FAILED, startedAt, finished, caseCount, passedCount,
-                           chatModel, judgeModel, judged, topK, similarityThreshold,
-                           hitRate, meanReciprocalRank, contextPrecision, precisionAtK,
-                           judgedContextPrecision, judgedPrecisionAtK,
-                           citedContextPrecision, citedPrecisionAtK, recallAtK, ndcgAtK,
-                           citationValidity, citationFabrication,
-                           relevancyRate, groundednessRate, phraseCoverage,
-                           finished.toEpochMilli() - startedAt.toEpochMilli(), message);
+                           chatModel, topK, similarityThreshold, hitRate, meanReciprocalRank,
+                           contextPrecision, precisionAtK, citedContextPrecision, citedPrecisionAtK,
+                           recallAtK, ndcgAtK, citationValidity, citationFabrication, citationsEmitted,
+                           inventedPages, phraseCoverage, finished.toEpochMilli() - startedAt.toEpochMilli(),
+                           message, gatePassed, gateFailures);
     }
 }

@@ -37,13 +37,6 @@
              declaration adds no second copy. -->
         <jsoup.version>1.22.2</jsoup.version>
         <commonmark.version>0.30.0</commonmark.version>
-        <!-- Test tags excluded from the ordinary build; cleared on the command line to run the golden
-             suite (see surefire below). -->
-        <surefire.excludedGroups>eval</surefire.excludedGroups>
-        <!-- So the command above works from the root: -Dtest applies to every module, and each one
-             without EvalSuiteIT would fail for matching nothing. The cost: a mistyped -Dtest runs nothing
-             and passes. -->
-        <surefire.failIfNoSpecifiedTests>false</surefire.failIfNoSpecifiedTests>
         <!-- ragr-shared has no main class, so spring-boot:run is skipped by default; each application
              sets this back to false. -->
         <spring-boot.run.skip>true</spring-boot.run.skip>
@@ -97,25 +90,5 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- EvalSuiteIT replays the golden dataset through the running ragr-app, with the
-                         corpus stored, and takes minutes - so it is not part of the ordinary build.
-                         Run it with:
-
-                             ./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
-
-                         -Dgroups=eval alone does NOT work: in JUnit 5 an exclusion beats an inclusion,
-                         so the exclusion itself must be cleared - hence a property, not a fixed value. -->
-                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>

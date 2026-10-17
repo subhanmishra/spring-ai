@@ -1,6 +1,7 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.config.EvalProperties;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalTurnRepository;
 import com.example.subhanmishra.repository.EvalTurnRepository.JudgeInput;
 import com.example.subhanmishra.service.eval.TurnVerdicts;
@@ -14,7 +15,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Drains the judge queue: one PENDING turn at a time, oldest first, on a single virtual thread.
+ * Drains the judge queue: one PENDING turn at a time, oldest first, live and golden alike, on a single
+ * virtual thread.
  *
  * <p><b>The queue is the {@code eval_turn} table, not Kafka.</b> Judging takes a minute or more and waits
  * for chat to be idle; holding a Kafka record that long would fight the consumer's poll timeout and lose
@@ -106,7 +108,8 @@ public class TurnJudgeWorker implements SmartLifecycle {
                                                  input.get().citationsFabricated());
             long millis = (System.nanoTime() - startedAt) / 1_000_000;
             turns.saveVerdicts(turnId, verdicts, answerOk, millis, properties.judgeModel());
-            metricsService.recordJudgedTurn(verdicts, answerOk, input.get().retrievedCount() > 0, millis);
+            metricsService.recordJudgedTurn(TurnOrigin.valueOf(input.get().origin()), verdicts, answerOk,
+                                            input.get().retrievedCount() > 0, millis);
             log.debug("Judged turn {} in {}ms", turnId, millis);
         } catch (TurnJudgeService.Interrupted e) {
             turns.requeue(turnId);

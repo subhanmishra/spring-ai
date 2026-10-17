@@ -77,13 +77,4 @@ class JudgeLineEndingAdvisorTest {
         assertThat(sentPrompts()).singleElement().asString()
                                  .contains("management.server.port").doesNotContain("\r");
     }
-
-    @Test
-    @DisplayName("context precision - one call per chunk - sends no carriage returns")
-    void contextPrecision() {
-        config.contextPrecisionEvaluator(builders, properties)
-              .judge(REQUEST.getUserText(), REQUEST.getResponseContent(), RETRIEVED);
-        assertThat(sentPrompts()).hasSize(RETRIEVED.size())
-                                 .allSatisfy(prompt -> assertThat(prompt).doesNotContain("\r"));
-    }
 }

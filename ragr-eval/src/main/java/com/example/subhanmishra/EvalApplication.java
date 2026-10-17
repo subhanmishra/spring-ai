@@ -10,10 +10,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * Evaluation, as its own application, so scoring and judging never share a JVM, a thread pool or a
  * failure with chat.
  *
- * <p>Live turns arrive from Kafka as {@code ChatTurnCompleted} events; {@code OnlineEvalService} scores
- * and stores them, and {@code TurnJudgeWorker} judges them while chat is idle. The golden suite
- * ({@code EvalSuiteIT}) drives the running ragr-app over HTTP and reads its own turns back from the same
- * topic. The web server is for the actuator and one API: human review.
+ * <p>Chat turns arrive from Kafka as {@code ChatTurnCompleted} events; {@code OnlineEvalService} scores
+ * and stores them, and {@code TurnJudgeWorker} judges them while chat is idle. A golden run
+ * ({@code GoldenEvalService}, started over HTTP) asks the running ragr-app its curated questions, and its
+ * turns come back the same way. The web server is for the actuator, golden runs and human review.
  */
 @SpringBootApplication
 @EnableConfigurationProperties(EvalProperties.class)

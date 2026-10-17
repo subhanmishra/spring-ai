@@ -8,11 +8,11 @@ import org.springframework.ai.document.Document;
  * Grades one retrieved chunk for the <em>question</em>: 0 not useful, 1 related background, 2 holds what
  * the answer needs. The grades over a turn's whole candidate pool are what {@link RetrievalRanking}
  * turns into precision, pooled recall, MRR and NDCG on live traffic, where there is no dataset to say
- * which chunks were right.
+ * which chunks were right - and on golden turns too, beside the dataset's expected sources.
  *
- * <p>Not {@link ContextPrecisionEvaluator}, which asks whether the <em>answer used</em> a passage. That
- * measures generation as much as retrieval, and cannot be asked of chunks the model never saw - yet the
- * pool beyond the prompt is exactly what recall is about.
+ * <p>It asks about the question, not whether the <em>answer used</em> a passage: that measures generation
+ * as much as retrieval, and cannot be asked of chunks the model never saw - yet the pool beyond the prompt
+ * is exactly what recall is about.
  *
  * <p><b>Why a middle grade.</b> Every candidate is on topic - the search chose it for that - and a YES/NO
  * judge answers YES to anything on topic. Grade 1 gives "on topic, but no answer" somewhere to go; only 2

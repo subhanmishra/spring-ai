@@ -36,13 +36,12 @@ CREATE TABLE IF NOT EXISTS eval_run
     -- score unless these match, and recording them is what turns a list of runs into a regression
     -- history.
     chat_model          VARCHAR(100),
-    judge_model          VARCHAR(100),
-    judged               BOOLEAN                          NOT NULL DEFAULT FALSE,
     top_k                INT,
     similarity_threshold DOUBLE PRECISION,
 
-    -- Aggregates, denormalised from eval_case_result so a trend query does not have to re-aggregate
-    -- every case on every dashboard refresh.
+    -- Rule-based aggregates, denormalised from eval_case_result so a trend query does not have to
+    -- re-aggregate every case on every dashboard refresh. The judges' verdicts are not here: they arrive
+    -- later, on the run's turns in eval_turn, and are aggregated from there.
     hit_rate             DOUBLE PRECISION,
     mean_reciprocal_rank DOUBLE PRECISION,
 
@@ -52,17 +51,9 @@ CREATE TABLE IF NOT EXISTS eval_run
     -- retrieved context was noise. A high average with a low precision@k is a well-ordered context
     -- that is mostly padding, and one number alone cannot say that.
     --
-    -- The judged_* pair is the same two metrics with relevance decided by an LLM judge per chunk
-    -- rather than by the dataset's expected pages. Nullable and normally null: judging is off by
-    -- default because precision costs top-k judge calls per case rather than one. Null here means
-    -- "not measured" and must never be averaged as a zero.
-    --
-    -- The cited_* pair counts a chunk as used when the answer cites its page: free, deterministic and
-    -- measured on every run, the steadier cross-check on the judge. Null on runs from before it existed.
+    -- The cited_* pair counts a chunk as used when the answer cites it: free and deterministic.
     context_precision        DOUBLE PRECISION,
     precision_at_k           DOUBLE PRECISION,
-    judged_context_precision DOUBLE PRECISION,
-    judged_precision_at_k    DOUBLE PRECISION,
     cited_context_precision  DOUBLE PRECISION,
     cited_precision_at_k     DOUBLE PRECISION,
 
@@ -74,11 +65,16 @@ CREATE TABLE IF NOT EXISTS eval_run
 
     citation_validity    DOUBLE PRECISION,
     citation_fabrication DOUBLE PRECISION,
-    relevancy_rate       DOUBLE PRECISION,
-    groundedness_rate    DOUBLE PRECISION,
+    citations_emitted    INT                              NOT NULL DEFAULT 0,
+    invented_pages       INT                              NOT NULL DEFAULT 0,
     phrase_coverage      DOUBLE PRECISION,
     duration_millis      BIGINT,
-    error_message        TEXT
+    error_message        TEXT,
+
+    -- The regression verdict (GoldenGate), from the rule-based scores only. NULL until the run completes;
+    -- gate_failures names each threshold missed.
+    gate_passed          BOOLEAN,
+    gate_failures        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS eval_case_result
@@ -89,6 +85,12 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     query                 TEXT                     NOT NULL,
     answer                TEXT,
 
+    -- The run writes the row AWAITING before asking the question; the turn listener finds it by the
+    -- conversation id the run used and scores it (SCORED). FAILED: the request failed or its turn never
+    -- arrived.
+    conversation_id       VARCHAR(200)             UNIQUE,
+    status                VARCHAR(20)              NOT NULL DEFAULT 'SCORED',
+
     -- Retrieval
     retrieved_count       INT                      NOT NULL DEFAULT 0,
     top_score             DOUBLE PRECISION,
@@ -96,18 +98,9 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     pages_retrieved       TEXT,
     first_relevant_rank   INT                      NOT NULL DEFAULT 0,
 
-    -- judged_relevance is the judge's per-chunk verdict vector in rank order, "1,0,1,1,0", read
-    -- against pages_retrieved which is stored the same way. It is here because it is the only column
-    -- in this table that cannot be reconstructed afterwards from the dataset and the other columns,
-    -- and because the comparison it enables is the point of running both precisions: a chunk the judge
-    -- called useful from a page expectedPages omits means the DATASET is too narrow, not that
-    -- retrieval erred. cited_relevance is the same vector from the answer's own citations; where it
-    -- and judged_relevance disagree, the judge is the likelier one wrong.
+    -- cited_relevance is the answer's own citations as a per-chunk vector in rank order, "1,0,1,1,0".
     context_precision        DOUBLE PRECISION,
     precision_at_k           DOUBLE PRECISION,
-    judged_context_precision DOUBLE PRECISION,
-    judged_precision_at_k    DOUBLE PRECISION,
-    judged_relevance         TEXT,
     cited_context_precision  DOUBLE PRECISION,
     cited_precision_at_k     DOUBLE PRECISION,
     cited_relevance          TEXT,
@@ -119,24 +112,20 @@ CREATE TABLE IF NOT EXISTS eval_case_result
     ndcg_at_k                DOUBLE PRECISION,
     reference_relevance      TEXT,
 
-    -- The case's turn in eval_turn, which holds the judged metrics. Null when the run did not persist.
+    -- The case's turn in eval_turn, which the judge worker fills with the judged metrics.
     turn_id                  UUID,
 
     -- Citations
     citations_emitted     INT                      NOT NULL DEFAULT 0,
     citations_valid       INT                      NOT NULL DEFAULT 0,
     citations_fabricated  INT                      NOT NULL DEFAULT 0,
+    invented_pages        INT                      NOT NULL DEFAULT 0,
 
     -- Answer
     phrase_coverage       DOUBLE PRECISION,
     refused               BOOLEAN                  NOT NULL DEFAULT FALSE,
 
-    -- Nullable on purpose: NULL means "not judged", which is different from FALSE meaning "judged and
-    -- failed". A run with judging switched off, or a judgement dropped under load, must not read as a
-    -- failure. Any aggregate over these columns has to exclude NULLs rather than coalesce them.
-    relevancy_pass        BOOLEAN,
-    groundedness_pass     BOOLEAN,
-
+    -- Rule-based only: the judges' verdicts are on the turn and never change a case's pass.
     passed                BOOLEAN                  NOT NULL DEFAULT FALSE,
     failure_reasons       TEXT,
     latency_millis        BIGINT,
@@ -158,8 +147,8 @@ CREATE INDEX IF NOT EXISTS eval_case_result_run_idx ON eval_case_result (run_id)
 -- above serves.
 CREATE INDEX IF NOT EXISTS eval_case_result_case_idx ON eval_case_result (case_id, created_at DESC);
 
--- One row per chat turn ragr-eval receives: live turns from the Kafka listener, golden turns from the
--- suite (with run_id and case_id). Written with judge_status PENDING and its deterministic scores; the
+-- One row per chat turn ragr-eval receives, live or golden, all from the Kafka listener; a golden turn
+-- carries its run_id and case_id. Written with judge_status PENDING and its deterministic scores; the
 -- judge worker fills the judged columns later, when chat is idle - so occurred_at, not judged_at, is the
 -- time axis for every quality panel.
 --

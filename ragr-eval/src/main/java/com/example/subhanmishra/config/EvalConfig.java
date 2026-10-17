@@ -4,7 +4,6 @@ import com.example.subhanmishra.service.eval.ChunkGradeEvaluator;
 import com.example.subhanmishra.service.eval.CitationSupportEvaluator;
 import com.example.subhanmishra.service.eval.ClaimFaithfulnessEvaluator;
 import com.example.subhanmishra.service.eval.CompletenessEvaluator;
-import com.example.subhanmishra.service.eval.ContextPrecisionEvaluator;
 import com.example.subhanmishra.service.eval.GoldenDatasetLoader;
 import com.example.subhanmishra.service.eval.TaskClassifier;
 import org.springframework.ai.chat.client.ChatClient;
@@ -94,19 +93,6 @@ public class EvalConfig {
     public FactCheckingEvaluator factCheckingEvaluator(ObjectProvider<ChatClient.Builder> builders,
                                                        EvalProperties properties) {
         return FactCheckingEvaluator.builder(judgeClientBuilder(builders, properties)).build();
-    }
-
-    /**
-     * Judges whether each retrieved chunk actually contributed to the answer, which is what context
-     * precision is computed from.
-     *
-     * <p>Called once per chunk rather than once per answer, so the golden suite uses it only on a judged
-     * run, where it is the biggest cost.
-     */
-    @Bean
-    public ContextPrecisionEvaluator contextPrecisionEvaluator(ObjectProvider<ChatClient.Builder> builders,
-                                                               EvalProperties properties) {
-        return new ContextPrecisionEvaluator(judgeClientBuilder(builders, properties));
     }
 
     /**

@@ -31,7 +31,7 @@ import static org.mockito.Mockito.when;
 class TurnJudgeWorkerTest {
 
     private static final UUID TURN = UUID.fromString("00000000-0000-0000-0000-000000000042");
-    private static final JudgeInput INPUT = new JudgeInput(TURN, "q", "a", 1, 0, List.of());
+    private static final JudgeInput INPUT = new JudgeInput(TURN, "LIVE", "q", "a", 1, 0, List.of());
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final EvalTurnRepository turns = mock(EvalTurnRepository.class);
@@ -68,6 +68,25 @@ class TurnJudgeWorkerTest {
 
         verify(turns).requeueRunning();
         verify(turns, timeout(5_000)).saveVerdicts(eq(TURN), any(), any(), anyLong(), eq("judge"));
+    }
+
+    @Test
+    @DisplayName("a golden turn is judged like a live one, and its metrics are tagged golden")
+    void goldenTurnJudged() {
+        JudgeInput golden = new JudgeInput(TURN, "GOLDEN", "q", "a", 1, 0, List.of());
+        when(turns.judgeInput(TURN)).thenReturn(Optional.of(golden));
+        when(turnJudge.judge(golden)).thenReturn(new TurnVerdicts());
+
+        start(5);
+
+        verify(turns, timeout(5_000)).saveVerdicts(eq(TURN), any(), any(), anyLong(), eq("judge"));
+        // Recorded just after the save the line above waits on.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (registry.find("rag.eval.online.judged.turns.total").tag("origin", "golden").counter() == null) {
+            assertThat(System.nanoTime()).as("no golden judged-turn counter within 5 s").isLessThan(deadline);
+            Thread.onSpinWait();
+        }
+        assertThat(registry.find("rag.eval.online.judged.turns.total").tag("origin", "live").counter()).isNull();
     }
 
     @Test

@@ -77,7 +77,7 @@ class TurnJudgeServiceTest {
                                          0.8 - i * 0.1, i < retrievedCount, false, null,
                                          "[manual.pdf, p. " + pages[i] + "]\n\nText of page " + pages[i] + "."));
         }
-        return new JudgeInput(UUID.randomUUID(), "How does graceful shutdown work?",
+        return new JudgeInput(UUID.randomUUID(), "LIVE", "How does graceful shutdown work?",
                               retrievedCount > 0 ? "It waits for requests (manual.pdf, p. 1)." : "Hi there.",
                               retrievedCount, 0, chunks);
     }

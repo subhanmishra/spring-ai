@@ -3,6 +3,7 @@ package com.example.subhanmishra.entity;
 import com.example.subhanmishra.service.EvalScoringService.ReferenceScores;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
+import com.example.subhanmishra.service.eval.GoldenCase;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
@@ -13,13 +14,13 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * What one golden case produced on one run.
+ * What one golden case produced on one run, scored against the case's expectations.
  *
  * <p>The answer is stored on purpose: a score says a case regressed, only the answer says how - and
  * re-running gives a different answer.
  *
- * <p>{@code relevancyPass} and {@code groundednessPass} are boxed: null is "not judged", not "failed".
- * Aggregates must skip nulls, or an unjudged run reads as failing everything.
+ * <p>The judges' verdicts are not here: they are on the case's turn ({@code turnId}) in {@code eval_turn},
+ * filled in by the judge worker like any live turn's.
  */
 @Table(name = "eval_case_result")
 public record EvalCaseResult(@Id @Nullable UUID id,
@@ -27,6 +28,8 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              String caseId,
                              String query,
                              @Nullable String answer,
+                             @Nullable String conversationId,
+                             Status status,
                              int retrievedCount,
                              @Nullable Double topScore,
                              @Nullable Double scoreSpread,
@@ -34,9 +37,6 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              int firstRelevantRank,
                              @Nullable Double contextPrecision,
                              @Nullable Double precisionAtK,
-                             @Nullable Double judgedContextPrecision,
-                             @Nullable Double judgedPrecisionAtK,
-                             @Nullable String judgedRelevance,
                              @Nullable Double citedContextPrecision,
                              @Nullable Double citedPrecisionAtK,
                              @Nullable String citedRelevance,
@@ -47,44 +47,53 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                              int citationsEmitted,
                              int citationsValid,
                              int citationsFabricated,
+                             int inventedPages,
                              @Nullable Double phraseCoverage,
                              boolean refused,
-                             @Nullable Boolean relevancyPass,
-                             @Nullable Boolean groundednessPass,
                              boolean passed,
                              @Nullable String failureReasons,
                              @Nullable Long latencyMillis,
                              Instant createdAt) {
 
+    /** Where a case is between the run asking its question and the listener scoring its turn. */
+    public enum Status {
+        /** Asked, or about to be; the listener has not seen its turn yet. */
+        AWAITING,
+        /** Its turn arrived and was scored. */
+        SCORED,
+        /** The request failed, or its turn never arrived. */
+        FAILED
+    }
+
+    /** The row a run writes before asking the case's question, so the listener can find it. */
+    public static EvalCaseResult awaiting(UUID runId, GoldenCase goldenCase, String conversationId) {
+        return new EvalCaseResult(null, runId, goldenCase.id(), goldenCase.query(), null, conversationId,
+                                  Status.AWAITING, 0, null, null, null, 0, null, null, null, null, null, null,
+                                  null, null, null, 0, 0, 0, 0, null, false, false, null, null, Instant.now());
+    }
+
     /**
-     * @param contextPrecision       scored against the case's expected pages, or null when it declares
-     *                               none
-     * @param judgedContextPrecision from the per-chunk judge, or null on an unjudged run. Its verdict
-     *                               vector is stored too - set against {@code pagesRetrieved} it shows
-     *                               whether the expected pages are too narrow, and it cannot be rebuilt
-     *                               later
-     * @param citedContextPrecision  a chunk counted as used when the answer cites its page; null when
-     *                               nothing was retrieved. Where it and the judge disagree, the citations
-     *                               are the model's own account, and the judge is likelier wrong
+     * This case, scored from its turn.
+     *
+     * @param contextPrecision      scored against the case's expected files or pages, or null when it
+     *                              declares none
+     * @param citedContextPrecision a chunk counted as used when the answer cites it; null when nothing
+     *                              was retrieved
+     * @param latencyMillis         chat's own time for the turn, as live turns measure it
      */
-    public static EvalCaseResult from(UUID runId,
-                                      String caseId,
-                                      String query,
-                                      String answer,
-                                      EvalScores scores,
-                                      int firstRelevantRank,
-                                      @Nullable ContextPrecisionScores contextPrecision,
-                                      @Nullable ContextPrecisionScores judgedContextPrecision,
-                                      @Nullable ContextPrecisionScores citedContextPrecision,
-                                      @Nullable ReferenceScores reference,
-                                      @Nullable UUID turnId,
-                                      long latencyMillis) {
+    public EvalCaseResult scored(String answer,
+                                 EvalScores scores,
+                                 int firstRelevantRank,
+                                 @Nullable ContextPrecisionScores contextPrecision,
+                                 @Nullable ContextPrecisionScores citedContextPrecision,
+                                 @Nullable ReferenceScores reference,
+                                 UUID turnId,
+                                 @Nullable Long latencyMillis) {
         List<String> reasons = scores.failureReasons();
-        return new EvalCaseResult(null,
-                                  runId,
-                                  caseId,
-                                  query,
-                                  answer,
+        int invented = (int) scores.citations().fabricatedCitations().stream()
+                                   .filter(citation -> !citation.hasMalformedPage())
+                                   .count();
+        return new EvalCaseResult(id, runId, caseId, query, answer, conversationId, Status.SCORED,
                                   scores.retrieval().retrievedCount(),
                                   scores.retrieval().topScore(),
                                   scores.retrieval().scoreSpread(),
@@ -92,12 +101,6 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                   firstRelevantRank,
                                   contextPrecision != null ? contextPrecision.averagePrecision() : null,
                                   contextPrecision != null ? contextPrecision.precisionAtK() : null,
-                                  judgedContextPrecision != null
-                                          ? judgedContextPrecision.averagePrecision() : null,
-                                  judgedContextPrecision != null
-                                          ? judgedContextPrecision.precisionAtK() : null,
-                                  judgedContextPrecision != null
-                                          ? judgedContextPrecision.relevanceAsString() : null,
                                   citedContextPrecision != null ? citedContextPrecision.averagePrecision() : null,
                                   citedContextPrecision != null ? citedContextPrecision.precisionAtK() : null,
                                   citedContextPrecision != null ? citedContextPrecision.relevanceAsString() : null,
@@ -108,14 +111,13 @@ public record EvalCaseResult(@Id @Nullable UUID id,
                                   scores.citations().emitted(),
                                   scores.citations().valid(),
                                   scores.citations().fabricated(),
+                                  invented,
                                   scores.answer().phraseCoverage(),
                                   scores.answer().refused(),
-                                  scores.relevancy(),
-                                  scores.groundedness(),
                                   reasons.isEmpty(),
                                   reasons.isEmpty() ? null : String.join("; ", reasons),
                                   latencyMillis,
-                                  Instant.now());
+                                  createdAt);
     }
 
     private static @Nullable String formatPages(List<Integer> pages) {

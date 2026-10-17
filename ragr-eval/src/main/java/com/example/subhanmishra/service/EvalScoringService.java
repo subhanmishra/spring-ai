@@ -234,7 +234,7 @@ public class EvalScoringService {
      *
      * <p><b>A floor, not a value.</b> The expected pages are the ones with the answer, not every page that
      * could help, so a useful chunk from an unlisted page counts as noise. Compare runs, not levels;
-     * {@code ContextPrecisionEvaluator} is the cross-check.
+     * {@link #citedPrecision} and the judge's chunk grades are the cross-checks.
      *
      * @return null when the case lists no expected pages - "not scored", which must not drag the average
      *         down the way 0.0 would
@@ -250,9 +250,9 @@ public class EvalScoringService {
     /**
      * Context precision with a chunk counted as used when the answer cites its page.
      *
-     * <p>The third way to decide relevance, beside {@link #contextPrecision} (expected pages) and
-     * {@code ContextPrecisionEvaluator} (the judge), and the only one both free and exact. It exists
-     * because the judge proved unreliable at this very question. A citation is the model's own statement
+     * <p>Beside {@link #contextPrecision} (expected pages) and the judge's chunk grades, the only way to
+     * decide relevance that is both free and exact. It exists because a judge proved unreliable at this
+     * very question. A citation is the model's own statement
      * of where a claim came from, so it answers "was this passage used" with no second opinion.
      *
      * <p>Two limits, both under-counting: a passage used without a citation counts as unused (so an

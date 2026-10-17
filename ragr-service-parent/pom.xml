@@ -85,8 +85,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- The test JVM loads the full context beside the running applications, so it gets
-                         the same cap. Merged with the root's surefire configuration. -->
+                    <!-- The context tests load the full context beside the running applications, so
+                         they get the same cap. -->
                     <argLine>${ragr.jvm.options}</argLine>
                 </configuration>
             </plugin>

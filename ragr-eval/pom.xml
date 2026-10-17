@@ -13,7 +13,7 @@
     <description>Scores answer quality: live chat turns from Kafka, and the curated golden suite</description>
 
     <properties>
-        <!-- The heap cap, for the application and the EvalSuiteIT test JVM alike. -->
+        <!-- The heap cap. -->
         <ragr.heap>256m</ragr.heap>
     </properties>
 

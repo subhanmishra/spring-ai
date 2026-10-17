@@ -17,7 +17,13 @@ final class EvalPropertiesFixture {
 
     static EvalProperties properties(double judgeSampleRate, int callTimeoutSeconds, int shutdownWaitSeconds,
                                      boolean idleGate) {
-        EvalProperties.Online online = new EvalProperties.Online(true, judgeSampleRate, 0.0, Duration.ofMinutes(5), 0.6);
+        return properties(judgeSampleRate, 0.0, callTimeoutSeconds, shutdownWaitSeconds, idleGate);
+    }
+
+    static EvalProperties properties(double judgeSampleRate, double reviewSampleRate, int callTimeoutSeconds,
+                                     int shutdownWaitSeconds, boolean idleGate) {
+        EvalProperties.Online online = new EvalProperties.Online(true, judgeSampleRate, reviewSampleRate,
+                                                                 Duration.ofMinutes(5), 0.6);
         EvalProperties.IdleGate gate = new EvalProperties.IdleGate(idleGate, URI.create("http://localhost:9"),
                                                                    Duration.ofMillis(20), Duration.ofSeconds(5));
         EvalProperties.Judge judge = new EvalProperties.Judge(true, Duration.ofMillis(20), Duration.ofHours(6),

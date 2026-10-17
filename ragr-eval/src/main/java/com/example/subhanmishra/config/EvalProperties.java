@@ -12,7 +12,7 @@ import java.time.Duration;
  *
  * @param enabled           turns all evaluation off - unlike a zero sample rate, which keeps the free
  *                          rule-based metrics
- * @param topic             where ragr-app publishes turns; the live consumer and the golden suite read it
+ * @param topic             where ragr-app publishes turns, live and golden
  * @param feedbackTopic     where ragr-app publishes ratings
  * @param judgeModel        the judges' Ollama model: the chat model, on purpose, since any other judge
  *                          would evict a resident model on every call. The price is self-judging bias (see
@@ -70,8 +70,8 @@ public record EvalProperties(boolean enabled,
      * The judge queue. Turns are stored as PENDING and judged one at a time by {@code TurnJudgeWorker},
      * only while chat is idle.
      *
-     * @param workerEnabled         whether this process runs the worker. Off in the golden suite's test JVM,
-     *                              which judges its own turns and must not take live ones
+     * @param workerEnabled         whether this process runs the worker. Off in the context test, which must
+     *                              not take the deployed application's queued turns or fail its golden run
      * @param pollInterval          how often an idle worker looks for a PENDING turn
      * @param maxBacklogAge         a PENDING turn older than this is SKIPPED, so the queue never runs hours
      *                              behind. A steadily rising {@code rag.eval.online.judge.skipped.total} means
@@ -122,19 +122,14 @@ public record EvalProperties(boolean enabled,
     }
 
     /**
-     * The curated-dataset regression suite.
+     * The curated-dataset regression suite, run through {@code POST /eval/golden/runs}.
      *
      * @param datasetLocation where the dataset is, as a Spring resource location
-     * @param judged          whether a run also asks the judges, on top of the rule-based scores
-     * @param persist         whether run, case and turn rows are written to Postgres. Every golden panel
-     *                        reads them - the suite runs in its own JVM, which Prometheus never scrapes -
-     *                        so with this off a run reaches no dashboard
      * @param chatUrl         the running ragr-app a run drives, through its real {@code /ai/generate}
-     * @param turnTimeout     how long a case waits for its turn on Kafka once the answer has returned.
-     *                        It arrives within milliseconds; running out means it was dropped, which fails
-     *                        the run rather than scoring a case blind
+     * @param turnTimeout     how long a run waits, after its last answer, for the listener to score every
+     *                        case. A turn arrives within milliseconds; running out means it was dropped,
+     *                        and the case fails
      */
-    public record Golden(String datasetLocation, boolean judged, boolean persist, URI chatUrl,
-                         Duration turnTimeout) {
+    public record Golden(String datasetLocation, URI chatUrl, Duration turnTimeout) {
     }
 }

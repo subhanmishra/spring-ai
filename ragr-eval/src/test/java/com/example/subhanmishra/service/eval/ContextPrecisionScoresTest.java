@@ -104,35 +104,4 @@ class ContextPrecisionScoresTest {
         assertThat(ContextPrecisionScores.of(ranks(1, 0, 1, 1, 0)).relevanceAsString())
                 .isEqualTo("1,0,1,1,0");
     }
-
-    @Nested
-    @DisplayName("judge verdict parsing")
-    class VerdictParsing {
-
-        @Test
-        @DisplayName("reads the leading word, whatever punctuation follows")
-        void leadingWord() {
-            assertThat(ContextPrecisionEvaluator.parse("YES")).isTrue();
-            assertThat(ContextPrecisionEvaluator.parse("  yes.\n")).isTrue();
-            assertThat(ContextPrecisionEvaluator.parse("No, the passage is unrelated.")).isFalse();
-        }
-
-        @Test
-        @DisplayName("\"not\" does not read as \"no\"")
-        void notIsNotNo() {
-            // The reason the first word is matched as a whole word: a judge that ignores the one-word
-            // instruction and opens with "Not enough information" would otherwise be recorded as a
-            // confident NO rather than as the failed measurement it is.
-            assertThat(ContextPrecisionEvaluator.parse("Not enough information to say")).isNull();
-        }
-
-        @Test
-        @DisplayName("anything unparseable is null - a failed measurement, never a NO")
-        void unparseable() {
-            assertThat(ContextPrecisionEvaluator.parse(null)).isNull();
-            assertThat(ContextPrecisionEvaluator.parse("")).isNull();
-            assertThat(ContextPrecisionEvaluator.parse("42")).isNull();
-            assertThat(ContextPrecisionEvaluator.parse("maybe")).isNull();
-        }
-    }
 }

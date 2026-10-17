@@ -8,8 +8,8 @@
       intellij  launched from its IntelliJ run configuration
       docker    the ai_ragr-* container from the `apps` profile in compose.yaml
 
-    Both publish the same host ports, so nothing else - Prometheus, Grafana, Swagger, the golden
-    suite - needs to know which mode is in use. This script never starts or stops an IntelliJ
+    Both publish the same host ports, so nothing else - Prometheus, Grafana, Swagger, golden runs -
+    needs to know which mode is in use. This script never starts or stops an IntelliJ
     instance: IntelliJ has no command line for its run configurations, and killing a process someone
     started in the IDE is not this script's call. It refuses instead, and says what to do.
 
@@ -35,6 +35,8 @@
     ./ragr.ps1 status
 .EXAMPLE
     ./ragr.ps1 logs ingest               # follow the container log; Ctrl+C stops following, not the app
+.EXAMPLE
+    ./ragr.ps1 golden                    # run the golden suite in ragr-eval; exit 1 on a failed gate
 #>
 param(
     [Parameter(Position = 0)][string]$Command = 'help',
@@ -222,6 +224,53 @@ function Show-Status($Apps) {
     }
 }
 
+$GoldenRuns = 'http://localhost:9096/eval/golden/runs'
+
+function Format-Score($Value) { if ($null -eq $Value) { 'n/a' } else { '{0:N3}' -f $Value } }
+
+function Show-GoldenRun($Run) {
+    $judging = $Run.judging
+    Write-Host @"
+
+==================== golden run: $($Run.suite) ====================
+run                : $($Run.runId)  ($($Run.status))
+cases              : $($Run.caseCount)  (scored $($Run.scored))
+passed             : $($Run.passedCount)
+gate               : $(if ($null -eq $Run.gatePassed) { 'pending' } elseif ($Run.gatePassed) { 'passed' } else { "FAILED - $($Run.gateFailures)" })
+hit rate           : $(Format-Score $Run.hitRate)
+MRR                : $(Format-Score $Run.meanReciprocalRank)
+context precision  : $(Format-Score $Run.contextPrecision)  (precision@k $(Format-Score $Run.precisionAtK))
+cited precision    : $(Format-Score $Run.citedContextPrecision)  (precision@k $(Format-Score $Run.citedPrecisionAtK))
+citations emitted  : $($Run.citationsEmitted)
+citation validity  : $(Format-Score $Run.citationValidity)
+fabrication rate   : $(Format-Score $Run.citationFabrication)
+invented pages     : $($Run.inventedPages)
+duration           : $($Run.durationMillis) ms
+judged             : $($judging.judged)/$($judging.turns) turns$(if ($judging.skipped) { ", $($judging.skipped) skipped" })
+failures           : $(if ($Run.failures) { $Run.failures -join '; ' } else { 'none' })
+$(if ($Run.errorMessage) { "error              : $($Run.errorMessage)`n" })========================================================
+"@
+}
+
+# Starts a golden run in ragr-eval and waits for it to complete - every case scored, not judged; the
+# judges work through its turns afterwards. Exits 1 when the run fails or misses the regression gate.
+function Invoke-Golden {
+    try {
+        $run = Invoke-RestMethod -Method Post -Uri $GoldenRuns -TimeoutSec 30
+    } catch {
+        $detail = if ($_.ErrorDetails.Message) { ($_.ErrorDetails.Message | ConvertFrom-Json).detail } else { $_.Exception.Message }
+        Stop-WithError "Could not start a golden run: $detail"
+    }
+    Write-Step "Golden run $($run.runId) started: $($run.caseCount) cases, about a minute each"
+    do {
+        Start-Sleep -Seconds 30
+        $run = Invoke-RestMethod -Uri "$GoldenRuns/$($run.runId)" -TimeoutSec 30
+        Write-Host "  $($run.scored)/$($run.caseCount) scored"
+    } while ($run.status -eq 'RUNNING')
+    Show-GoldenRun $run
+    if ($run.status -ne 'COMPLETED' -or -not $run.gatePassed) { exit 1 }
+}
+
 function Show-Usage {
     Write-Host @'
 Usage:
@@ -234,6 +283,8 @@ Usage:
   ./ragr.ps1 intellij       [app|ingest|eval ...]   stop the containers so IntelliJ can take the ports
   ./ragr.ps1 status                                 which mode each application is in, health, Ollama models
   ./ragr.ps1 logs           <app|ingest|eval>       follow a container's log
+  ./ragr.ps1 golden                                 start a golden run in ragr-eval, wait until every case is scored; exit 1 on a failed gate
+  ./ragr.ps1 golden latest                          the latest run, with how far the judges have got through it
 
 No application names means all three.
 '@
@@ -262,6 +313,11 @@ switch ($Command) {
     }
     'intellij' { Invoke-ToIntelliJ (Resolve-Apps $Rest) }
     'status'   { Show-Status $AllApps }
+    'golden' {
+        if (-not $Rest -or $Rest.Count -eq 0) { Invoke-Golden }
+        elseif ($Rest.Count -eq 1 -and $Rest[0] -eq 'latest') { Show-GoldenRun (Invoke-RestMethod -Uri "$GoldenRuns/latest" -TimeoutSec 30) }
+        else { Show-Usage; exit 1 }
+    }
     'logs' {
         if (-not $Rest -or $Rest.Count -ne 1) { Stop-WithError 'logs takes exactly one application: app, ingest or eval' }
         $app = Resolve-Apps $Rest

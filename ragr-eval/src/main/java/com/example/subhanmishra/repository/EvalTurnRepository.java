@@ -188,24 +188,26 @@ public class EvalTurnRepository {
     /** What the judges need of a turn: the question, the answer and the pool. */
     public Optional<JudgeInput> judgeInput(UUID turnId) {
         Optional<JudgeInput> head = jdbc.sql("""
-                SELECT query, answer, retrieved_count, citations_fabricated FROM eval_turn WHERE turn_id = :turnId
+                SELECT origin, query, answer, retrieved_count, citations_fabricated FROM eval_turn WHERE turn_id = :turnId
                 """)
                                         .param("turnId", turnId)
-                                        .query((rs, _) -> new JudgeInput(turnId, rs.getString("query"),
+                                        .query((rs, _) -> new JudgeInput(turnId, rs.getString("origin"), rs.getString("query"),
                                                                          rs.getString("answer"),
                                                                          rs.getInt("retrieved_count"),
                                                                          rs.getInt("citations_fabricated"),
                                                                          List.of()))
                                         .optional();
-        return head.map(input -> new JudgeInput(input.turnId(), input.query(), input.answer(),
+        return head.map(input -> new JudgeInput(input.turnId(), input.origin(), input.query(), input.answer(),
                                                 input.retrievedCount(), input.citationsFabricated(),
                                                 chunks(turnId)));
     }
 
     /**
+     * @param origin the turn's {@code TurnOrigin} name, which the judged-turn metrics are tagged with
      * @param chunks the pool in rank order; the first {@code retrievedCount} were in the prompt
      */
     public record JudgeInput(UUID turnId,
+                             String origin,
                              String query,
                              @Nullable String answer,
                              int retrievedCount,
@@ -214,12 +216,6 @@ public class EvalTurnRepository {
 
         public List<EvalTurnChunk> inContext() {
             return chunks.subList(0, Math.min(retrievedCount, chunks.size()));
-        }
-
-        /** A turn not yet stored - the golden suite judges before it persists. */
-        public static JudgeInput of(EvalTurn turn) {
-            return new JudgeInput(turn.turnId(), turn.query(), turn.answer(), turn.retrievedCount(),
-                                  turn.citationsFabricated(), turn.chunks());
         }
     }
 
@@ -295,6 +291,43 @@ public class EvalTurnRepository {
                 .param("rank", i + 1)
                 .update();
         }
+    }
+
+    /** The chat model and retrieval settings a golden run's first turn reported. */
+    public Optional<RunPipeline> runPipeline(UUID runId) {
+        return jdbc.sql("""
+                SELECT chat_model, top_k, similarity_threshold FROM eval_turn
+                WHERE run_id = :runId ORDER BY occurred_at LIMIT 1
+                """)
+                   .param("runId", runId)
+                   .query((rs, _) -> new RunPipeline(rs.getString("chat_model"),
+                                                     rs.getObject("top_k", Integer.class),
+                                                     rs.getObject("similarity_threshold", Double.class)))
+                   .optional();
+    }
+
+    public record RunPipeline(@Nullable String chatModel, @Nullable Integer topK,
+                              @Nullable Double similarityThreshold) {
+    }
+
+    /** How far the judges have got through a golden run's turns. */
+    public JudgeProgress judgeProgress(UUID runId) {
+        return jdbc.sql("""
+                SELECT count(*) AS turns,
+                       count(*) FILTER (WHERE judge_status IN ('DONE', 'PARTIAL')) AS judged,
+                       count(*) FILTER (WHERE judge_status = 'SKIPPED') AS skipped
+                FROM eval_turn WHERE run_id = :runId
+                """)
+                   .param("runId", runId)
+                   .query((rs, _) -> new JudgeProgress(rs.getInt("turns"), rs.getInt("judged"), rs.getInt("skipped")))
+                   .single();
+    }
+
+    /**
+     * @param judged  turns the worker finished, PARTIAL included
+     * @param skipped turns that outwaited {@code max-backlog-age} and will never be judged
+     */
+    public record JudgeProgress(int turns, int judged, int skipped) {
     }
 
     public int pendingCount() {

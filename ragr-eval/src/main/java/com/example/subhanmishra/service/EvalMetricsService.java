@@ -1,9 +1,11 @@
 package com.example.subhanmishra.service;
 
 import com.example.subhanmishra.event.ChatFeedbackSubmitted;
+import com.example.subhanmishra.event.TurnOrigin;
 import com.example.subhanmishra.repository.EvalTurnRepository;
 import com.example.subhanmishra.service.eval.ContextPrecisionScores;
 import com.example.subhanmishra.service.eval.EvalScores;
+import com.example.subhanmishra.service.eval.GoldenRunResult;
 import com.example.subhanmishra.service.eval.RetrievalRanking;
 import com.example.subhanmishra.service.eval.TurnVerdicts;
 import io.micrometer.core.instrument.Counter;
@@ -35,10 +37,12 @@ import java.util.concurrent.atomic.DoubleAdder;
  *
  * <p>Two kinds of instrument, and mixing them up makes a dashboard lie:
  * <ul>
- *   <li><b>Counters for live traffic.</b> Turns keep arriving, so the useful number is a rate or a ratio
- *       of two counters, which stays right however scrapes line up. A gauge would show only whatever the
- *       last turn did.</li>
- *   <li><b>Gauges for the golden suite.</b> A run is a batch job with one final score.</li>
+ *   <li><b>Counters and summaries per turn</b>, tagged {@code origin} ({@code live} or {@code golden}):
+ *       both kinds of turn are scored and judged the same way, and the tag keeps a golden run out of the
+ *       live rates. The useful number is a rate or a ratio of two counters, which stays right however
+ *       scrapes line up.</li>
+ *   <li><b>Gauges for a golden run's rule-based aggregate.</b> A run is a batch job with one final score;
+ *       its judged figures are read from {@code eval_turn} by the dashboard instead.</li>
  * </ul>
  *
  * <p><b>A gauge keeps its last value forever</b>, so a run from months ago looks as current as one from
@@ -71,14 +75,8 @@ public class EvalMetricsService {
     private final MeterRegistry registry;
 
     /**
-     * Where a golden run's scores are read back from.
-     *
-     * <p>The suite runs as a test in its <em>own</em> JVM, whose meters Prometheus never sees. So the
-     * {@code eval_run} table is the record, and these gauges report its latest row, whichever process
-     * wrote it. A run in this process also sets them directly, so it shows at once.
-     *
-     * <p><b>So the golden gauges need {@code app.eval.golden.persist=true}.</b> Without it a run still
-     * logs its result, but nothing reaches Grafana.
+     * Where a golden run's scores are read back from after a restart, which empties the gauges; a run in
+     * this process sets them directly.
      */
     private final EvalRunRepository runRepository;
 
@@ -86,24 +84,8 @@ public class EvalMetricsService {
     private final AtomicReference<Instant> lastAppliedRun = new AtomicReference<>();
 
     /**
-     * Whether any run has ever produced a judge verdict.
-     *
-     * <p>Until then the judged gauges report {@code NaN}, which Grafana shows as "no data", not 0.0, which
-     * reads as "nothing passed". Judging is off by default, so a 0.0 would be a red alarm about something
-     * nobody measured.
-     */
-    private final AtomicBoolean relevancyEverJudged = new AtomicBoolean();
-    private final AtomicBoolean groundednessEverJudged = new AtomicBoolean();
-
-    /**
-     * The same for judged context precision. A 0.0 beside the other precisions would read as the judge
-     * disagreeing completely, when nobody asked it.
-     */
-    private final AtomicBoolean contextPrecisionEverJudged = new AtomicBoolean();
-
-    /**
-     * Cited precision is measured on every run, but older runs have none, so it too stays NaN until a run
-     * produces one.
+     * Cited precision stays {@code NaN} until a run produces one, so a run that retrieved nothing never
+     * shows as 0.0.
      */
     private final AtomicBoolean citedPrecisionEverMeasured = new AtomicBoolean();
 
@@ -115,17 +97,16 @@ public class EvalMetricsService {
     private final DoubleAdder goldenMrr = new DoubleAdder();
     private final DoubleAdder goldenContextPrecision = new DoubleAdder();
     private final DoubleAdder goldenPrecisionAtK = new DoubleAdder();
-    private final DoubleAdder goldenJudgedContextPrecision = new DoubleAdder();
-    private final DoubleAdder goldenJudgedPrecisionAtK = new DoubleAdder();
     private final DoubleAdder goldenCitedContextPrecision = new DoubleAdder();
     private final DoubleAdder goldenCitedPrecisionAtK = new DoubleAdder();
     private final DoubleAdder goldenCitationValidity = new DoubleAdder();
     private final DoubleAdder goldenCitationFabrication = new DoubleAdder();
-    private final DoubleAdder goldenRelevancy = new DoubleAdder();
-    private final DoubleAdder goldenGroundedness = new DoubleAdder();
     private final DoubleAdder goldenPassRate = new DoubleAdder();
     private final AtomicInteger goldenCaseCount = new AtomicInteger();
     private final AtomicLong goldenLastRunEpochSeconds = new AtomicLong();
+
+    /** The tag on every per-turn meter, so live and golden turns can be read apart. */
+    private static final List<String> ORIGINS = List.of("live", "golden");
 
     /** The two Spring AI judges, as their verdict counters are tagged. */
     public static final String RELEVANCY = "relevancy";
@@ -166,40 +147,41 @@ public class EvalMetricsService {
      * per-suite counters are not here; they appear on the first run, and no panel needs them.
      */
     private void preRegisterOnlineMeters() {
-        counter(ONLINE + "turns.total", Tags.empty());
-        counter(ONLINE + "zero.hit.total", Tags.empty());
-        counter(ONLINE + "uncited.answers.total", Tags.empty());
-        counter(ONLINE + "refusals.total", Tags.empty());
-        counter(ONLINE + "instruction.echoes.total", Tags.empty());
-        counter(ONLINE + "chunks.without.header.total", Tags.empty());
+        for (String origin : ORIGINS) {
+            Tags tags = Tags.of("origin", origin);
+            counter(ONLINE + "turns.total", tags);
+            counter(ONLINE + "zero.hit.total", tags);
+            counter(ONLINE + "uncited.answers.total", tags);
+            counter(ONLINE + "refusals.total", tags);
+            counter(ONLINE + "instruction.echoes.total", tags);
+            counter(ONLINE + "chunks.without.header.total", tags);
+            for (String retrieval : List.of("right", "wrong")) {
+                for (String answer : List.of("right", "wrong")) {
+                    counter(ONLINE + "quadrant.total", tags.and("retrieval", retrieval, "answer", answer));
+                }
+            }
+            for (String outcome : List.of("valid", "fabricated")) {
+                counter(ONLINE + "citations.total", tags.and("outcome", outcome));
+            }
+            for (String metric : JUDGE_METRICS) {
+                for (String outcome : List.of("pass", "fail")) {
+                    counter(ONLINE + "judgements.total", tags.and("metric", metric, "outcome", outcome));
+                }
+            }
+            // Summaries are created on first use too.
+            for (String summary : List.of("retrieved.chunks", "top.score", "score.spread", "answer.chars",
+                                          "cited.context.precision", "cited.precision.at.k")) {
+                registry.summary(ONLINE + summary, tags);
+            }
+        }
         counter(ONLINE + "judge.skipped.total", Tags.empty());
         counter(ONLINE + "rephrases.total", Tags.empty());
         for (String rating : List.of("up", "down")) {
             counter(ONLINE + "feedback.total", Tags.of("rating", rating));
         }
-        for (String retrieval : List.of("right", "wrong")) {
-            for (String answer : List.of("right", "wrong")) {
-                counter(ONLINE + "quadrant.total", Tags.of("retrieval", retrieval, "answer", answer));
-            }
-        }
-
-        for (String outcome : List.of("valid", "fabricated")) {
-            counter(ONLINE + "citations.total", Tags.of("outcome", outcome));
-        }
         for (String metric : JUDGE_METRICS) {
             counter(ONLINE + "judgements.errors.total", Tags.of("metric", metric));
-            for (String outcome : List.of("pass", "fail")) {
-                counter(ONLINE + "judgements.total", Tags.of("metric", metric, "outcome", outcome));
-            }
         }
-
-        // Summaries are created on first use too.
-        registry.summary(ONLINE + "retrieved.chunks");
-        registry.summary(ONLINE + "top.score");
-        registry.summary(ONLINE + "score.spread");
-        registry.summary(ONLINE + "answer.chars");
-        registry.summary(ONLINE + "cited.context.precision");
-        registry.summary(ONLINE + "cited.precision.at.k");
     }
 
     /**
@@ -233,11 +215,6 @@ public class EvalMetricsService {
         setIfPresent(goldenMrr, run.meanReciprocalRank());
         setIfPresent(goldenContextPrecision, run.contextPrecision());
         setIfPresent(goldenPrecisionAtK, run.precisionAtK());
-        if (run.judgedContextPrecision() != null) {
-            set(goldenJudgedContextPrecision, run.judgedContextPrecision());
-            setIfPresent(goldenJudgedPrecisionAtK, run.judgedPrecisionAtK());
-            contextPrecisionEverJudged.set(true);
-        }
         if (run.citedContextPrecision() != null) {
             set(goldenCitedContextPrecision, run.citedContextPrecision());
             setIfPresent(goldenCitedPrecisionAtK, run.citedPrecisionAtK());
@@ -245,14 +222,6 @@ public class EvalMetricsService {
         }
         setIfPresent(goldenCitationValidity, run.citationValidity());
         setIfPresent(goldenCitationFabrication, run.citationFabrication());
-        if (run.relevancyRate() != null) {
-            set(goldenRelevancy, run.relevancyRate());
-            relevancyEverJudged.set(true);
-        }
-        if (run.groundednessRate() != null) {
-            set(goldenGroundedness, run.groundednessRate());
-            groundednessEverJudged.set(true);
-        }
         if (run.caseCount() > 0) {
             set(goldenPassRate, (double) run.passedCount() / run.caseCount());
         }
@@ -266,53 +235,54 @@ public class EvalMetricsService {
     // ---------------------------------------------------------------- online
 
     /**
-     * Records one live turn's rule-based scores, on the Kafka listener thread. It must never throw, or the
-     * turn would not be stored.
+     * Records one turn's rule-based scores, on the Kafka listener thread. It must never throw, or the turn
+     * would not be stored.
      */
-    public void recordOnline(EvalScores scores) {
-        counter(ONLINE + "turns.total", Tags.empty()).increment();
+    public void recordOnline(TurnOrigin origin, EvalScores scores) {
+        Tags tags = originTag(origin);
+        counter(ONLINE + "turns.total", tags).increment();
 
         var retrieval = scores.retrieval();
-        registry.summary(ONLINE + "retrieved.chunks").record(retrieval.retrievedCount());
+        registry.summary(ONLINE + "retrieved.chunks", tags).record(retrieval.retrievedCount());
         if (retrieval.isZeroHit()) {
-            counter(ONLINE + "zero.hit.total", Tags.empty()).increment();
+            counter(ONLINE + "zero.hit.total", tags).increment();
         } else {
-            registry.summary(ONLINE + "top.score").record(retrieval.topScore());
-            registry.summary(ONLINE + "score.spread").record(retrieval.scoreSpread());
+            registry.summary(ONLINE + "top.score", tags).record(retrieval.topScore());
+            registry.summary(ONLINE + "score.spread", tags).record(retrieval.scoreSpread());
         }
         // Chunks stored before the citation header cannot be cited. Any here means re-ingest, not prompt
         // tuning.
         int withoutHeader = retrieval.retrievedCount() - retrieval.chunksWithHeader();
         if (withoutHeader > 0) {
-            counter(ONLINE + "chunks.without.header.total", Tags.empty()).increment(withoutHeader);
+            counter(ONLINE + "chunks.without.header.total", tags).increment(withoutHeader);
         }
 
         var citations = scores.citations();
         if (citations.emitted() > 0) {
-            counter(ONLINE + "citations.total", Tags.of("outcome", "valid")).increment(citations.valid());
-            counter(ONLINE + "citations.total", Tags.of("outcome", "fabricated")).increment(citations.fabricated());
+            counter(ONLINE + "citations.total", tags.and("outcome", "valid")).increment(citations.valid());
+            counter(ONLINE + "citations.total", tags.and("outcome", "fabricated")).increment(citations.fabricated());
         } else {
             // Counted apart: an answer citing nothing would make the validity rate trivially perfect.
-            counter(ONLINE + "uncited.answers.total", Tags.empty()).increment();
+            counter(ONLINE + "uncited.answers.total", tags).increment();
         }
 
         if (scores.answer().refused()) {
-            counter(ONLINE + "refusals.total", Tags.empty()).increment();
+            counter(ONLINE + "refusals.total", tags).increment();
         }
         if (scores.answer().echoedInstruction()) {
-            counter(ONLINE + "instruction.echoes.total", Tags.empty()).increment();
+            counter(ONLINE + "instruction.echoes.total", tags).increment();
         }
-        registry.summary(ONLINE + "answer.chars").record(scores.answer().answerChars());
+        registry.summary(ONLINE + "answer.chars", tags).record(scores.answer().answerChars());
     }
 
     /**
-     * Records one grounded live turn's cited context precision - a chunk counts as used when the answer
+     * Records one grounded turn's cited context precision - a chunk counts as used when the answer
      * cites its page. Summaries rather than counters because the score is a fraction per turn; the
      * dashboard reads the mean as {@code _sum / _count}.
      */
-    public void recordOnlineCitedPrecision(ContextPrecisionScores cited) {
-        registry.summary(ONLINE + "cited.context.precision").record(cited.averagePrecision());
-        registry.summary(ONLINE + "cited.precision.at.k").record(cited.precisionAtK());
+    public void recordOnlineCitedPrecision(TurnOrigin origin, ContextPrecisionScores cited) {
+        registry.summary(ONLINE + "cited.context.precision", originTag(origin)).record(cited.averagePrecision());
+        registry.summary(ONLINE + "cited.precision.at.k", originTag(origin)).record(cited.precisionAtK());
     }
 
     /**
@@ -345,9 +315,10 @@ public class EvalMetricsService {
      * <em>judged</em>. Quality panels read {@code eval_turn} by when the turn happened instead; these are
      * for alerting and per-task rates. The task tag is a closed set, so the series count stays fixed.
      */
-    public void recordJudgedTurn(TurnVerdicts verdicts, @Nullable Boolean answerOk, boolean grounded,
-                                 long judgeMillis) {
-        Tags task = Tags.of("task", verdicts.taskType() != null ? verdicts.taskType().tag() : "unknown");
+    public void recordJudgedTurn(TurnOrigin origin, TurnVerdicts verdicts, @Nullable Boolean answerOk,
+                                 boolean grounded, long judgeMillis) {
+        Tags tags = originTag(origin);
+        Tags task = tags.and("task", verdicts.taskType() != null ? verdicts.taskType().tag() : "unknown");
         Timer.builder(ONLINE + "judge.turn.duration")
              .register(registry)
              .record(judgeMillis, TimeUnit.MILLISECONDS);
@@ -371,11 +342,11 @@ public class EvalMetricsService {
         recordIfPresent(ONLINE + "faithfulness", task, verdicts.faithfulness());
         if (verdicts.relevancyPass() != null) {
             counter(ONLINE + "judgements.total",
-                    Tags.of("metric", RELEVANCY, "outcome", outcome(verdicts.relevancyPass()))).increment();
+                    tags.and("metric", RELEVANCY, "outcome", outcome(verdicts.relevancyPass()))).increment();
         }
         if (verdicts.groundednessPass() != null) {
             counter(ONLINE + "judgements.total",
-                    Tags.of("metric", GROUNDEDNESS, "outcome", outcome(verdicts.groundednessPass()))).increment();
+                    tags.and("metric", GROUNDEDNESS, "outcome", outcome(verdicts.groundednessPass()))).increment();
         }
         if (verdicts.completenessPass() != null) {
             counter(ONLINE + "completeness.total", task.and("outcome", outcome(verdicts.completenessPass())))
@@ -384,15 +355,15 @@ public class EvalMetricsService {
         Integer checked = verdicts.citationsChecked();
         Integer supported = verdicts.citationsSupported();
         if (checked != null && supported != null && checked > 0) {
-            counter(ONLINE + "citation.support.total", Tags.of("outcome", "supported")).increment(supported);
-            counter(ONLINE + "citation.support.total", Tags.of("outcome", "unsupported")).increment(checked - supported);
+            counter(ONLINE + "citation.support.total", tags.and("outcome", "supported")).increment(supported);
+            counter(ONLINE + "citation.support.total", tags.and("outcome", "unsupported")).increment(checked - supported);
         }
         if (answerOk != null) {
             counter(ONLINE + "e2e.total", task.and("outcome", outcome(answerOk))).increment();
         }
         Boolean retrievalOk = verdicts.retrievalOk();
         if (answerOk != null && retrievalOk != null) {
-            counter(ONLINE + "quadrant.total", Tags.of("retrieval", retrievalOk ? "right" : "wrong",
+            counter(ONLINE + "quadrant.total", tags.and("retrieval", retrievalOk ? "right" : "wrong",
                                                        "answer", answerOk ? "right" : "wrong")).increment();
         }
     }
@@ -410,6 +381,10 @@ public class EvalMetricsService {
         if (value != null) {
             DistributionSummary.builder(name).tags(tags).register(registry).record(value);
         }
+    }
+
+    private static Tags originTag(TurnOrigin origin) {
+        return Tags.of("origin", origin.name().toLowerCase(Locale.ROOT));
     }
 
     private static String outcome(boolean passed) {
@@ -455,57 +430,28 @@ public class EvalMetricsService {
 
     // ---------------------------------------------------------------- golden
 
-    /** Publishes the aggregate scores of a completed suite run. */
-    public void recordGoldenRun(String suite,
-                                int caseCount,
-                                double passRate,
-                                double hitRate,
-                                double mrr,
-                                @Nullable Double contextPrecision,
-                                @Nullable Double precisionAtK,
-                                @Nullable Double judgedContextPrecision,
-                                @Nullable Double judgedPrecisionAtK,
-                                @Nullable Double citedContextPrecision,
-                                @Nullable Double citedPrecisionAtK,
-                                double citationValidity,
-                                double citationFabrication,
-                                @Nullable Double relevancyRate,
-                                @Nullable Double groundednessRate,
-                                long durationMillis) {
-        set(goldenHitRate, hitRate);
-        set(goldenMrr, mrr);
-        setIfPresent(goldenContextPrecision, contextPrecision);
-        setIfPresent(goldenPrecisionAtK, precisionAtK);
-        if (judgedContextPrecision != null) {
-            set(goldenJudgedContextPrecision, judgedContextPrecision);
-            setIfPresent(goldenJudgedPrecisionAtK, judgedPrecisionAtK);
-            contextPrecisionEverJudged.set(true);
-        }
-        if (citedContextPrecision != null) {
-            set(goldenCitedContextPrecision, citedContextPrecision);
-            setIfPresent(goldenCitedPrecisionAtK, citedPrecisionAtK);
+    /** Publishes the rule-based aggregate of a completed run. */
+    public void recordGoldenRun(GoldenRunResult result) {
+        set(goldenHitRate, result.hitRate());
+        set(goldenMrr, result.meanReciprocalRank());
+        setIfPresent(goldenContextPrecision, result.contextPrecision());
+        setIfPresent(goldenPrecisionAtK, result.precisionAtK());
+        if (result.citedContextPrecision() != null) {
+            set(goldenCitedContextPrecision, result.citedContextPrecision());
+            setIfPresent(goldenCitedPrecisionAtK, result.citedPrecisionAtK());
             citedPrecisionEverMeasured.set(true);
         }
-        set(goldenCitationValidity, citationValidity);
-        set(goldenCitationFabrication, citationFabrication);
-        set(goldenPassRate, passRate);
-        // Unjudged runs leave these alone; a reset to zero would look like a collapse in quality.
-        if (relevancyRate != null) {
-            set(goldenRelevancy, relevancyRate);
-            relevancyEverJudged.set(true);
-        }
-        if (groundednessRate != null) {
-            set(goldenGroundedness, groundednessRate);
-            groundednessEverJudged.set(true);
-        }
-        goldenCaseCount.set(caseCount);
+        set(goldenCitationValidity, result.citationValidity());
+        set(goldenCitationFabrication, result.citationFabrication());
+        set(goldenPassRate, result.passRate());
+        goldenCaseCount.set(result.caseCount());
         goldenLastRunEpochSeconds.set(System.currentTimeMillis() / 1000);
 
         Timer.builder(GOLDEN + "run.duration")
-             .tag("suite", suite)
+             .tag("suite", result.suite())
              .register(registry)
-             .record(durationMillis, TimeUnit.MILLISECONDS);
-        counter(GOLDEN + "runs.total", Tags.of("suite", suite, "outcome", "completed")).increment();
+             .record(result.durationMillis(), TimeUnit.MILLISECONDS);
+        counter(GOLDEN + "runs.total", Tags.of("suite", result.suite(), "outcome", "completed")).increment();
     }
 
     public void recordGoldenRunFailed(String suite) {
@@ -532,11 +478,6 @@ public class EvalMetricsService {
               + "dataset omits count as noise, so compare runs rather than reading the level.");
         gauge("precision.at.k", goldenPrecisionAtK,
               "Fraction of the retrieved context on an expected page - the noise measure, unweighted by rank");
-        judgedGauge("judged.context.precision", goldenJudgedContextPrecision, contextPrecisionEverJudged,
-                    "Rank-weighted context precision with per-chunk relevance decided by the LLM judge. "
-                    + "NaN until some run has judged.");
-        judgedGauge("judged.precision.at.k", goldenJudgedPrecisionAtK, contextPrecisionEverJudged,
-                    "Fraction of the retrieved context the judge called useful. NaN until some run has judged.");
         judgedGauge("cited.context.precision", goldenCitedContextPrecision, citedPrecisionEverMeasured,
                     "Rank-weighted context precision with a chunk counted as used when the answer cites its "
                     + "page. Deterministic; under-counts passages used without a citation.");
@@ -546,10 +487,6 @@ public class EvalMetricsService {
               "Fraction of emitted citations that matched a retrieved chunk");
         gauge("citation.fabrication.rate", goldenCitationFabrication,
               "Fraction of emitted citations the model invented");
-        judgedGauge("relevancy.rate", goldenRelevancy, relevancyEverJudged,
-                    "Fraction judged relevant. NaN until some run has actually judged.");
-        judgedGauge("groundedness.rate", goldenGroundedness, groundednessEverJudged,
-                    "Fraction judged grounded in the context. NaN until some run has actually judged.");
         gauge("pass.rate", goldenPassRate, "Fraction of cases with no failure reason");
 
         io.micrometer.core.instrument.Gauge
@@ -573,8 +510,8 @@ public class EvalMetricsService {
     }
 
     /**
-     * Registers a golden gauge whose value function refreshes from the database before reporting, so a
-     * run executed in another process (the tagged test) still reaches Prometheus.
+     * Registers a golden gauge whose value function refreshes from the database before reporting, so the
+     * last run survives a restart.
      */
     private void gauge(String name, DoubleAdder state, String description) {
         io.micrometer.core.instrument.Gauge
@@ -587,11 +524,8 @@ public class EvalMetricsService {
     }
 
     /**
-     * A golden gauge that reports {@code NaN} until some run has actually produced a verdict for it.
-     *
-     * <p>The distinction between "not measured" and "measured as zero" has to survive all the way to
-     * the dashboard. Prometheus omits NaN, so the panel shows no data; 0.0 would show a confident
-     * scarlet zero for a metric nobody ran.
+     * A golden gauge that reports {@code NaN} until some run has produced a value for it: Prometheus omits
+     * NaN, so the panel shows no data rather than a zero nobody measured.
      */
     private void judgedGauge(String name, DoubleAdder state, AtomicBoolean everJudged, String description) {
         io.micrometer.core.instrument.Gauge

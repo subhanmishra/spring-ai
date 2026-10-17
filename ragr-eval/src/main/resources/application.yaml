@@ -106,8 +106,9 @@ app:
     judge-num-ctx: 8192
     online:
       enabled: true
-      # Which turns are QUEUED for the judges. The rule-based metrics run on every turn regardless. It
-      # bounds how far behind the queue falls; the idle gate protects chat latency.
+      # Which live turns are QUEUED for the judges (golden turns always are). The rule-based metrics run
+      # on every turn regardless. It bounds how far behind the queue falls; the idle gate protects chat
+      # latency.
       judge-sample-rate: 1.0
       # Random share put in the human review queue, beside every thumbs-down and every user-judge
       # disagreement, so the reviewed set is not only failures.
@@ -117,7 +118,7 @@ app:
       rephrase-window: 5m
       rephrase-overlap: 0.6
     judge:
-      # Off in the golden suite's test JVM (EvalSuiteIT sets it), which must not take live turns.
+      # Off in the context test (EvalApplicationTests sets it), which must not take the deployed app's turns.
       worker-enabled: true
       poll-interval: 2s
       # A queued turn not reached by then is SKIPPED and counted, so the queue never runs hours behind.
@@ -145,12 +146,9 @@ app:
       live-days: 14
     golden:
       dataset-location: classpath:eval/golden-dataset.yaml
-      # Judging takes several times longer, so it is off by default. For one run:
-      # -Dapp.eval.golden.judged=true
-      judged: false
-      persist: true
-      # The running ragr-app the suite drives, through its real endpoint.
+      # The running ragr-app a run drives, through its real endpoint; containers override it with
+      # APP_EVAL_GOLDEN_CHAT_URL.
       chat-url: http://localhost:8080
-      # How long a case waits for its turn on Kafka after the answer returns. It arrives within
-      # milliseconds; running out means it was dropped.
+      # How long a run waits after its last answer for the listener to score every case. A turn arrives
+      # within milliseconds; running out means it was dropped.
       turn-timeout: 30s

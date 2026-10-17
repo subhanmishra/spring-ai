@@ -357,6 +357,8 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
       # The idle gate reads ragr-app's active-generations gauge from its management port.
       APP_EVAL_JUDGE_IDLE_GATE_CHAT_ACTUATOR_URL: "http://ragr-app:9095"
+      # Golden runs ask ragr-app through its API port.
+      APP_EVAL_GOLDEN_CHAT_URL: "http://ragr-app:8080"
     ports:
       - "9096:9096"
     healthcheck:
