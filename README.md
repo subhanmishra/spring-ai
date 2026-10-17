@@ -19,7 +19,7 @@ they share.
 |---|---|---|---|---|
 | `ragr-ingest` | Upload, parse, chunk, embed and store documents | `8081`, actuator `9097` | the `public` schema, `vector_store` included | [ragr-ingest/README.md](ragr-ingest/README.md) |
 | `ragr-app` | Chat: retrieve, answer, cite, remember | `8080`, actuator `9095` | `compose.yaml` - it starts the containers | [ragr-app/README.md](ragr-app/README.md) |
-| `ragr-eval` | Score and judge every answer, store ratings and reviews, run the golden suite | `9096` (actuator and human review) | the `eval` schema | [ragr-eval/README.md](ragr-eval/README.md) |
+| `ragr-eval` | Score and judge every answer, store ratings and reviews, run the golden suite | `9096` (actuator, golden runs, human review) | the `eval` schema | [ragr-eval/README.md](ragr-eval/README.md) |
 | `ragr-shared` | The contracts between the applications | - | - | [ragr-shared/README.md](ragr-shared/README.md) |
 
 ## Design principles
@@ -183,10 +183,12 @@ sequenceDiagram
     M->>E: scrape /actuator/prometheus
 ```
 
-**The golden suite** is the one flow that goes the other way. A test in ragr-eval sends each curated
-question to the running ragr-app, marked `X-Eval-Origin: GOLDEN`, reads the turn back off Kafka,
-scores it against the pages known to hold the answer, and records the run in the `eval` schema. Live
-metrics leave golden turns out. See [ragr-eval](ragr-eval/README.md#the-golden-suite).
+**The golden suite** is the one flow that goes the other way. Started with `./ragr.ps1 golden` (`POST
+/eval/golden/runs` on ragr-eval), it sends each curated question to the running ragr-app, marked
+`X-Eval-Origin: GOLDEN`. The turn comes back on Kafka like any other: the same listener scores it,
+also against the sources known to hold the answer, and it waits in the same judge queue as live turns.
+Golden turns are tagged, so live figures leave them out. See
+[ragr-eval](ragr-eval/README.md#the-golden-suite).
 
 ### Changing the pipeline means re-ingesting everything
 
@@ -383,8 +385,8 @@ SerialGC saved about 290 MB at peak between them; their `pom.xml` comments have 
 ./mvnw clean package
 ```
 
-`./mvnw test` runs every module's tests except the golden suite, which needs the running chat service -
-see [ragr-eval](ragr-eval/README.md#the-golden-suite).
+`./mvnw test` runs every module's tests. The golden suite is not a test: it runs inside ragr-eval, against
+the running chat service - see [ragr-eval](ragr-eval/README.md#the-golden-suite).
 
 **API docs.** `http://localhost:8080/swagger-ui.html` for chat and diagnostics,
 `http://localhost:8081/swagger-ui.html` for documents. ragr-eval's one endpoint, human review, is in

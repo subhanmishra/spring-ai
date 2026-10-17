@@ -10,8 +10,8 @@ A Retrieval-Augmented Generation system on Spring Boot and Spring AI. Users uplo
 parsed, chunked and stored as embeddings in Postgres/pgvector; a chat service answers from them, citing
 its sources, with history in Redis; and every answer is scored in a separate service, live and against a
 curated dataset. The corpus is a Markdown library of the Spring Boot 4.1 stack's documentation. Three applications - `ragr-ingest`, `ragr-app` (chat), `ragr-eval` - share one Postgres
-and talk through the vector store and two Kafka topics, never by calling each other, except the golden
-suite driving chat and ragr-eval reading chat's active-generations gauge so its judges wait for idle
+and talk through the vector store and two Kafka topics, never by calling each other, except golden
+runs driving chat and ragr-eval reading chat's active-generations gauge so its judges wait for idle
 chat. The design principles are at the top of `README.md`.
 
 ## Stack & versions
@@ -51,14 +51,16 @@ both modes. Every JVM has a capped heap and SerialGC.
 /ragr-run stack up|stop|down   the whole compose stack: infrastructure and all three containers
 ```
 
-The golden suite - not the obvious command; `-Dgroups=eval` alone does not work:
+A golden run is an HTTP call to the running ragr-eval, not a test:
 
 ```bash
-./mvnw test -pl ragr-eval -am -Dsurefire.excludedGroups= -Dtest=EvalSuiteIT
+./ragr.ps1 golden
 ```
 
-It drives the running ragr-app over HTTP, so that must be up with the corpus stored; stop ragr-eval
-first on this host (memory), send one warm-up chat turn after a ragr-app restart, and expect minutes.
+It starts `POST /eval/golden/runs` and waits until every case is scored (about 15 min), then exits 1 on
+a failed regression gate. ragr-app must be up with the corpus stored, and warmed with one chat turn
+after a restart. The judges work through the run's turns afterwards; `./ragr.ps1 golden latest` shows
+how far they have got.
 
 ## Project structure
 
@@ -103,24 +105,27 @@ first on this host (memory), send one warm-up chat turn after a ragr-app restart
 │       │           └── pdf # PdfBlockReader, table detection, the footer and contents strippers
 │       └── resources       # application.yaml (all of it), logback-spring.xml,
 │                           # db/migration (Flyway V1: public schema, vector_store)
-├── ragr-eval        # evaluation (9096: actuator and human review)
+├── ragr-eval        # evaluation (9096: actuator, golden runs, human review)
 │   └── src
 │       ├── main/java/.../subhanmishra/
 │       │   ├── config      # EvalConfig (the judges), EvalProperties, ObservationConfig,
 │       │   │               # JudgeLineEndingAdvisor
-│       │   ├── controller  # TurnReviewController (PUT /eval/turns/{id}/review)
+│       │   ├── controller  # GoldenRunController (/eval/golden/runs), TurnReviewController
+│       │   │               # (PUT /eval/turns/{id}/review)
 │       │   ├── dto, entity (EvalRun, EvalCaseResult, EvalTurn, EvalTurnChunk), exception
-│       │   ├── repository  # EvalTurnRepository (plain SQL: the queue, verdicts, feedback)
+│       │   ├── repository  # EvalTurnRepository (plain SQL: the queue, verdicts, feedback),
+│       │   │               # EvalRunRepository, EvalCaseResultRepository
 │       │   └── service     # OnlineEvalService, TurnJudgeWorker, TurnJudgeService, ChatIdleGate,
 │       │       │           # FeedbackService, TurnReviewService, EvalRetentionService,
 │       │       │           # EvalScoringService, EvalMetricsService, GoldenEvalService
-│       │       └── eval    # the judges, RetrievalRanking, TurnVerdicts, TaskType, scores, dataset model
+│       │       └── eval    # the judges, RetrievalRanking, TurnVerdicts, TaskType, scores, dataset model,
+│       │                   # GoldenGate (the run's regression verdict)
 │       ├── main/resources  # application.yaml, eval/golden-dataset.yaml, db/migration (eval schema)
-│       └── test            # unit tests, and EvalSuiteIT (@Tag("eval"), excluded from ./mvnw test)
+│       └── test            # unit tests
 ├── docker/          # config for the compose services (grafana, loki, otel, pgadmin, prometheus, tempo)
 ├── docker-volume/   # gitignored runtime data
 ├── .claude/         # gitignored: context documents, hooks, skills
-├── pom.xml          # root parent: versions, modules, the surefire eval exclusion
+├── pom.xml          # root parent: versions, modules
 ├── compose.yaml     # at the root; infrastructure, plus the applications behind the `apps` profile
 ├── Dockerfile       # one layered image per application, from the jar packaged on the host
 ├── ragr.ps1         # stack | docker | intellij | status | logs
@@ -151,7 +156,7 @@ area. **If it has not fired, read the file directly.**
 | `parsing.md` | the pipeline's shape, tables, strippers, chunk-size evidence | `service/parse/**`, `chunk/**`, `DocumentParserService` |
 | `ingestion.md` | batching, threads, memory, throughput, model residency | `DocumentIngestionService`, `DocumentMetadataService`, `IngestionProperties`, `ThreadPoolConfig`, `embedding/**`, `EmbeddingConfig` |
 | `chat-and-citations.md` | the path, the citation convention, prompt and model evidence, generation settings | `ChatService`, `ChatController`, `SpringAiConfig`, `PooledQuestionAnswerAdvisor`, `citation/**`, `event/**`, `ChatTurnPublisher` |
-| `evaluation.md` | where eval runs and why, the judges and their cost, calibration, the fabrication history | `ragr-eval/**`, `EvalSuiteIT` |
+| `evaluation.md` | where eval runs and why, the judges and their cost, calibration, the fabrication history | `ragr-eval/**` |
 | `observability.md` | the compose stack, tracing and logging, dashboards, container measurements | `docker/**`, `compose.yaml`, `Dockerfile`, `ragr.ps1`, `logback-spring.xml` |
 | `api-and-errors.md` | `ApiExceptionHandler` and its subclasses, upload validation, bulk upload, diagnostics | `controller/**`, `exception/**`, `dto/**` |
 
