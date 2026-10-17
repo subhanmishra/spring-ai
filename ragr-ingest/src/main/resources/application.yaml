@@ -40,7 +40,7 @@ spring:
         table-name: vector_store
         schema-name: public
         initialize-schema: false     # created by this application's Flyway V1
-        index-type: NONE             # exact search; see the vector_store comment in ragr-ingest V1
+        index-type: HNSW
         distance-type: COSINE_DISTANCE
         dimensions: 768              # nomic-embed-text
     ollama:

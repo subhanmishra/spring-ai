@@ -63,14 +63,12 @@ CREATE TABLE IF NOT EXISTS vector_store (
     embedding vector(768)
 );
 
--- No vector index, on purpose: every similarity search is exact.
---
--- An HNSW index is approximate, and at 12,444 chunks it lost real neighbours. For a question quoting
--- org.springframework.boot.actuate.health.HealthIndicator, the exact top 5 holds three chunks of the
--- upgrade map that answers it (0.765-0.747); the index, at its default hnsw.ef_search of 40, returned
--- none of them. The near-identical upgrade-map tables crowd one region of the graph. An exact search
--- costs 38 ms against the index's 1 ms - nothing beside the model's seconds.
---
--- Add an index back only when exact search is measurably slow. Then its operator class MUST match
--- spring.ai.vectorstore.pgvector.distance-type (COSINE_DISTANCE -> vector_cosine_ops), or the index is
--- never used; and re-check its recall against an exact search on the golden questions.
+-- The operator class MUST match spring.ai.vectorstore.pgvector.distance-type. Spring AI's
+-- PgDistanceType binds each distance type to one operator and one opclass, and an HNSW index
+-- only answers the operator of its own opclass:
+--   COSINE_DISTANCE        -> <=>  vector_cosine_ops   (what this project uses)
+--   EUCLIDEAN_DISTANCE     -> <->  vector_l2_ops
+--   NEGATIVE_INNER_PRODUCT -> <#>  vector_ip_ops
+-- A mismatch leaves the index never a candidate, and every similarity search falls back to a
+-- sequential scan.
+CREATE INDEX IF NOT EXISTS vector_store_embedding_hnsw_idx ON vector_store USING HNSW (embedding vector_cosine_ops);
